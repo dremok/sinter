@@ -57,6 +57,11 @@
 
       button { font: inherit; color: inherit; }
 
+      /* Set by Ui under ?ticks. A headless run has no wall clock, so anything
+         timed against one photographs at a random point through itself. */
+      body.headless #inventory,
+      body.headless .toast { transition: none; animation: none; }
+
       /* ------------------------------------------------------------ carried */
       /*
        * The only permanent thing in the shipped frame. Icon and numeral, no
@@ -202,6 +207,7 @@
       }
 
       .inv-head {
+        flex: none;
         display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
         padding: 24px 24px 13px;
       }
@@ -214,13 +220,12 @@
       }
       .inv-count b { font: 600 11px/1 var(--mono); color: var(--ink-2); font-weight: 600; }
 
-      .rule {
-        height: 1px; margin: 0 18px; flex: none;
-        background: linear-gradient(90deg, transparent, var(--stitch) 18%, var(--stitch) 82%, transparent);
-      }
+      /* Dashed, so every divider in the panel is the same stitch as the frame. */
+      .rule { height: 0; margin: 0 22px; flex: none; border-top: 1px dashed var(--stitch); }
 
       /* ------------------------------------------------------------ filter */
       #filter-bar {
+        flex: none;
         display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
         padding: 10px 22px 10px; margin: 0 12px;
         background: linear-gradient(rgba(0, 0, 0, 0.26), rgba(0, 0, 0, 0.16));
@@ -247,8 +252,11 @@
       #filter-clear:hover { color: var(--warm); }
       #filter-clear[hidden] { display: none; }
 
+      /* `flex: none` matters: as a flex child it would otherwise shrink and hide
+         its own last groups while the item list below kept its height. */
       #filters {
-        padding: 12px 22px 14px; margin: 0 12px; max-height: 42vh; overflow-y: auto;
+        flex: none;
+        padding: 12px 22px 14px; margin: 0 12px; max-height: 46vh; overflow-y: auto;
         background: linear-gradient(rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0));
         box-shadow: inset 0 -1px 0 rgba(240, 220, 190, 0.07);
       }
@@ -292,9 +300,13 @@
        */
       #items {
         flex: 1 1 auto; min-height: 0; overflow-y: auto;
-        padding: 4px 16px 26px;
-        -webkit-mask-image: linear-gradient(#000 0 calc(100% - 34px), transparent 100%);
-        mask-image: linear-gradient(#000 0 calc(100% - 34px), transparent 100%);
+        padding: 4px 16px 10px;
+      }
+      /* Only while something is actually below the fold, so the fade always
+         means "there is more" and never just eats the last row. */
+      #items.more {
+        -webkit-mask-image: linear-gradient(#000 0 calc(100% - 42px), transparent 100%);
+        mask-image: linear-gradient(#000 0 calc(100% - 42px), transparent 100%);
       }
       #items::-webkit-scrollbar { width: 6px; }
       #items::-webkit-scrollbar-thumb { background: rgba(232, 224, 208, 0.14); border-radius: 3px; }
@@ -345,7 +357,10 @@
       .pips { display: flex; gap: 1.5px; }
       .pip { width: 4px; height: 8px; border-radius: 0.5px; background: rgba(255, 255, 255, 0.13); }
       .pip.on { background: var(--pcolor, #ccc); }
-      .trait-more { color: var(--dim); font: 500 8.5px/1 var(--ui); letter-spacing: 0.1em; align-self: center; }
+      .trait-more {
+        color: var(--dim); font: 500 8.5px/1 var(--ui); letter-spacing: 0.1em;
+        align-self: center; margin-left: 3px;
+      }
 
       .empty {
         color: var(--dim); font: 400 12px/1.7 var(--ui);
@@ -354,9 +369,10 @@
 
       /* ------------------------------------------------------------- bench */
       #bench {
-        flex: none; padding: 14px 22px 18px;
+        flex: none; margin: 0 12px; padding: 14px 10px 18px;
+        border-top: 1px dashed var(--stitch);
         background: linear-gradient(rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.46));
-        box-shadow: 0 -1px 0 var(--stitch), 0 -16px 26px rgba(0, 0, 0, 0.45);
+        box-shadow: 0 -16px 26px rgba(0, 0, 0, 0.45);
       }
       .bench-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
       .bench-title {

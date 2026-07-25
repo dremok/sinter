@@ -211,7 +211,12 @@ export class Flame {
 
     this.group.add(this.embers.points, this.smoke.points)
 
-    this.light = new THREE.PointLight(BAND0.ember, 0, 9, 2)
+    // decay 1.2 rather than a physical 2. Inverse square puts almost all of a
+    // fire's light inside the first half metre, so anything standing in the
+    // flames (a cooking tripod, a fence post) blows to white while the ground
+    // two metres away gets nothing. A flatter falloff spends the same light
+    // over the area the player can actually see it in.
+    this.light = new THREE.PointLight(BAND0.ember, 0, 9, 1.2)
     this.group.add(this.light)
   }
 
@@ -263,9 +268,9 @@ export class Flame {
     this.light.visible = light
     if (light) {
       const pulse = 0.76 + hash01(Math.floor(t * 5) + this.seed) * 0.3
-      this.light.position.y = size * heat * 0.5
-      this.light.intensity = heat * heat * 12 * pulse * size
-      this.light.distance = 3 + heat * size * 5.5
+      this.light.position.y = size * heat * 0.9
+      this.light.intensity = heat * heat * 4.5 * pulse * size
+      this.light.distance = 4 + heat * size * 6
       this.light.color.copy(EMBER).lerp(FLAME, pulse * 0.45)
     }
   }

@@ -102,7 +102,7 @@ export function toonRamp(): THREE.DataTexture {
     [0.32, 0.40, 0.60],
     [0.36, 0.45, 0.63], // the shadow lifts a little as it approaches the turn
     [0.80, 0.55, 0.38], // terminator: one narrow band of hot orange
-    [0.95, 0.89, 0.76],
+    [0.94, 0.82, 0.62], // and one golden step out of it, or the turn is a jump
     [1.00, 0.96, 0.87],
     [1.00, 0.99, 0.93], // square to the sun
   ]
@@ -154,6 +154,62 @@ export function sizeToPixelBuffer(renderer: THREE.WebGLRenderer, w: number, h: n
   renderer.setSize(bufferW, bufferH, false)
 }
 
+// ------------------------------------------------------------- contact shadow
+
+let blob: THREE.DataTexture | null = null
+
+/** Radial alpha, squared so the middle stays dense and the rim goes to nothing.
+ *  Small and nearest-filtered, like every other texture here. (D14) */
+function blobTexture(): THREE.DataTexture {
+  if (blob) return blob
+  const n = 48
+  const data = new Uint8Array(n * n * 4)
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const dx = (x + 0.5) / n - 0.5
+      const dy = (y + 0.5) / n - 0.5
+      const edge = Math.max(0, 1 - Math.hypot(dx, dy) * 2)
+      data[(y * n + x) * 4 + 3] = Math.round(edge * edge * 255)
+    }
+  }
+  blob = new THREE.DataTexture(data, n, n, THREE.RGBAFormat)
+  blob.minFilter = THREE.NearestFilter
+  blob.magFilter = THREE.NearestFilter
+  blob.generateMipmaps = false
+  blob.needsUpdate = true
+  return blob
+}
+
+/**
+ * A darkened patch to sit a thing on the ground.
+ *
+ * The shadow map already grounds anything big, but it cannot help where it is
+ * needed most: a character standing inside another object's cast shadow throws
+ * no shadow of its own, because there is no key light left to block. A blob
+ * does not care, and the player is looking at the character the whole time.
+ *
+ * Cool rather than black, so it belongs to the same shadow family as everything
+ * else in the frame.
+ */
+export function groundBlob(radius: number, opacity = 0.45): THREE.Mesh {
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(radius * 2, radius * 2).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      map: blobTexture(),
+      color: 0x121e30,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+      fog: false,
+    }),
+  )
+  mesh.position.y = 0.03
+  mesh.renderOrder = -1
+  // It is a shadow. It must never be given one, and never cast one.
+  mesh.userData.noShadow = true
+  return mesh
+}
+
 // ---------------------------------------------------------------- colour grade
 
 const GRADE_VERT = /* glsl */ `
@@ -194,13 +250,17 @@ void main() {
   // reach: a shadow map zeroes the key light, so the ramp's blue band never
   // gets to apply there.
   float l = dot( c, LUMA );
-  c *= mix( vec3( 0.80, 0.92, 1.24 ), vec3( 1.07, 1.00, 0.90 ), smoothstep( 0.0, 0.55, l ) );
+  c *= mix( vec3( 0.76, 0.90, 1.29 ), vec3( 1.08, 1.00, 0.89 ), smoothstep( 0.0, 0.60, l ) );
 
-  // Contrast about a mid pivot, then saturation back, because contrast in a
-  // display space always costs some.
+  // Contrast about a mid pivot, then saturation, weighted by brightness.
+  //
+  // Shadows lose saturation and highlights gain it, which is the other half of
+  // making shadow read as shadow: outdoors a shadow is lit by a broad grey-blue
+  // sky, so it goes flat as well as cool. Saturating everything equally is what
+  // leaves dark grass looking like dark grass instead of like grass in shade.
   c = clamp( ( c - 0.46 ) * 1.13 + 0.46, 0.0, 1.0 );
   float g = dot( c, LUMA );
-  c = clamp( mix( vec3( g ), c, 1.09 ), 0.0, 1.0 );
+  c = clamp( mix( vec3( g ), c, mix( 0.80, 1.14, smoothstep( 0.04, 0.58, l ) ) ), 0.0, 1.0 );
 
   // Vignette, cool rather than black, so the corners read as air between the
   // camera and the far trees rather than as a lens.

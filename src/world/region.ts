@@ -108,8 +108,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     const d = Math.hypot(dx, dz)
     const r = pondRadius(Math.atan2(dz, dx))
     if (d < r) {
+      // Exponent chosen so the ground crosses WATER_LEVEL at about 0.55 of the
+      // radius. That leaves a wide, gently shelving beach rather than a rim you
+      // fall off, and the waterline ends up wherever the terrain crosses the
+      // water plane, which is irregular for free.
       const t = d / r
-      h = h * (t * t) - POND_DEPTH * (1 - t * t)
+      h = h * (t * t) - POND_DEPTH * (1 - t) ** 1.34
     }
     return h
   }
@@ -123,16 +127,17 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     toonUnique({ ...(color === undefined ? {} : { color }), map: tiled(t, 3.2, 3.2), side: THREE.DoubleSide })
 
   const M = {
-    track: flatMat(tex.sand, 0xff0000),
-    yard: flatMat(tex.sand, 0x0000ff),
-    rut: flatMat(tex.sand, 0xff00ff),
-    ash: flatMat(tex.stone, 0x00ffff),
-    tilled: flatMat(tex.sand, 0x00ff00),
-    shore: flatMat(tex.sand, 0xffff00),
+    track: flatMat(tex.sand, 0xbb9160),
+    yard: flatMat(tex.sand, 0x9c7a4e),
+    rut: flatMat(tex.sand, 0x836444),
+    ash: flatMat(tex.stone, 0x6a5949),
+    parched: flatMat(tex.grass, 0xd9c67e),
+    tilled: flatMat(tex.sand, 0x6f5237),
+    shore: flatMat(tex.sand, 0xd9bf8e),
     water: toonUnique({
       map: tiled(tex.water, 3.2, 3.2),
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.7,
       side: THREE.DoubleSide,
     }),
 
@@ -291,16 +296,49 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const pondRng = rng.fork('pond')
 
   {
-    // Water first, drawn generously past the true shoreline. The terrain rises
-    // above WATER_LEVEL near the rim and hides the surplus, so the waterline is
-    // wherever the ground crosses the water level: irregular, and free.
+    // The whole basin is sand, from the middle out to a ragged line above the
+    // waterline. Water is transparent, so the part under it reads as a bottom
+    // you can see, which is most of what stops a pond looking like a decal.
+    const seg = 48
+    const rings = [0, 0.3, 0.52, 0.68, 0.84]
+    const verts: number[] = []
+    const uvs: number[] = []
+    const idx: number[] = []
+    const ragged: number[] = []
+    for (let i = 0; i <= seg; i++) ragged.push(pondRng.range(-0.15, 0.55))
+
+    for (let i = 0; i <= seg; i++) {
+      const a = (i / seg) * Math.PI * 2
+      const rad = pondRadius(a)
+      for (const f of rings) {
+        const rr = rad * f + (f === 0.84 ? ragged[i % seg]! : 0)
+        const x = POND.x + Math.cos(a) * rr
+        const z = POND.z + Math.sin(a) * rr
+        verts.push(x, heightAt(x, z) + 0.045, z)
+        uvs.push(...worldUv(x, z))
+      }
+    }
+    const n = rings.length
+    for (let i = 0; i < seg; i++) {
+      for (let k = 0; k < n - 1; k++) {
+        const a = i * n + k
+        idx.push(a, a + 1, a + n, a + 1, a + n + 1, a + n)
+      }
+    }
+    surface(verts, uvs, idx, M.shore)
+  }
+
+  {
+    // Water drawn generously past the true shoreline. The terrain rises above
+    // WATER_LEVEL well inside the rim and hides the surplus, so the waterline
+    // is wherever the ground crosses the water plane: irregular, and free.
     const seg = 56
     const verts: number[] = [POND.x, WATER_LEVEL, POND.z]
     const uvs: number[] = [...worldUv(POND.x, POND.z)]
     const idx: number[] = []
     for (let i = 0; i <= seg; i++) {
       const a = (i / seg) * Math.PI * 2
-      const rad = pondRadius(a) * 0.94
+      const rad = pondRadius(a) * 0.8
       const x = POND.x + Math.cos(a) * rad
       const z = POND.z + Math.sin(a) * rad
       verts.push(x, WATER_LEVEL, z)
@@ -312,48 +350,22 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     water.renderOrder = 1
   }
 
-  {
-    // Wet sand from just under the waterline to a ragged line above it.
-    const seg = 48
-    const verts: number[] = []
-    const uvs: number[] = []
-    const idx: number[] = []
-    for (let i = 0; i <= seg; i++) {
-      const a = (i / seg) * Math.PI * 2
-      const rad = pondRadius(a)
-      for (const [f, extra] of [
-        [0.66, 0],
-        [1, pondRng.range(0.05, 0.7)],
-      ] as const) {
-        const x = POND.x + Math.cos(a) * (rad * f + extra)
-        const z = POND.z + Math.sin(a) * (rad * f + extra)
-        verts.push(x, heightAt(x, z) + 0.05, z)
-        uvs.push(...worldUv(x, z))
-      }
-    }
-    for (let i = 0; i < seg; i++) {
-      const a = i * 2
-      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2)
-    }
-    surface(verts, uvs, idx, M.shore)
-  }
-
   // Reeds, in clumps on two sides only. Nothing sells a natural edge like
   // vegetation standing in the shallows.
-  const reedGeo = new THREE.ConeGeometry(0.055, 1, 4)
-  for (let c = 0; c < 9; c++) {
-    const a = pondRng.pick([1.5, 2.0, 2.5, 3.0, 3.5, -2.2, -1.7, 4.4, 5.0]) + pondRng.range(-0.2, 0.2)
-    const rad = pondRadius(a) * pondRng.range(0.78, 0.94)
+  const reedGeo = new THREE.ConeGeometry(0.065, 1, 4)
+  for (const a0 of [2.1, 2.8, 3.5, -2.1, 4.7]) {
+    const a = a0 + pondRng.range(-0.15, 0.15)
+    const rad = pondRadius(a) * pondRng.range(0.52, 0.66)
     const cx = POND.x + Math.cos(a) * rad
     const cz = POND.z + Math.sin(a) * rad
-    for (let i = 0; i < pondRng.int(5, 10); i++) {
-      const x = cx + pondRng.range(-0.7, 0.7)
-      const z = cz + pondRng.range(-0.7, 0.7)
-      const hgt = pondRng.range(0.9, 1.7)
-      const reed = new THREE.Mesh(reedGeo, M.reed)
+    for (let i = 0; i < pondRng.int(5, 9); i++) {
+      const x = cx + pondRng.range(-0.8, 0.8)
+      const z = cz + pondRng.range(-0.8, 0.8)
+      const hgt = pondRng.range(0.6, 1.1)
+      const reed = new THREE.Mesh(reedGeo, pondRng.chance(0.75) ? M.reed : M.straw)
       reed.scale.set(1, hgt, 1)
-      reed.position.set(x, Math.max(heightAt(x, z), WATER_LEVEL - 0.15) + hgt * 0.42, z)
-      reed.rotation.z = pondRng.range(-0.18, 0.18)
+      reed.position.set(x, Math.max(heightAt(x, z), WATER_LEVEL - 0.1) + hgt * 0.44, z)
+      reed.rotation.z = pondRng.range(-0.2, 0.2)
       reed.castShadow = true
       group.add(reed)
     }
@@ -627,15 +639,64 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     treeEntity(mesh, x, z, 2.5, 'The old oak')
   }
 
-  // Scrub and saplings scattered inside, to soften the step from lawn to wall.
-  for (let i = 0; i < 22; i++) {
+  // Scrub scattered inside, to soften the step from lawn to wall. Kept low and
+  // well off the tracks: anything tall in the middle of the clearing breaks the
+  // sightline from the hearth to the gate, which is the one line that matters.
+  for (let i = 0; i < 26; i++) {
     const x = treeRng.range(BOUNDS.minX + 0.5, BOUNDS.maxX - 0.5)
     const z = treeRng.range(BOUNDS.minZ + 0.5, BOUNDS.maxZ - 0.5)
     if (Math.hypot(x - HOME.x, z - HOME.z) < 11) continue
     if (Math.hypot(x - POND.x, z - POND.z) < pondRadius(Math.atan2(z - POND.z, x - POND.x)) + 0.6) continue
     if (Math.abs(z - PAL_Z) < 2.5) continue
-    if (nearTrack(x, z, 2.2)) continue
-    plantTree(x, z, treeRng.chance(0.75) ? 'scrub' : 'birch', treeRng.range(0.5, 0.85), treeRng)
+    if (nearTrack(x, z, 4.5)) continue
+    plantTree(x, z, 'scrub', treeRng.range(0.4, 0.72), treeRng)
+  }
+
+  // Patches where the grass has gone over to straw. The clearing is one hue
+  // otherwise, and a single hue at this size reads as a lawn however good the
+  // texture is. These are pasture, not decoration.
+  for (const [x, z, r] of [
+    [6.6, 3.4, 3.1],
+    [-4.4, -3.8, 3.6],
+    [12.2, 6.0, 2.6],
+    [-13.0, -6.6, 3.0],
+    [4.2, -6.0, 2.4],
+    [-9.0, 12.6, 2.0],
+    [14.0, 14.2, 2.8],
+  ] as const) {
+    layPatch(x, z, r, M.parched, trackRng, 0.42, 22, 0.05)
+  }
+
+  // A fringe of bracken along the foot of the tree line. Two jobs: it hides the
+  // hard line where trunks meet lawn, and it is the only warm hue in the middle
+  // distance, so the clearing stops reading as one flat green.
+  const brackenGeo = new THREE.ConeGeometry(0.5, 0.7, 5)
+  const brackenMats = [0x8a7a3a, 0x9c6f34, 0x6f7a34].map((c) =>
+    toonUnique({ color: c, map: tiled(tex.foliage, 1.4, 1.4) }),
+  )
+  for (let c = 0; c < 34; c++) {
+    const side = treeRng.int(0, 3)
+    const along = treeRng.range(-1, 1)
+    const inset = treeRng.range(-1.5, 2.6)
+    let cx = 0
+    let cz = 0
+    if (side === 0) { cx = along * 22; cz = BOUNDS.maxZ + 3.2 - inset }
+    else if (side === 1) { cx = along * 18; cz = BOUNDS.minZ - 0.4 + inset }
+    else if (side === 2) { cx = BOUNDS.minX - 0.6 + inset; cz = along * 16 }
+    else { cx = BOUNDS.maxX + 0.6 - inset; cz = along * 16 }
+
+    for (let k = 0; k < treeRng.int(3, 7); k++) {
+      const x = cx + treeRng.range(-1.5, 1.5)
+      const z = cz + treeRng.range(-1.5, 1.5)
+      if (Math.hypot(x - POND.x, z - POND.z) < pondRadius(Math.atan2(z - POND.z, x - POND.x)) + 0.5) continue
+      const s = treeRng.range(0.6, 1.25)
+      const b = new THREE.Mesh(brackenGeo, treeRng.pick(brackenMats))
+      b.scale.set(s, s * treeRng.range(0.7, 1.2), s)
+      b.position.set(x, heightAt(x, z) + s * 0.28, z)
+      b.rotation.set(treeRng.range(-0.12, 0.12), treeRng.range(0, 3), treeRng.range(-0.12, 0.12))
+      b.castShadow = true
+      group.add(b)
+    }
   }
 
   // ------------------------------------------------------------ ground cover
@@ -1052,7 +1113,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   function cottage(x: number, z: number, turn: number, w: number, dep: number, chimney: boolean): void {
     const h = heightAt(x, z)
     const g = new THREE.Group()
-    const wallH = 1.75
+    const wallH = 2.05
 
     const footing = new THREE.Mesh(new THREE.BoxGeometry(w + 0.24, 0.34, dep + 0.24), M.stone)
     footing.position.y = 0.17
@@ -1152,8 +1213,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     })
   }
 
-  cottage(-4.6, 15.2, 0.22, 3.3, 2.6, true)
-  cottage(5.1, 15.6, -0.44, 2.7, 2.2, false)
+  cottage(-4.8, 15.4, 0.22, 4.1, 3.2, true)
+  cottage(5.4, 15.8, -0.44, 3.3, 2.7, false)
 
   /** The hearth. Always lit, never consumed. */
   {
@@ -1429,8 +1490,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Washing line. Two forked poles, a sag, and three things drying. */
   {
-    const a = new THREE.Vector3(-7.6, 0, 13.6)
-    const b = new THREE.Vector3(-7.0, 0, 16.8)
+    const a = new THREE.Vector3(-8.0, 0, 11.6)
+    const b = new THREE.Vector3(-7.2, 0, 14.6)
     a.y = heightAt(a.x, a.z)
     b.y = heightAt(b.x, b.z)
 

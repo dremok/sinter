@@ -74,6 +74,7 @@ export class Ui {
   constructor(private hooks: UiHooks) {
     this.buildFilters()
     this.mountDebug()
+    this.mountHeadless()
 
     $('merge-btn').addEventListener('click', () => this.doMerge())
     $('slot-a').addEventListener('click', () => {
@@ -92,6 +93,7 @@ export class Ui {
       this.filters.clear()
       this.render()
     })
+    $('items').addEventListener('scroll', () => this.syncFade())
 
     this.render()
   }
@@ -296,7 +298,19 @@ export class Ui {
 
     for (const { def, index } of visible) host.append(this.buildCard(def, index))
 
+    this.syncFade()
     this.renderBench()
+  }
+
+  /**
+   * The list fades out at the bottom while there are rows below the fold, which
+   * is what stops the bench edge from looking like it has guillotined a card.
+   * Driven by the real scroll position, so a list that ends exactly at the
+   * bottom is not lied about.
+   */
+  private syncFade(): void {
+    const host = $('items')
+    host.classList.toggle('more', host.scrollTop + host.clientHeight < host.scrollHeight - 2)
   }
 
   private buildCard(def: ItemDef, index: number): HTMLElement {
@@ -451,5 +465,15 @@ export class Ui {
       e.preventDefault()
       document.body.classList.toggle('debug')
     })
+  }
+
+  /**
+   * `tools/shot.ts` renders one frame and screenshots the moment
+   * `__sinterReady` flips, while a CSS transition runs on the wall clock that
+   * a headless run deliberately does not have. The panel photographed half
+   * slid in. Under `?ticks` there is nothing to animate against, so do not.
+   */
+  private mountHeadless(): void {
+    if (new URLSearchParams(location.search).has('ticks')) document.body.classList.add('headless')
   }
 }

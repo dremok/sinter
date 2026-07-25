@@ -186,11 +186,17 @@ function valueNoise(r: Rng, cells: number): (u: number, v: number) => number {
   }
 }
 
-/** Two octaves. Enough for terrain-scale drift without the per-pixel cost. */
-function fbm(r: Rng, cells: number): (u: number, v: number) => number {
+/**
+ * Two octaves by default, which is enough for terrain-scale drift without the
+ * per-pixel cost. A third is worth paying for anything whose *edge* is seen,
+ * since two octaves give smooth amoeba outlines and worn ground is ragged.
+ */
+function fbm(r: Rng, cells: number, octaves = 2): (u: number, v: number) => number {
   const a = valueNoise(r, cells)
   const b = valueNoise(r, cells * 2)
-  return (u, v) => a(u, v) * 0.68 + b(u, v) * 0.32
+  if (octaves < 3) return (u, v) => a(u, v) * 0.68 + b(u, v) * 0.32
+  const c = valueNoise(r, cells * 4)
+  return (u, v) => a(u, v) * 0.56 + b(u, v) * 0.28 + c(u, v) * 0.16
 }
 
 /**
@@ -258,7 +264,7 @@ function blob(put: Put, x: number, y: number, rx: number, ry: number, color: str
 export const grass = (rng: Rng) =>
   build(GROUND, rng, (put, r, n) => {
     const lush = normalized(fbm(r, 6))
-    const bare = normalized(fbm(r, 11))
+    const bare = normalized(fbm(r, 11, 3))
     const fine = valueNoise(r, 96)
 
     for (let y = 0; y < n; y++) {
@@ -271,12 +277,15 @@ export const grass = (rng: Rng) =>
         // complementary hues resolves to neither of them. Keep the stipple a
         // few texels wide and darken both sides as they approach it, so the
         // boundary reads as worn ground rather than as measles.
-        const soil = (bare(u, v) - 0.72) * 16
+        // Kept sparse. region.ts now lays authored tracks, yards and tilled
+        // ground as overlay meshes, and a texture that invents its own
+        // clearings everywhere competes with the layout somebody meant.
+        const soil = (bare(u, v) - 0.78) * 16
         if (soil > dither(x, y)) {
           put(x, y, shade(RAMP.dirt, 0.02 + clamp(soil, 0, 1) * 0.5 + fine(u, v) * 0.3))
         } else {
           const t = lush(u, v) * 0.75 + fine(u, v) * 0.2
-          const dim = 1 - clamp(soil + 0.6, 0, 1) * 0.5
+          const dim = 1 - clamp(soil + 0.6, 0, 1) * 0.35
           put(x, y, shade(RAMP.grass, (0.16 + t * 0.62) * dim))
         }
       }
@@ -375,8 +384,11 @@ export const sand = (rng: Rng) =>
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
       const rx = r.range(1.2, 2.6)
-      blob(put, x, y, rx, rx * 0.75, tone(RAMP.stone, r.int(1, 3)))
-      put(x, y - Math.round(rx * 0.7), tone(RAMP.stone, 5))
+      // Mostly waterworn brown, occasionally grey. All-grey pebbles read as
+      // blue flecks against tan, which is the one hue the shore must not have.
+      const grey = r.chance(0.35)
+      blob(put, x, y, rx, rx * 0.75, tone(grey ? RAMP.stone : RAMP.dirt, r.int(1, 2)))
+      put(x, y - Math.round(rx * 0.7), tone(grey ? RAMP.stone : RAMP.dirt, 4))
       put(x, y + Math.round(rx * 0.75), tone(RAMP.dirt, 0))
     }
   })
@@ -391,18 +403,21 @@ export const water = (rng: Rng) =>
     const deep = normalized(fbm(r, 4))
     const warp = valueNoise(r, 6)
 
-    // Phase drift is kept small. At 1.6 periods of warp the ripples curled into
-    // closed loops and the pond read as polished marble; a third of a period is
-    // enough to stop them being corduroy and not enough to make them swirl.
-    const ripple = (u: number, v: number) => Math.sin((v * 7 + warp(u, v) * 0.45) * Math.PI * 2)
+    // Two frequencies, because one gives stripes of exactly equal width and a
+    // pond of those reads as a beach towel. Phase drift is kept small: at 1.6
+    // periods of warp the ripples curled into closed loops and the pond read as
+    // polished marble instead.
+    const ripple = (u: number, v: number) =>
+      Math.sin((v * 9 + warp(u, v) * 0.5) * Math.PI * 2) * 0.72 +
+      Math.sin((v * 22 + warp(u, v) * 0.3) * Math.PI * 2) * 0.28
 
     for (let y = 0; y < n; y++) {
       const v = y / n
       for (let x = 0; x < n; x++) {
         const u = x / n
         const band = ripple(u, v)
-        let idx = 4 + (band > 0.4 ? 1 : band < -0.45 ? -1 : 0)
-        idx -= Math.round(deep(u, v) * 1.4)
+        let idx = 4 + (band > 0.5 ? 1 : band > 0 ? 0 : band > -0.5 ? -1 : -2)
+        idx -= Math.round(deep(u, v) * 1.2)
         put(x, y, tone(RAMP.water, idx))
       }
     }
@@ -522,7 +537,9 @@ export const foliage = (rng: Rng) =>
  */
 export const stone = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    const SEEDS = 10
+    // Fifty blocks to the tile puts each one at about nine texels, which is
+    // three quarters of a metre: three or four courses across a boulder.
+    const SEEDS = 50
     const sx: number[] = []
     const sy: number[] = []
     const base: number[] = []
@@ -639,7 +656,9 @@ export const plank = (rng: Rng) =>
  */
 export const straw = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    const COURSE = 16
+    // Eight texels to a course, about two thirds of a metre, so a cottage roof
+    // shows three or four courses rather than one and a half.
+    const COURSE = 8
     fill(put, n, tone(RAMP.straw, 1))
 
     for (let c = 0; c < n / COURSE; c++) {
@@ -650,14 +669,14 @@ export const straw = (rng: Rng) =>
       // Stalks, grouped into bundles so a course has rhythm rather than fur,
       // but each stalk keeps its own tone. Giving a whole bundle one tone was
       // what made the roof read as a patchwork quilt.
-      for (let bundle = 0; bundle < 13; bundle++) {
+      for (let bundle = 0; bundle < 7; bundle++) {
         const bx = r.int(0, n - 1)
         const bidx = r.range(2.4, 4)
-        for (let s = 0; s < r.int(4, 7); s++) {
+        for (let s = 0; s < r.int(3, 5); s++) {
           const x = bx + r.int(-2, 2)
-          const len = r.int(10, COURSE + 3)
+          const len = r.int(6, COURSE + 3)
           const lean = r.range(-0.2, 0.2)
-          const start = top + 1 + r.int(0, 2)
+          const start = top + 1 + r.int(0, 1)
           // Dark where it disappears under the course above, lightest at the
           // cut end, which is the only part of a thatch stalk in full sun.
           for (let k = 0; k < len; k++) {
@@ -766,7 +785,9 @@ export const gold = (rng: Rng) =>
  */
 export const ember = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    const SEEDS = 10
+    // Small plates: the hearth is barely a metre across, so a crust cell has to
+    // be four or five texels or the whole fire is one plate.
+    const SEEDS = 200
     const sx: number[] = []
     const sy: number[] = []
     for (let i = 0; i < SEEDS; i++) {
@@ -788,7 +809,7 @@ export const ember = (rng: Rng) =>
         }
         const edge = Math.sqrt(second) - Math.sqrt(best)
         // Hot in the fissures, cooling toward the middle of each crust plate.
-        const idx = edge < 1 ? 5 : edge < 2.4 ? 4 : edge < 5 ? 2 : edge < 8 ? 1 : 0
+        const idx = edge < 0.6 ? 5 : edge < 1.2 ? 4 : edge < 2 ? 2 : 1
         put(x, y, tone(RAMP.ember, idx))
       }
     }

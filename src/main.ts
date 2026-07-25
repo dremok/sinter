@@ -3,7 +3,7 @@ import { createRng } from './core/rng'
 import { Clock, TICK_DT } from './core/clock'
 import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
-import { Grade, sizeToPixelBuffer, toonUnique } from './render/toon'
+import { Grade, groundBlob, sizeToPixelBuffer, toonUnique } from './render/toon'
 import { Flame } from './render/flame'
 import { loadParts } from './render/parts'
 import { Character } from './render/character'
@@ -39,9 +39,13 @@ const PACK = params.get('pack')
 const rng = createRng(SEED)
 const clock = new Clock()
 
+// TEMP PERF INSTRUMENTATION
+const __t: Record<string, number> = { moduleStart: performance.now() }
+
 // The kitbash library has to be in memory before anything assembles an item.
 // Top-level await, so the headless harness still sees a single settled frame.
 await loadParts()
+__t.parts = performance.now()
 
 // ---------------------------------------------------------------- rendering
 
@@ -143,7 +147,28 @@ function placeLights(): void {
 
 // ---------------------------------------------------------------- region
 
+// TEMP PERF INSTRUMENTATION: textures() caches, and forks from the base seed by
+// label alone, so pulling it forward here measures it without changing it.
+const __tex = await import('./render/textures')
+__tex.textures(rng)
+__t.textures = performance.now()
+
+// TEMP: per-generator cost. Second copies, thrown away; only the clock matters.
+const __texMs: Record<string, number> = {}
+if (params.has('texprofile')) {
+  const r2 = rng.fork('probe')
+  for (const name of [
+    'grass', 'sand', 'bark', 'foliage', 'stone', 'plank',
+    'straw', 'steel', 'cloth', 'clay', 'water', 'glass', 'gold', 'ember',
+  ] as const) {
+    const a = performance.now()
+    ;(__tex as unknown as Record<string, (r: typeof r2) => unknown>)[name]!(r2)
+    __texMs[name] = +(performance.now() - a).toFixed(1)
+  }
+}
+
 const region = buildRegion(rng, scene)
+__t.region = performance.now()
 
 if (START_AT) {
   const [sx, sz] = START_AT.split(',').map(Number)
@@ -416,16 +441,21 @@ let groundedChildren = -1
 
 function groundEverything(): void {
   if (region.group.children.length === groundedChildren) return
+  const first = groundedChildren < 0
   groundedChildren = region.group.children.length
 
   for (const root of [region.group, character.group]) {
     root.traverse((o) => {
       const mesh = o as THREE.Mesh
-      if (!mesh.isMesh) return
+      if (!mesh.isMesh || mesh.userData.noShadow) return
       mesh.castShadow = true
       mesh.receiveShadow = true
     })
   }
+
+  // Parented to the character rather than moved each frame: the group already
+  // sits at the player's feet, so following is free and cannot drift.
+  if (first) character.group.add(groundBlob(0.62, 0.5))
 }
 
 // ---------------------------------------------------------------- interaction
@@ -696,15 +726,86 @@ if (IGNITE_AT) {
 }
 
 if (HEADLESS_TICKS > 0) {
+  __t.simStart = performance.now()
   for (let i = 0; i < HEADLESS_TICKS; i++) {
     stepSimulation()
     clock.forceTicks(1)
   }
+  __t.simEnd = performance.now()
   syncMeshes(TICK_DT)
   updateFocus()
   updateHud(0)
   iso.update()
+  __t.renderStart = performance.now()
   grade.render(renderer, scene, iso.camera)
+  __t.renderEnd = performance.now()
+
+  // TEMP: renderer.info resets per render() call and grade.render() does two,
+  // so a plain read only ever reports the fullscreen quad. Turn autoReset off
+  // and take a second frame; totals are then scene pass + 1 quad draw / 2 tris.
+  renderer.info.autoReset = false
+  renderer.info.reset()
+  grade.render(renderer, scene, iso.camera)
+  const drawInfo = { ...renderer.info.render }
+  renderer.info.autoReset = true
+
+  // TEMP PERF INSTRUMENTATION
+  {
+    let meshes = 0
+    let objects = 0
+    let sceneTris = 0
+    const mats = new Set<unknown>()
+    const geos = new Set<unknown>()
+    const maps = new Set<unknown>()
+    const sources = new Set<unknown>()
+    scene.traverse((o) => {
+      objects++
+      const m = o as THREE.Mesh
+      if (!m.isMesh) return
+      meshes++
+      geos.add(m.geometry)
+      const idx = m.geometry.index
+      const posAttr = m.geometry.getAttribute('position')
+      sceneTris += (idx ? idx.count : (posAttr?.count ?? 0)) / 3
+      for (const mm of Array.isArray(m.material) ? m.material : [m.material]) {
+        mats.add(mm)
+        const map = (mm as THREE.MeshToonMaterial).map
+        if (map) {
+          maps.add(map)
+          sources.add(map.source)
+        }
+      }
+    })
+    let entities = 0
+    for (const _ of world.entities) entities++
+    ;(window as unknown as { __perf: unknown }).__perf = {
+      ticks: HEADLESS_TICKS,
+      ms: {
+        toParts: +(__t.parts! - __t.moduleStart!).toFixed(1),
+        textures: +(__t.textures! - __t.parts!).toFixed(1),
+        region: +(__t.region! - __t.textures!).toFixed(1),
+        sim: +(__t.simEnd! - __t.simStart!).toFixed(1),
+        msPerTick: +((__t.simEnd! - __t.simStart!) / HEADLESS_TICKS).toFixed(4),
+        firstRender: +(__t.renderEnd! - __t.renderStart!).toFixed(1),
+        moduleStartSinceNav: +__t.moduleStart!.toFixed(1),
+        totalSinceNav: +__t.renderEnd!.toFixed(1),
+      },
+      render: drawInfo,
+      programs: renderer.info.programs?.length ?? -1,
+      memory: { ...renderer.info.memory },
+      textureBreakdown: __texMs,
+      scene: {
+        objects,
+        meshes,
+        geometries: geos.size,
+        materials: mats.size,
+        mapTextures: maps.size,
+        textureSources: sources.size,
+        sceneTriangles: Math.round(sceneTris),
+        entities,
+      },
+    }
+  }
   window.__sinterReady = true
 } else {
   let lastFpsSample = performance.now()

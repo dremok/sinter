@@ -416,6 +416,12 @@ def make_blade_axe():
     which is the single detail that stops an axe silhouette reading as a
     hatchet-shaped rectangle.
 
+    The bit fans in BOTH directions out of a waisted neck. An earlier pass only
+    dropped the beard and left the top nearly level, which gave the head a long
+    unbroken upper curve and made it read as a boot. Waisting the neck top and
+    bottom and then flaring the toe as hard as the heel is what makes the front
+    of this a fan rather than a lump.
+
     The eye sits at x = -0.078 rather than at the origin because that is where
     the recipe in `items/catalog.ts` puts the haft. Move this and the axe head
     slides off its handle.
@@ -427,12 +433,12 @@ def make_blade_axe():
         (-0.162, -0.076, 0.078, 0.040, 0.88, 0.0),   # poll face
         (-0.118, -0.088, 0.092, 0.047, 0.90, 0.0),   # eye, back lug
         (-0.038, -0.090, 0.094, 0.047, 0.90, 0.0),   # eye, front lug
-        (-0.004, -0.096, 0.084, 0.030, 0.74, 0.0),   # neck, waisted hard
-        (0.052, -0.140, 0.082, 0.022, 0.70, 0.0),    # the beard falls away
-        (0.126, -0.196, 0.100, 0.016, 0.66, 0.008),  # cheek
-        (0.198, -0.228, 0.118, 0.011, 0.62, 0.026),  # shoulder of the bit
-        (0.236, -0.220, 0.115, 0.0045, 0.70, 0.044),  # bevel behind the edge
-        (0.250, -0.204, 0.108, 0.0016, 1.00, 0.050),  # the edge itself
+        (-0.004, -0.098, 0.080, 0.030, 0.74, 0.0),   # neck, waisted top and bottom
+        (0.052, -0.142, 0.076, 0.022, 0.70, 0.0),    # the beard falls away
+        (0.126, -0.198, 0.106, 0.016, 0.66, 0.008),  # cheek, and the toe starts up
+        (0.198, -0.232, 0.150, 0.011, 0.62, 0.026),  # bit, fanned both ways
+        (0.236, -0.224, 0.146, 0.0045, 0.70, 0.044),  # bevel behind the edge
+        (0.250, -0.208, 0.138, 0.0016, 1.00, 0.050),  # the edge itself
     ]
     bm_loft(bm, [blade_section(*s) for s in stations])
     o = emit(bm, "blade_axe", "none", bevel_width=0.004)
@@ -881,17 +887,19 @@ def make_leaf_cluster():
     of noise on a sphere gets there.
 
     Uneven is the whole job. Evenly spaced blades all pitched the same way make
-    a lotus, which is what the first pass produced. The yaw scatter and the
-    per-blade droop are what turn a flower back into foliage.
+    a lotus, which is what the first pass produced. The second overcorrected,
+    splayed everything nearly flat and made a pressed maple leaf. What works is
+    blades that stand up at scattered angles with only the tips falling away:
+    the cluster keeps height in its silhouette and still reads soft.
     """
     bm = bmesh.new()
     rng = _Lcg(53)
     blades = 7
     for k in range(blades):
-        yaw = 2.0 * math.pi * k / blades + 0.62 * (rng.next() - 0.5)
-        pitch = 0.10 + 0.62 * rng.next()
+        yaw = 2.0 * math.pi * k / blades + 0.55 * (rng.next() - 0.5)
+        pitch = 0.42 + 0.62 * rng.next()
         length = 0.100 + 0.070 * rng.next()
-        droop = 0.30 + 0.55 * rng.next()
+        droop = 0.16 + 0.30 * rng.next()
         ca, sa = math.cos(yaw), math.sin(yaw)
         cp, sp = math.cos(pitch), math.sin(pitch)
 
@@ -913,11 +921,16 @@ def make_leaf_cluster():
             for (across, up) in ((0.0, rib), (half, 0.0), (0.0, -rib * 0.5), (-half, 0.0)):
                 x = d * cp - up * sp
                 z = d * sp + up * cp + fall
-                pts.append((x * ca - across * sa, x * sa + across * ca, z + 0.086))
+                pts.append((x * ca - across * sa, x * sa + across * ca, z + 0.014))
             secs.append(pts)
         bm_loft(bm, secs)
 
-    emit(bm, "leaf_cluster", "base", bevel_width=0.002, bevel_segments=1)
+    # Anchored where the stems meet, not on the lowest leaf tip. Base anchoring
+    # would push the whole cluster up by however far the outermost tip happened
+    # to fall, which floats it clear of whatever it is growing out of. The
+    # attachment point for a tuft is its root, and the convention says the
+    # origin goes at the attachment point.
+    emit(bm, "leaf_cluster", "none", bevel_width=0.002, bevel_segments=1)
 
 
 def make_stopper():

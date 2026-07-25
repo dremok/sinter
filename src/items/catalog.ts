@@ -76,6 +76,61 @@ export interface PartSpec {
 /** Distance from home. The genre gradient in `docs/DESIGN.md` is this axis. */
 export type Band = 0 | 1 | 2 | 3
 
+/**
+ * Named landing effects, defined in `LANDINGS` in `items/interactions.ts`.
+ *
+ * Declared here rather than there so the compiler checks both ends: a projected
+ * item cannot name a landing that does not exist, and the table cannot forget
+ * one. Same reasoning as `PartKind` being a union instead of a string.
+ */
+export type LandingId =
+  | 'shatter_burning'
+  | 'thrown_flame'
+  | 'oil_spill'
+  | 'water_burst'
+  | 'tainted_splash'
+  | 'focused_sunlight'
+
+/** Where a worn item sits. One item per slot. */
+export type WearSlot = 'eyes' | 'head' | 'body' | 'hands' | 'feet'
+
+/**
+ * What pressing USE does with this item. Four modes, from A11 in
+ * `docs/IDEAS.md`, and the rule underneath them is:
+ *
+ *     The verb is authored. The consequences are simulated.
+ *
+ * Throwing a fire flask is an authored action belonging to one item. Where it
+ * lands, what catches, whether the fire reaches the tree behind it, whether the
+ * grass carries it to the palisade, whether rain already soaked the ground:
+ * none of that is here. It falls out of `sim/fire.ts` reading FLAMMABLE and
+ * WET, exactly as it does today. An authored action that also authors its
+ * outcome is a cutscene. One that hands off to the simulation is a tool.
+ *
+ * `projected` is the mode the game was missing entirely, and it is the one that
+ * matters most, because it decouples acting from standing next to.
+ *
+ * IMPORTANT, and easy to get backwards: `use` describes the USE keypress only.
+ * It never removes a property-driven affordance. A bucket marked `projected`
+ * can still be chosen from the affordance list of a fire you are facing,
+ * because that list asks about WATER and has never known what an item id is.
+ * Rule 1 survives this field precisely because the two are independent.
+ */
+export type Use =
+  /** Acts on whatever you face. The affordance table decides, as it always has. */
+  | { mode: 'contextual' }
+  /** Usable anywhere; opens its own panel. `hud` names one in `ui/huds/`. */
+  | { mode: 'panel'; hud: string }
+  /**
+   * Usable anywhere, aimed at a point, and it leaves your hands. `onLand` names
+   * a landing rather than a function, so throwing stays data.
+   */
+  | { mode: 'projected'; range: number; onLand: LandingId; leaves: 'shatters' | 'lands' }
+  /** Equipped, then always on. No use keypress; it changes what other things do. */
+  | { mode: 'worn'; slot: WearSlot }
+
+const CONTEXTUAL: Use = { mode: 'contextual' }
+
 export interface ItemDef {
   id: string
   name: string
@@ -86,6 +141,13 @@ export interface ItemDef {
 
   /** Where it belongs. Absent means Band 0. */
   band?: Band
+
+  /**
+   * What the USE key does with it. Absent means `{ mode: 'contextual' }`, which
+   * is the common case and the reason it is optional. Read it through
+   * `useOf()` so a caller never has to handle the undefined.
+   */
+  use?: Use
 
   /**
    * Set on things that never merge, per D18. The value is what the bench says
@@ -171,6 +233,10 @@ add({
   name: 'Bucket of Water',
   desc: 'Drawn this morning. Still cold.',
   props: { WOODEN: 0.5, CONTAINER: 1, WATER: 1 },
+  // Thrown water is the cheapest proof that mode 3 is worth having: it reaches
+  // a fire you cannot walk up to. Dousing what you are facing still works
+  // through the affordance list, which asks about WATER and not about this.
+  use: { mode: 'projected', range: 6, onLand: 'water_burst', leaves: 'lands' },
   parts: [
     { part: 'bucket_body', scale: [1.1, 1.1, 1.1], at: [0, -0.16, 0], material: 'wood' },
     { part: 'disc_flat', scale: [1.25, 1, 1.25], at: [0, 0.11, 0], material: 'water' },
@@ -236,6 +302,9 @@ add({
   name: 'Flask of Oil',
   desc: 'Lamp oil. The stopper does not seat properly.',
   props: { GLASS: 0.5, CONTAINER: 0.6, FLAMMABLE: 1 },
+  // Throw it to lay fuel somewhere, then light it from where you are standing.
+  // Two actions, neither of which authors what burns.
+  use: { mode: 'projected', range: 8, onLand: 'oil_spill', leaves: 'shatters' },
   parts: [
     { part: 'flask_body', scale: [1, 1, 1], at: [0, -0.15, 0], material: 'glass' },
     { part: 'stopper', scale: [1, 1, 1], at: [0, 0.14, 0], material: 'clay' },
@@ -280,6 +349,10 @@ add({
   name: 'Spectacles',
   desc: 'Wire frames, one arm bent. Somebody misses these.',
   props: { GLASS: 0.9, FRAGILE: 0.8, VALUABLE: 0.2 },
+  // Mode 4, and the reason the mode exists: worn things change what OTHER
+  // things do rather than doing anything themselves. Small print becomes
+  // legible, and the sun becomes a way to start a fire.
+  use: { mode: 'worn', slot: 'eyes' },
   parts: [
     { part: 'ring_band', scale: [0.5, 0.5, 0.5], at: [-0.16, 0, 0], rot: [0, 1.57, 0], material: 'steel' },
     { part: 'ring_band', scale: [0.5, 0.5, 0.5], at: [0.16, 0, 0], rot: [0, 1.57, 0], material: 'steel' },
@@ -323,4 +396,31 @@ export const STARTING_ITEMS: string[] = itemsInBand(0).map((d) => d.id)
  */
 export function itemsInBand(band: Band): ItemDef[] {
   return Object.values(CATALOG).filter((d) => d.from === undefined && (d.band ?? 0) === band)
+}
+
+/** The item's use mode, with the default filled in. Never returns undefined. */
+export function useOf(def: ItemDef): Use {
+  return def.use ?? CONTEXTUAL
+}
+
+/**
+ * One line answering "what happens if I press use right now?".
+ *
+ * A11 is firm that the answer must never be a silent nothing, so every mode has
+ * a sentence, including the contextual case where the answer depends on what
+ * you are standing in front of. Suggested glyphs for the pack, if the UI wants
+ * them: hand for contextual, screen for panel, arc for projected, dot for worn.
+ */
+export function useSummary(def: ItemDef): string {
+  const use = useOf(def)
+  switch (use.mode) {
+    case 'contextual':
+      return 'Use it on whatever you are facing.'
+    case 'panel':
+      return 'Use it anywhere. It opens.'
+    case 'projected':
+      return `Throw it, up to ${use.range} paces.`
+    case 'worn':
+      return 'Wear it. It works while you have it on.'
+  }
 }

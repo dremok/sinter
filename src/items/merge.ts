@@ -41,7 +41,7 @@
  */
 
 import { deriveProperties } from '../props/derive'
-import { CATALOG, type ItemDef, type PartSpec } from './catalog'
+import { CATALOG, type ItemDef, type PartSpec, type Use } from './catalog'
 
 export function mergeId(a: string, b: string): string {
   return [a, b].sort().join('+')
@@ -62,6 +62,17 @@ export interface Recipe {
   name: string
   /** One line, plain and concrete, same voice as the catalog. */
   desc: string
+  /**
+   * What USE does with the result. Absent means contextual.
+   *
+   * Deliberately authored rather than inherited from the parents, and it is the
+   * one thing besides the name and the id that a recipe is allowed to state.
+   * A11's rule is that the VERB is authored, so a recipe naming the verb of its
+   * own result is exactly right, while the properties underneath it stay
+   * derived. Inheriting instead would mean guessing that oil plus straw is
+   * still throwable, which happens to be true here and would not stay true.
+   */
+  use?: Use
 }
 
 /**
@@ -92,6 +103,7 @@ export const RECIPES: Recipe[] = [
     id: 'lit_torch',
     name: 'Lit Torch',
     desc: 'Caught on the second try. It is going now.',
+    use: { mode: 'projected', range: 7, onLand: 'thrown_flame', leaves: 'lands' },
   },
   {
     inputs: ['torch', 'oil'],
@@ -104,6 +116,7 @@ export const RECIPES: Recipe[] = [
     id: 'burning_brand',
     name: 'Burning Brand',
     desc: 'Lit, and it will stay lit long enough to cross a field at night.',
+    use: { mode: 'projected', range: 7, onLand: 'thrown_flame', leaves: 'lands' },
   },
   {
     inputs: ['burning_brand', 'rope'],
@@ -116,6 +129,10 @@ export const RECIPES: Recipe[] = [
     id: 'fire_flask',
     name: 'Fire Flask',
     desc: 'Oil, glass, and a striker bound to the neck. Throw it and get back.',
+    // The molotov, and the example A11 is written around. The verb is throwing.
+    // Everything after the glass breaks belongs to sim/fire.ts, including the
+    // tree behind it that nobody thought about.
+    use: { mode: 'projected', range: 9, onLand: 'shatter_burning', leaves: 'shatters' },
   },
   {
     inputs: ['oil', 'rope'],
@@ -134,6 +151,7 @@ export const RECIPES: Recipe[] = [
     id: 'firebrand_bundle',
     name: 'Firebrand Bundle',
     desc: 'Straw drenched in oil. It will go up like paper.',
+    use: { mode: 'projected', range: 7, onLand: 'oil_spill', leaves: 'lands' },
   },
   {
     inputs: ['straw', 'torch'],
@@ -208,6 +226,7 @@ export const RECIPES: Recipe[] = [
     id: 'well_bucket',
     name: 'Well Bucket',
     desc: 'Rope through the handle. Now it reaches the bottom.',
+    use: { mode: 'projected', range: 7, onLand: 'water_burst', leaves: 'lands' },
   },
 
   // ------------------------------------------------------------- edge, mass
@@ -434,6 +453,7 @@ export const RECIPES: Recipe[] = [
     id: 'poisoned_water',
     name: 'Poisoned Water',
     desc: 'A pail nobody should drink from. It looks exactly like the other one.',
+    use: { mode: 'projected', range: 6, onLand: 'tainted_splash', leaves: 'lands' },
   },
   {
     inputs: ['poison', 'straw'],
@@ -537,6 +557,7 @@ function buildAll(): void {
         props: deriveProperties(a.props, b.props),
         parts: inheritParts(first, second),
         band: Math.max(first.band ?? 0, second.band ?? 0) as ItemDef['band'],
+        use: r.use,
         from: [first.id, second.id],
       }
       BY_PAIR.set(mergeId(r.inputs[0], r.inputs[1]), r)

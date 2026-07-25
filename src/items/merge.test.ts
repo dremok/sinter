@@ -1,7 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import { CATALOG, STARTING_ITEMS, itemsInBand } from './catalog'
+import { CATALOG, STARTING_ITEMS, itemsInBand, useOf, useSummary } from './catalog'
 import { RECIPES, canMerge, merge, mergeId, refusal, tryMerge } from './merge'
-import { INTERACTIONS, OBSTACLES, interactionFor, routesPast, unknownInteractionItems } from './interactions'
+import {
+  INTERACTIONS,
+  LANDINGS,
+  OBSTACLES,
+  interactionFor,
+  landingOf,
+  projectedItems,
+  routesPast,
+  unknownInteractionItems,
+} from './interactions'
+import { applyReactions } from '../props/derive'
 import { p, type PropertyId } from '../props/registry'
 
 /**
@@ -404,5 +414,112 @@ describe('the interaction table', () => {
     // D17: authored entries are the highlights, not the mechanism. If this ever
     // inverts, the game has quietly become a lock-and-key adventure.
     expect(INTERACTIONS.length).toBeLessThan(RECIPES.length)
+  })
+})
+
+describe('the four use modes', () => {
+  it('gives every item a mode, with contextual as the default', () => {
+    for (const id of Object.keys(CATALOG)) {
+      const use = useOf(CATALOG[id]!)
+      expect(['contextual', 'panel', 'projected', 'worn']).toContain(use.mode)
+      // A11: pressing use must never be a silent nothing, so every mode owes
+      // the player a sentence.
+      expect(useSummary(CATALOG[id]!).length, id).toBeGreaterThan(0)
+    }
+  })
+
+  it('has something in every mode the game can currently express', () => {
+    expect(projectedItems().length, 'mode 3 is the one that was missing').toBeGreaterThan(4)
+    const worn = Object.keys(CATALOG).filter((id) => useOf(CATALOG[id]!).mode === 'worn')
+    expect(worn.length).toBeGreaterThan(0)
+  })
+
+  it('never lets a projected item name a landing that does nothing', () => {
+    for (const id of projectedItems()) {
+      const use = useOf(CATALOG[id]!)
+      if (use.mode !== 'projected') throw new Error('unreachable')
+      expect(use.range, id).toBeGreaterThan(0)
+
+      const land = landingOf(id)!
+      expect(land, id).toBeDefined()
+      expect(land.radius, id).toBeGreaterThan(0)
+      // The failure this catches: a throwable whose arrival stamps nothing, so
+      // the player aims, throws, loses the item, and the world does not react.
+      expect(Object.keys(land.applies).length, `${id} lands and does nothing`).toBeGreaterThan(0)
+    }
+  })
+
+  it('keeps every landing inside [0,1] and readable by a real system', () => {
+    // The systems that exist today. A landing stamping something nothing reads
+    // is the same dead weight as a property nothing reads.
+    const read: PropertyId[] = ['FLAMMABLE', 'HOT', 'WET', 'WATER', 'TOXIC']
+    for (const land of Object.values(LANDINGS)) {
+      for (const [key, v] of Object.entries(land.applies)) {
+        expect(v, `${land.id} ${key}`).toBeGreaterThanOrEqual(0)
+        expect(v, `${land.id} ${key}`).toBeLessThanOrEqual(1)
+      }
+      const useful = (Object.keys(land.applies) as PropertyId[]).some((k) => read.includes(k))
+      expect(useful, `nothing reads anything ${land.id} applies`).toBe(true)
+    }
+  })
+
+  it('the fire flask is a verb, not an outcome', () => {
+    const flask = landingOf('fire_flask')!
+    expect(flask).toBeDefined()
+    // Hot enough to matter: sim/fire.ts ignites at HOT 0.35.
+    expect(p(flask.applies, 'HOT')).toBeGreaterThanOrEqual(0.35)
+    expect(p(flask.applies, 'FLAMMABLE')).toBeGreaterThan(0)
+  })
+})
+
+describe('the verb is authored, the consequences are simulated', () => {
+  /**
+   * The whole point of A11, tested at the only level this module owns: what a
+   * landing does to something depends on what that something already is, and
+   * nothing in the table gets to decide the outcome.
+   */
+  const dryPlank = () => ({ ...CATALOG.plank!.props })
+  const soakedPlank = () => applyReactions({ ...CATALOG.plank!.props, WATER: 1, WET: 1 })
+
+  const land = (target: ReturnType<typeof dryPlank>, id: keyof typeof LANDINGS) =>
+    applyReactions({ ...target, ...LANDINGS[id].applies })
+
+  it('sets a dry thing alight', () => {
+    expect(p(land(dryPlank(), 'shatter_burning'), 'HOT')).toBeGreaterThanOrEqual(0.35)
+  })
+
+  it('does nothing to the same thing soaked, and nobody wrote that down', () => {
+    const hit = land(soakedPlank(), 'shatter_burning')
+    expect(p(hit, 'HOT'), 'water kills the heat').toBeLessThan(0.35)
+    expect(p(hit, 'FLAMMABLE'), 'and it will not carry fire either').toBeLessThan(0.2)
+  })
+
+  it('lets thrown water put out what a thrown flame started', () => {
+    const burning = land(dryPlank(), 'thrown_flame')
+    expect(p(burning, 'HOT')).toBeGreaterThanOrEqual(0.35)
+    expect(p(applyReactions({ ...burning, ...LANDINGS.water_burst.applies }), 'HOT')).toBeLessThan(0.2)
+  })
+
+  it('lays fuel without lighting it, so the two acts stay separate', () => {
+    const oiled = land(dryPlank(), 'oil_spill')
+    expect(p(oiled, 'FLAMMABLE')).toBeGreaterThan(0.9)
+    expect(p(oiled, 'HOT'), 'a spill is not a fire').toBeLessThan(0.35)
+  })
+
+  it('carries poison onto ground without pretending to kill anything', () => {
+    const splash = LANDINGS.tainted_splash.applies
+    expect(p(splash, 'TOXIC')).toBeGreaterThan(0.5)
+    // And the same dilution rule that applies everywhere else still applies.
+    expect(p(applyReactions({ ...splash }), 'TOXIC')).toBeLessThan(p(splash, 'TOXIC'))
+  })
+
+  it('never lets a landing express an outcome', () => {
+    // Structural, and worth asserting because the shape is the guarantee. A
+    // landing has properties and a radius. If a field like `destroys` or
+    // `target` ever appears here, the authored layer has started authoring
+    // consequences and A11 has been lost.
+    for (const land of Object.values(LANDINGS)) {
+      expect(Object.keys(land).sort()).toEqual(['applies', 'id', 'radius', 'says'])
+    }
   })
 })
