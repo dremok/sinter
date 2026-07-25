@@ -36,17 +36,22 @@
       html, body { margin: 0; padding: 0; height: 100%; background: #0b0d10; overflow: hidden; }
 
       /*
-       * The scene renders into a 720-line buffer and the browser scales it to
-       * fill the window. `pixelated` keeps that upscale hard-edged. At this
-       * height the frame is crisp rather than pixellated; the stylisation now
-       * comes from the hand-drawn textures and the cel ramp instead.
+       * The canvas is 1:1 with the display. `sizeToDisplay()` sets the drawing
+       * buffer to the CSS size times devicePixelRatio, capped at 2, so there is
+       * nothing to upscale and no pixel grid to preserve.
+       *
+       * `image-rendering: pixelated` used to live here, back when the scene
+       * rendered into a 720-line buffer. It has to stay gone: with a 2x buffer
+       * on a retina display it point-samples back down to 1x and throws away
+       * exactly the detail native resolution was added to get.
+       *
+       * The forced size stays. three sizes with updateStyle = false and relies
+       * on this CSS to define the display size.
        */
       canvas {
         display: block;
         width: 100vw !important;
         height: 100vh !important;
-        image-rendering: pixelated;
-        image-rendering: crisp-edges;
       }
 
       body {
@@ -105,7 +110,7 @@
 
       /* ---------------------------------------------------------- prompt */
       #prompt {
-        position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%);
+        position: fixed; bottom: 142px; left: 50%; transform: translateX(-50%);
         display: none; align-items: center; gap: 12px;
         padding: 9px 16px; border-radius: 4px;
         font: 400 12.5px/1 var(--ui); color: var(--ink);
@@ -152,22 +157,59 @@
       .key + .key { margin-left: 3px; }
 
       /* ------------------------------------------------------------- held */
-      /* What is in hand, and what USE will do with it. Sits above the control
-         bar so the two read as one block of "what can I press". */
+      /*
+       * What is in hand, and what happens if you use it. Sits directly above
+       * the control bar and shares its plate treatment, so the two read as one
+       * block of "what can I press right now".
+       *
+       * Left to right: how to change hands, what is in them, what it does, the
+       * use mode, and the key that does it. For a throwable the middle grows a
+       * row with range, spread and the traits it lands with, which is what
+       * turns a throw from a guess into a decision.
+       */
       #held {
-        position: fixed; bottom: 46px; left: 50%; transform: translateX(-50%);
-        display: none; align-items: center; gap: 10px;
-        background: var(--panel); border: 1px solid var(--edge); border-radius: 4px;
-        padding: 7px 12px; pointer-events: none; backdrop-filter: blur(6px);
+        position: fixed; bottom: 62px; left: 50%; transform: translateX(-50%);
+        display: none; align-items: center; gap: 14px;
+        padding: 9px 14px; border-radius: 6px;
+        background: linear-gradient(rgba(24, 19, 15, 0.84), rgba(11, 9, 7, 0.88));
+        box-shadow:
+          inset 0 1px 0 rgba(240, 220, 190, 0.12),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+          0 8px 24px rgba(0, 0, 0, 0.5);
+        pointer-events: none; backdrop-filter: blur(7px);
       }
       #held.on { display: flex; }
-      .held-icon { width: 30px; height: 30px; image-rendering: pixelated; }
-      .held-name { font-size: 12px; }
-      .held-use { font-size: 10.5px; color: var(--dim); margin-top: 1px; }
-      .held-count {
-        font-size: 10px; color: var(--dim); margin-left: 6px;
-        padding-left: 10px; border-left: 1px solid var(--edge);
+
+      .held-cycle { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+      .held-cycle .key + .key { margin-left: 0; }
+      .held-pos { font: 600 10px/1 var(--mono); color: var(--ink-2); }
+
+      .held-icon {
+        width: 34px; height: 34px; flex: none; border-radius: 3px;
+        background: rgba(0, 0, 0, 0.32);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
       }
+
+      .held-text { min-width: 0; }
+      .held-name { font: 400 14px/1.15 var(--display); color: var(--ink); }
+      .held-use { font: 400 11px/1.35 var(--ui); color: var(--dim); margin-top: 2px; }
+      .held-aim { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+      .held-reach { font: 600 10px/1 var(--mono); color: var(--ink-2); letter-spacing: 0.02em; }
+      .held-dot { color: var(--dim); font-size: 10px; }
+
+      .held-mode {
+        display: flex; align-items: center; gap: 6px; flex: none;
+        padding: 5px 9px; border-radius: 3px;
+        background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+        font: 500 9px/1 var(--ui); letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--ink-2);
+      }
+      .held-act {
+        display: flex; align-items: center; gap: 7px; flex: none;
+        padding-left: 13px; box-shadow: inset 1px 0 0 rgba(240, 220, 190, 0.13);
+        font: 500 11.5px/1 var(--ui); letter-spacing: 0.05em; color: #e2dac9;
+      }
+      .glyph { display: flex; }
 
       /* --------------------------------------------------------- controls */
       #controls {
@@ -350,15 +392,28 @@
         font: 400 15.5px/1.1 var(--display); letter-spacing: 0.01em; color: var(--ink);
       }
       .card.picked .card-name { color: #ffe9c8; }
-      /*
-       * The USE mode badge (IDEAS A11: contextual, panel, projected, worn) lands
-       * here, right aligned on this row, and a USE button goes beside MERGE in
-       * the bench below. Both are another agent's items/ work; the room is kept
-       * so neither reflows this card when it arrives.
-       */
-      .card-slot {
-        margin-left: auto; flex: none;
-        font: 700 9px/1 var(--mono); letter-spacing: 0.1em; color: var(--warm);
+      /* Whatever is in hand, marked in the list, so the strip at the bottom of
+         the screen and the pack never disagree about what you are holding. */
+      .card.in-hand { box-shadow: inset 3px 0 0 var(--warm); }
+
+      /* Right of the name: use mode, bench slot, and the control that takes the
+         thing in hand. All small, all optional, none of them reflow the row. */
+      .card-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 7px; }
+      .card-mode { color: var(--dim); }
+      .card:hover .card-mode { color: var(--ink-2); }
+      .card-slot { font: 700 9px/1 var(--mono); letter-spacing: 0.1em; color: var(--warm); }
+
+      .card-hold {
+        padding: 4px 8px; border-radius: 2px; cursor: pointer;
+        border: 1px solid rgba(255, 255, 255, 0.13); background: rgba(255, 255, 255, 0.05);
+        font: 500 9.5px/1 var(--ui); letter-spacing: 0.06em; color: var(--ink-2);
+        opacity: 0.55; transition: opacity 120ms ease;
+      }
+      .card:hover .card-hold { opacity: 1; }
+      .card-hold:hover { color: #1d1409; background: var(--warm); border-color: var(--warm); }
+      .card-hold.on {
+        opacity: 1; color: #1d1409; font-weight: 700;
+        background: var(--warm); border-color: var(--warm);
       }
 
       .card-traits { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
@@ -476,7 +531,7 @@
 
       /* ------------------------------------------------------------ toast */
       #toasts {
-        position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
+        position: fixed; bottom: 188px; left: 50%; transform: translateX(-50%);
         display: flex; flex-direction: column-reverse; gap: 6px; align-items: center;
         pointer-events: none;
       }

@@ -307,8 +307,8 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 5.3,
     prompt:
-      `${STYLE} A sheet of beaten gold seen flat on. Broad soft diagonal bands of ' +
-      'lighter and darker metal across the whole frame, four or five of them, with ` +
+      `${STYLE} A sheet of beaten gold seen flat on. Broad soft diagonal bands of ` +
+      'lighter and darker metal across the whole frame, four or five of them, with ' +
       'faint hammer facets. Rich warm yellow, matte and burnished rather than mirror ' +
       'polished.',
     palette: [...RAMP.gold],

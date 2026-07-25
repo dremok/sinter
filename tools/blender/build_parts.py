@@ -1357,25 +1357,28 @@ def make_key_body():
 
 def make_chili_pod():
     """
-    A pod: fat at the shoulder, curving away, kinked near the tip.
+    A pod: fat at the shoulder, hooking hard away, kinked near the tip.
 
     Anchored at the TOP, where the stem joins, because that is the attachment
-    point and it makes a calyx trivial to place: the recipe puts the leaves at
+    point and it makes a calyx trivial to place: the recipe puts the calyx at
     the same height as the pod and they meet.
 
     The curve is what separates this from a stretched apple, which is what the
-    catalog was using. A straight tapered cone reads as a carrot. The kink in
-    the last quarter is the detail that says the thing grew.
+    catalog was using. The first attempt curved by twelve degrees over its
+    length and was still a carrot: at play size a gentle curve is a straight
+    line, and length plus a sharp point is the carrot glyph however you shade
+    it. So this hooks properly, about forty degrees, and is short and fat at
+    roughly three to one rather than six. Blunt at the tip, for the same reason.
     """
     bm = bmesh.new()
-    radii = [0.026, 0.048, 0.056, 0.055, 0.049, 0.041, 0.031, 0.017, 0.004]
+    radii = [0.032, 0.058, 0.065, 0.063, 0.057, 0.048, 0.036, 0.022, 0.009]
     steps = len(radii)
 
     frames = []
     for i in range(steps):
         t = i / (steps - 1)
-        kink = 0.9 * max(0.0, t - 0.72) ** 2
-        frames.append((Vector((0.062 * t * t + kink, 0.0, -0.300 * t)),
+        kink = 1.1 * max(0.0, t - 0.68) ** 2
+        frames.append((Vector((0.132 * t * t + kink, 0.0, -0.258 * t)),
                        Vector((1.0, 0.0, 0.0)), Vector((0.0, 1.0, 0.0)), t))
 
     def sec(i, t):
@@ -1390,6 +1393,33 @@ def make_chili_pod():
     bm_sweep(bm, frames, sec)
     o = emit(bm, "chili_pod", "top", bevel_width=0.003, bevel_segments=1)
     socket(o, "socket_base", (0, 0, 0))
+
+
+def make_stem_calyx():
+    """
+    The green top of a fruit: a five pointed calyx cap and a short stem.
+
+    `leaf_cluster` was standing in for this and it is the wrong object. A
+    cluster splays outward and reads as foliage; a calyx caps the shoulder of
+    the fruit and the stem rises out of it, so the two together make a small
+    vertical accent rather than a green splat sitting on top.
+
+    Base anchored at the cap's underside, which is where it meets the fruit.
+    """
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, 0.008),
+        (0.022, 0.0, 0.006),
+        (0.042, 0.006, 0.014),       # star rim, five points
+        (0.032, 0.022, 0.008),
+        (0.015, 0.030),
+        (0.012, 0.038),              # stem
+        (0.011, 0.078),
+        (0.009, 0.094),
+        (0.0, 0.100),
+    ], segments=10, lobes=5)
+    o = emit(bm, "stem_calyx", "base", bevel_width=0.002, bevel_segments=1)
+    socket(o, "socket_tip", (0, 0, 0.100))
 
 
 def make_stone_lump():
@@ -1412,7 +1442,7 @@ def make_stone_lump():
         # Push out to a shell so the hull gets facets all round rather than a
         # few big ones spanning an empty middle.
         k = (0.72 + 0.28 * rng.next()) / n
-        bm.verts.new((u * k * 0.132, v * k * 0.118, max(w * k * 0.104, -0.052)))
+        bm.verts.new((u * k * 0.152, v * k * 0.136, max(w * k * 0.118, -0.060)))
     bmesh.ops.convex_hull(bm, input=bm.verts)
     emit(bm, "stone_lump", "base", bevel_width=0.004)
 
@@ -1423,26 +1453,32 @@ def make_phial_ribbed():
 
     Poison bottles were made ribbed and angular by law so they could be told
     from medicine by touch in the dark. That is exactly the problem here, minus
-    the dark: the item cannot carry a label at nineteen pixels, so the warning
-    has to be in the shape. Set against the flask, which is a wide flattened
-    bulb, this is a narrow upright column with six hard ribs and a mean little
-    neck, and the pair are never confusable.
+    the dark: the item cannot carry a label at seventeen pixels, so the warning
+    has to be in the shape. Set against the flask, which is a wide round bulb,
+    this is a hard sided column with six deep ribs, a shoulder that turns a
+    corner instead of curving, and a mean little neck.
+
+    The ribs are 14mm rather than the 9mm they started at. Nine was invisible:
+    a rib only counts if it breaks the OUTLINE, not just the shading, because
+    at this size the shading inside a seven pixel wide object is two pixels of
+    gradient and the eye reads none of it.
     """
     bm = bmesh.new()
-    rib = 0.009
+    rib = 0.014
     bm_lathe(bm, [
         (0.0, 0.0),
-        (0.050, 0.0, rib),
-        (0.057, 0.014, rib),
-        (0.059, 0.150, rib),         # long straight ribbed body
-        (0.056, 0.186, rib),
-        (0.046, 0.208),              # shoulder, cut in hard
-        (0.029, 0.226),
-        (0.026, 0.248),              # neck
-        (0.033, 0.258),              # lip
-        (0.031, 0.268),
-        (0.020, 0.270),
-        (0.0, 0.264),
+        (0.056, 0.0, rib),
+        (0.065, 0.014, rib),
+        (0.067, 0.140, rib),         # long straight ribbed body
+        (0.064, 0.172, rib),
+        (0.052, 0.190, rib * 0.55),  # shoulder turns a corner
+        (0.034, 0.212),
+        (0.026, 0.228),
+        (0.025, 0.250),              # neck
+        (0.033, 0.260),              # lip
+        (0.031, 0.270),
+        (0.020, 0.272),
+        (0.0, 0.266),
     ], segments=12, lobes=6)
     o = emit(bm, "phial_ribbed", "base", bevel_width=0.003, bevel_segments=1)
     socket(o, "socket_tip", (0, 0, 0.250))
@@ -1460,7 +1496,7 @@ BUILDERS = [
     make_disc, make_bar,
     make_blade_sword, make_guard_cross, make_grip_wrapped, make_pommel_round,
     make_spectacles_frame, make_lens_round, make_key_body,
-    make_chili_pod, make_stone_lump, make_phial_ribbed,
+    make_chili_pod, make_stem_calyx, make_stone_lump, make_phial_ribbed,
 ]
 
 

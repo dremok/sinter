@@ -18,7 +18,8 @@
  *     ?debug=1 or F3; see `mountDebug` below.
  */
 
-import type { ItemDef } from '../items/catalog'
+import { useOf, type ItemDef, type Use } from '../items/catalog'
+import { landingOf } from '../items/interactions'
 import { canMerge, isDiscovered, mergeId, refusal, tryMerge } from '../items/merge'
 import { itemIcon } from '../render/icons'
 import { ALL_PROPERTIES, meta, ranked, type PropertyId } from '../props/registry'
@@ -56,6 +57,52 @@ const MAX_NOTICES = 3
 /** How long a notice lives once nothing has refreshed it. */
 const NOTICE_MS = 5200
 
+/**
+ * How each use mode is drawn and named (IDEAS A11).
+ *
+ * `key` is the keycap shown beside the item, and it is present only when that
+ * key performs the item's use *directly*. Today R throws and nothing else, so
+ * only `projected` gets one. That is the whole answer to "what happens if I
+ * press use right now?": if there is no keycap on the strip, R is not the verb
+ * for this thing, and the line beside it says what is.
+ *
+ * Glyphs are drawn on a 12x12 grid in `currentColor`. A11 suggests hand,
+ * screen, arc and dot; a hand does not survive being 12 pixels tall, so
+ * contextual is an arrow meeting a wall, which says "acts on the thing in
+ * front of you" at any size.
+ */
+const MODES: Record<Use['mode'], { label: string; blurb: string; key?: string; verb?: string; art: string }> = {
+  contextual: {
+    label: 'Applied',
+    blurb: 'Applied to whatever you are facing.',
+    art: '<path d="M1.4 6h5.4"/><path d="M4.9 4.1 6.9 6 4.9 7.9"/><path d="M9.5 2.3v7.4"/>',
+  },
+  projected: {
+    label: 'Thrown',
+    blurb: 'Thrown. It leaves your hands.',
+    key: 'R',
+    verb: 'Throw',
+    art: '<path d="M1.3 9.1Q5.3 0.9 9.7 6.6"/><circle cx="10" cy="9.2" r="1.6" fill="currentColor" stroke="none"/>',
+  },
+  panel: {
+    label: 'Opens',
+    blurb: 'Opens its own panel.',
+    art: '<rect x="1.6" y="2.3" width="8.8" height="7.4" rx="1.2"/><path d="M3.7 5.3h4.6M3.7 7.3h2.9"/>',
+  },
+  worn: {
+    label: 'Worn',
+    blurb: 'Worn. It works on its own.',
+    art: '<circle cx="6" cy="6" r="4.2"/><circle cx="6" cy="6" r="1.7" fill="currentColor" stroke="none"/>',
+  },
+}
+
+/**
+ * `contextual` is the default and most items are it, so a glyph on every card
+ * would be wallpaper rather than information. Drawing only the three that
+ * differ is what makes a throwable findable at a glance in a long list.
+ */
+const GLYPHED: Use['mode'][] = ['projected', 'panel', 'worn']
+
 /** A live notice box. `label` is kept so a repeat can be told from a sequel. */
 interface Notice {
   node: HTMLElement
@@ -80,6 +127,17 @@ const GROUPS: { id: string; label: string }[] = [
 export interface UiHooks {
   onMerged: (result: ItemDef, a: ItemDef, b: ItemDef) => void
   onDropped: (def: ItemDef) => void
+  /**
+   * Put the pack item at `index` in hand.
+   *
+   * Which item is held is `main.ts`'s state, because that is where Q, E and R
+   * are read, so the pack cannot take something in hand without saying so. Wire
+   * it with `onHold: (index) => { held = index }` and the Hold control appears
+   * on every card; leave it out and no card draws a control that would do
+   * nothing. Cycling with Q and E is fine for four things and useless for
+   * forty, which is why the pack needs its own way in.
+   */
+  onHold?: (index: number) => void
 }
 
 export class Ui {
@@ -98,6 +156,10 @@ export class Ui {
   private overflow: { node: HTMLElement; count: number; timer: ReturnType<typeof setTimeout> } | null = null
   /** The pair whose refusal has already been toasted. See `announce`. */
   private announced: string | null = null
+  /** Pack index of whatever is in hand, mirrored from `held()` for the cards. */
+  private heldIndex: number | null = null
+  /** What the strip is currently showing, so a frame loop does not rebuild it. */
+  private heldKey: string | null = null
 
   constructor(private hooks: UiHooks) {
     this.buildFilters()
@@ -327,8 +389,39 @@ export class Ui {
 
     for (const { def, index } of visible) host.append(this.buildCard(def, index))
 
+    this.markHeld()
     this.syncFade()
     this.renderBench()
+  }
+
+  /**
+   * Marks whichever card is in hand.
+   *
+   * Toggling classes on the cards that exist, rather than re-rendering the
+   * list, because this is driven from a frame loop: `main.ts` calls `held()`
+   * every frame and a full rebuild there would throw away scroll position and
+   * restart every animation sixty times a second.
+   */
+  private markHeld(): void {
+    for (const card of Array.from($('items').querySelectorAll<HTMLElement>('.card'))) {
+      const on = Number(card.dataset.index) === this.heldIndex
+      card.classList.toggle('in-hand', on)
+      const hold = card.querySelector<HTMLElement>('.card-hold')
+      if (!hold) continue
+      hold.textContent = on ? 'In hand' : 'Hold'
+      hold.classList.toggle('on', on)
+    }
+  }
+
+  /** The 12x12 use-mode glyph, as an inline SVG so it inherits text colour. */
+  private modeGlyph(mode: Use['mode']): HTMLElement {
+    const box = el('span', 'glyph')
+    box.innerHTML =
+      `<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor"` +
+      ` stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+      `${MODES[mode].art}</svg>`
+    box.title = MODES[mode].blurb
+    return box
   }
 
   /**
@@ -345,6 +438,10 @@ export class Ui {
   private buildCard(def: ItemDef, index: number): HTMLElement {
     const picked = index === this.slotA ? 1 : index === this.slotB ? 2 : 0
     const card = el('div', 'card' + (picked ? ' picked' : ''))
+    card.dataset.index = String(index)
+    // The card body loads the bench, because the bench is the thing directly
+    // below it. Taking something in hand is a different verb and gets its own
+    // control rather than a second meaning for the same click.
     card.addEventListener('click', () => this.pick(index))
 
     const swatch = el('img', 'swatch')
@@ -355,10 +452,27 @@ export class Ui {
 
     const top = el('div', 'card-top')
     top.append(el('div', 'card-name', def.name))
-    // The USE mode badge (IDEAS A11) belongs on this row, right aligned, next
-    // to the bench-slot numeral. Nothing declares a mode yet, so nothing is
-    // drawn; the row already reserves the height either way.
-    if (picked) top.append(el('div', 'card-slot', String(picked)))
+
+    const actions = el('div', 'card-actions')
+    const mode = useOf(def).mode
+    if (GLYPHED.includes(mode)) {
+      const glyph = this.modeGlyph(mode)
+      glyph.classList.add('card-mode')
+      actions.append(glyph)
+    }
+    if (picked) actions.append(el('div', 'card-slot', String(picked)))
+    if (this.hooks.onHold) {
+      const hold = el('button', 'card-hold', 'Hold')
+      hold.type = 'button'
+      hold.title = `Take the ${def.name} in hand`
+      hold.addEventListener('click', (e) => {
+        // Without this the bench would also claim the click.
+        e.stopPropagation()
+        this.hooks.onHold!(index)
+      })
+      actions.append(hold)
+    }
+    top.append(actions)
 
     const traits = el('div', 'card-traits')
     const all = ranked(def.props)
@@ -592,29 +706,92 @@ export class Ui {
   }
 
   /**
-   * The held item strip.
+   * The held item strip: what is in hand, and what will happen if you use it.
    *
    * A11 says every item must answer "what happens if I press use right now?"
-   * and that the answer must never be a silent nothing. This is where that
-   * answer lives: what is in hand, and the one line describing what USE does
-   * with it. Without this, throwing was a keypress that consumed an item the
-   * player never chose and could not see.
+   * and that the answer must never be a silent nothing. For a throwable that
+   * answer has to include the numbers, or throwing is a guess: how far it goes,
+   * how wide it lands, and what it stamps on whatever is standing there. The
+   * last of those is drawn with the same trait chips as the item cards, so the
+   * vocabulary a player learns in the pack is the one that tells them what a
+   * fire flask does before they let go of it.
+   *
+   * Called from a frame loop, so it rebuilds only when something changed.
    */
   held(icon: string | null, name: string, summary: string, index: number, total: number): void {
     const node = $('held')
-    node.classList.toggle('on', icon !== null)
-    if (icon === null) return
 
+    if (icon === null) {
+      if (this.heldKey === null) return
+      this.heldKey = null
+      this.heldIndex = null
+      node.classList.remove('on')
+      node.replaceChildren()
+      this.markHeld()
+      return
+    }
+
+    const key = `${index}/${total}/${name}`
+    if (key === this.heldKey) return
+    this.heldKey = key
+    this.heldIndex = index
+    node.classList.add('on')
     node.replaceChildren()
+
+    const def = this.pack[index]
+    const use = def ? useOf(def) : ({ mode: 'contextual' } as Use)
+    const mode = MODES[use.mode]
+
+    if (total > 1) {
+      const cycle = el('div', 'held-cycle')
+      cycle.append(
+        el('span', 'key', 'Q'),
+        el('span', 'held-pos', `${index + 1}/${total}`),
+        el('span', 'key', 'E'),
+      )
+      node.append(cycle)
+    }
+
     const img = el('img', 'held-icon')
     img.src = icon
     img.alt = ''
+    node.append(img)
 
     const text = el('div', 'held-text')
     text.append(el('div', 'held-name', name), el('div', 'held-use', summary))
 
-    node.append(img, text)
-    if (total > 1) node.append(el('div', 'held-count', `${index + 1}/${total}`))
+    // Everything a throw decision needs, in one row: how far, how wide, and
+    // what lands there.
+    if (def && use.mode === 'projected') {
+      const land = landingOf(def.id)
+      const aim = el('div', 'held-aim')
+      const across = land ? Math.max(1, Math.round(land.radius * 2)) : 1
+      aim.append(
+        el('span', 'held-reach', `${use.range} paces`),
+        el('span', 'held-dot', '·'),
+        el('span', 'held-reach', `${across} across`),
+      )
+      if (land) {
+        for (const { id, value } of ranked(land.applies).slice(0, 2)) {
+          aim.append(this.buildTrait(id, value))
+        }
+      }
+      text.append(aim)
+    }
+    node.append(text)
+
+    const badge = this.modeGlyph(use.mode)
+    badge.classList.add('held-mode')
+    badge.append(el('span', undefined, mode.label))
+    node.append(badge)
+
+    // A keycap only where that key is genuinely the verb. Anything else would
+    // invite the player to press a key and watch nothing happen.
+    if (mode.key && mode.verb) {
+      const act = el('div', 'held-act')
+      act.append(el('span', 'key', mode.key), el('span', undefined, mode.verb))
+      node.append(act)
+    }
   }
 
   prompt(html: string | null): void {

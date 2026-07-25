@@ -59,7 +59,33 @@ export const RAMP = {
    * bright, or the brightest thing in the frame is the backdrop.
    */
   grass: ['#2b3124', '#39432a', '#4b5836', '#5f6f45', '#7b8a5f', '#9ca887'],
-  /** Bare soil. Warmer and redder than bark, so worn ground reads as earth. */
+  /**
+   * Parched grass, for the thin patches in the ground bitmap.
+   *
+   * Its six luminances match `grass` step for step, deliberately. The patches
+   * are dithered against the green ramp at the same index, so what varies
+   * across the boundary is hue alone and the field stays continuous in value —
+   * no blob appears in a greyscale check, and there is no stipple of two
+   * complementary hues to resolve into red.
+   *
+   * Hue sits at ~53 degrees, well clear of the ~26 degrees of `dirt` and of the
+   * tints region.ts uses for tracks (0xbb9160) and the yard (0x9c7a4e), and at
+   * noticeably lower saturation than either. That separation is the whole
+   * point: see the note on `dirt` below.
+   */
+  dryGrass: ['#302f21', '#403d28', '#545033', '#6a6542', '#867f57', '#a69e78'],
+  /**
+   * Bare soil. Warmer and redder than bark, so earth reads as earth.
+   *
+   * Used for stones and shore pebbles, and NOT for patches in the ground
+   * bitmap. region.ts lays worn tracks and a trodden yard as authored geometry,
+   * and under D20 that worn ground *is* the navigation system: it is how the
+   * world says somebody walks here. A texture that scatters tan patches of the
+   * same hue and size across the clearing competes with that signal directly,
+   * and two of them beyond the palisade read as a path junction that means
+   * nothing. So the split is: the ground bitmap owns grass, region.ts owns
+   * bare earth.
+   */
   dirt: ['#352a1c', '#473828', '#5a4835', '#705843', '#876c53', '#9e8267'],
   /**
    * Canopy. Deliberately pale and near-neutral (8-15% saturation): region.ts

@@ -1937,9 +1937,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   {
     const crateGeo = new THREE.BoxGeometry(0.62, 0.56, 0.6)
     for (const [x, z, y, ry] of [
-      [-0.2, 17.0, 0, 0.3],
-      [0.35, 16.8, 0.56, -0.4],
-      [0.9, 17.3, 0, 0.9],
+      [5.6, 15.9, 0, 0.3],
+      [6.2, 15.6, 0.56, -0.4],
+      [6.7, 16.2, 0, 0.9],
     ] as const) {
       const crate = new THREE.Mesh(crateGeo, M.plank)
       crate.position.set(x, heightAt(x, z) + 0.28 + y, z)
@@ -2057,6 +2057,85 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   }
 
   /**
+   * A bench outside the gate, facing down the track. Somebody sits here and
+   * looks at the way out, which is the only comment this region makes on it.
+   */
+  {
+    const bx = 3.0
+    const bz = 8.4
+    const g = new THREE.Group()
+    for (const sx of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.42, 0.34), M.log)
+      leg.position.set(sx * 0.62, 0.21, 0)
+      leg.castShadow = true
+      g.add(leg)
+    }
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.13, 0.42), M.plank)
+    seat.position.y = 0.48
+    seat.castShadow = true
+    seat.receiveShadow = true
+    g.add(seat)
+    g.position.set(bx, heightAt(bx, bz), bz)
+    g.rotation.y = -0.55
+    group.add(g)
+  }
+
+  /** A second bed outside the fence, where the things that need sun go. */
+  {
+    const bx = -3.6
+    const bz = 8.2
+    layPatch(bx, bz, 1.3, M.tilled, homeRng, 0.14, 12, 0.075)
+    const podGeo = new THREE.ConeGeometry(0.13, 0.5, 5)
+    const podMat = toonUnique({ color: 0x76a54a, map: tiled(tex.foliage, 0.7, 0.7) })
+    for (let i = 0; i < 9; i++) {
+      const x = bx + homeRng.range(-0.95, 0.95)
+      const z = bz + homeRng.range(-0.95, 0.95)
+      const pod = new THREE.Mesh(podGeo, podMat)
+      pod.scale.setScalar(homeRng.range(0.8, 1.3))
+      pod.position.set(x, heightAt(x, z) + 0.24, z)
+      pod.rotation.set(homeRng.range(-0.15, 0.15), homeRng.range(0, 3), homeRng.range(-0.15, 0.15))
+      pod.castShadow = true
+      group.add(pod)
+    }
+  }
+
+  /** A lean-to store by the chopping block, with a shelf nobody keeps tidy. */
+  {
+    const sx = 11.5
+    const sz = 13.4
+    const h = heightAt(sx, sz)
+    const g = new THREE.Group()
+    for (const dx of [-1, 1]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 1.9, 6), M.log)
+      post.position.set(dx * 0.85, 0.95, 0.55)
+      post.castShadow = true
+      g.add(post)
+      const rear = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 2.3, 6), M.log)
+      rear.position.set(dx * 0.85, 1.15, -0.55)
+      rear.castShadow = true
+      g.add(rear)
+    }
+    const back = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.6, 0.1), M.plank)
+    back.position.set(0, 0.8, -0.6)
+    back.castShadow = true
+    back.receiveShadow = true
+    g.add(back)
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.13, 1.5), M.thatchOld)
+    roof.position.set(0, 2.15, 0)
+    roof.rotation.x = -0.26
+    roof.castShadow = true
+    g.add(roof)
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.08, 0.36), M.plank)
+    shelf.position.set(0, 1.05, -0.42)
+    shelf.castShadow = true
+    g.add(shelf)
+    g.position.set(sx, h, sz)
+    g.rotation.y = -0.3
+    group.add(g)
+    occluders.push(occluder(g, 1.2, 2.3))
+  }
+
+  /**
    * The grave marker, up on the knoll under the old oak. Nobody explains it.
    * (IDEAS A1: progress made visible with no UI.)
    */
@@ -2125,6 +2204,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    */
   const viewPlayer = new THREE.Vector3()
   const viewObject = new THREE.Vector3()
+  /**
+   * The first call snaps instead of easing. Two reasons: the player spawns
+   * already standing behind whatever is behind them, so easing in from solid on
+   * frame one is a visible pop; and the headless harness renders exactly one
+   * frame, so without this a screenshot would only ever catch the fade 11% of
+   * the way in and could never show the steady state.
+   */
+  let settled = false
 
   function fadeOccluders(playerPos: THREE.Vector3, camera: THREE.Camera, dt: number): void {
     viewPlayer.copy(playerPos).applyMatrix4(camera.matrixWorldInverse)
@@ -2146,10 +2233,16 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       const target = hiding ? FADE_TO : 1
       if (o.opacity === target) continue
 
-      const rate = hiding ? FADE_IN_RATE : FADE_OUT_RATE
-      const step = rate * dt
-      o.opacity =
-        Math.abs(target - o.opacity) <= step ? target : o.opacity + Math.sign(target - o.opacity) * step
+      if (settled) {
+        const rate = hiding ? FADE_IN_RATE : FADE_OUT_RATE
+        const step = rate * dt
+        o.opacity =
+          Math.abs(target - o.opacity) <= step
+            ? target
+            : o.opacity + Math.sign(target - o.opacity) * step
+      } else {
+        o.opacity = target
+      }
 
       if (!o.faded) {
         o.faded = []
@@ -2174,6 +2267,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         }
       }
     }
+
+    settled = true
   }
 
   // ----------------------------------------------------------------- items
@@ -2196,12 +2291,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // else a player does in the first minute, they walk past this.
     rock: [2.4, 6.8],
     // On the bench outside the fence, where somebody sat down and forgot them.
-    glasses: [3.25, 8.15],
+    glasses: [3.55, 7.85],
     // In the bed outside the fence, with the rest of what grows there.
     chili: [-3.6, 8.0],
     // By the chopping block, with the axe.
     knife: [8.6, 12.8],
-    // On the shed shelf, which is where a jar you do not want indoors goes.
+    // On the lean-to shelf, which is where a jar you do not want indoors goes.
     poison: [11.6, 13.6],
     // Dropped at the water's edge and never found. Not near any door.
     key: [-9.2, 1.2],

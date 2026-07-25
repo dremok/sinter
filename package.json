@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "shot": "tsx tools/shot.ts",
+    "bake:textures": "tsx tools/bake-textures/bake.ts",
     "verify:deploy": "node tools/verify-deploy.mjs",
     "start": "node tools/serve.mjs",
     "verify:movement": "node tools/verify-movement.mjs"
