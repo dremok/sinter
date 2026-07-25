@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { occluderHides, type OccluderInView, type TargetInView } from './region'
+import { PALISADE, occluderHides, type OccluderInView, type TargetInView } from './region'
 
 /**
  * The rig from `IsoCamera` at its only azimuth: orthographic, looking at the
@@ -109,5 +109,52 @@ describe('occluderHides', () => {
   it('ignores something too short to cover the player at all', () => {
     const stump = { x: 10.6, z: 8.8, radius: 3.0, top: 0.4 }
     expect(hides({ occluder: stump, player: { x: 8.0, z: 6.2 } })).toBe(false)
+  })
+})
+
+/**
+ * The palisade run against the gate it meets.
+ *
+ * This is the cheap half of the buried-geometry problem: two structures laid
+ * down independently that turned out to occupy the same space. The expensive
+ * half is that `fail` strips a felled thing's blocker, so a buried destructible
+ * is load-bearing for whatever it is buried in, and chopping it opens a hole
+ * through something still standing. Asserting the layout catches that here
+ * rather than when a player happens to swing an axe at it.
+ */
+describe('palisade layout', () => {
+  const posts = PALISADE.posts()
+
+  it('puts no post inside the gate pillars', () => {
+    // The whole bug in one line. A post whose body reaches into a pillar is
+    // invisible from every angle and destructible from all of them.
+    const pillarInner = PALISADE.pillarAt - PALISADE.pillarRadius
+    const pillarOuter = PALISADE.pillarAt + PALISADE.pillarRadius
+    for (const x of posts) {
+      const near = Math.abs(x) - PALISADE.postGirth
+      const far = Math.abs(x) + PALISADE.postGirth
+      const overlaps = near < pillarOuter && far > pillarInner
+      expect(overlaps, `post at ${x} overlaps a gate pillar`).toBe(false)
+    }
+  })
+
+  it('leaves no gap between the gate and the first post on either side', () => {
+    // The other failure mode of the same fix. Move the run clear of the pillars
+    // without widening the gate's own blocker and the seam becomes a doorway.
+    const first = Math.min(...posts.map(Math.abs))
+    expect(first - PALISADE.postRadius).toBeLessThan(PALISADE.gateHalf)
+  })
+
+  it('leaves no gap between neighbouring posts', () => {
+    const side = posts.filter((x) => x > 0).sort((a, b) => a - b)
+    for (let i = 1; i < side.length; i++) {
+      expect(side[i]! - side[i - 1]!).toBeLessThan(PALISADE.postRadius * 2)
+    }
+  })
+
+  it('has a gate blocker wide enough to cover both pillars', () => {
+    // Nothing else may be load-bearing for the gate. If this shrinks below the
+    // pillars, their collision silently becomes the first post's again.
+    expect(PALISADE.gateHalf).toBeGreaterThanOrEqual(PALISADE.pillarAt + PALISADE.pillarRadius)
   })
 })

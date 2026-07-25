@@ -289,6 +289,44 @@
       /* Dashed, so every divider in the panel is the same stitch as the frame. */
       .rule { height: 0; margin: 0 22px; flex: none; border-top: 1px dashed var(--stitch); }
 
+      /* ------------------------------------------------------------- worn */
+      /*
+       * Five small sockets, one per wear slot, occupied or not. This is the
+       * whole equipment view and it is deliberately tiny: worn items are the
+       * one passive use mode, so what the player needs is to see the state at a
+       * glance, not a screen to manage it in.
+       */
+      #worn { flex: none; padding: 4px 22px 12px; }
+      .worn-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+      .worn-title {
+        font: 400 11px/1 var(--display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-2);
+      }
+      .worn-count { font: 400 10.5px/1 var(--ui); color: var(--dim); }
+      .worn-slots { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+
+      .worn-slot { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; }
+      .worn-well {
+        width: 100%; height: 42px; border-radius: 3px;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(0, 0, 0, 0.3);
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45), inset 0 3px 7px rgba(0, 0, 0, 0.4);
+      }
+      .worn-well img { width: 26px; height: 26px; }
+      /* One dashed mark in an empty socket, the same language as the bench. */
+      .worn-slot:not(.filled) .worn-well::after {
+        content: ''; width: 16px; height: 16px; border-radius: 2px;
+        border: 1px dashed rgba(232, 224, 208, 0.22);
+      }
+      .worn-slot.filled .worn-well {
+        background: linear-gradient(rgba(224, 163, 92, 0.15), rgba(224, 163, 92, 0.05));
+        box-shadow: inset 0 0 0 1px rgba(224, 163, 92, 0.5);
+      }
+      .worn-label {
+        max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font: 500 8.5px/1 var(--ui); letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim);
+      }
+      .worn-slot.filled .worn-label { color: var(--ink-2); text-transform: none; letter-spacing: 0.02em; font-size: 9.5px; }
+
       /* ------------------------------------------------------------ filter */
       #filter-bar {
         flex: none;
@@ -400,6 +438,9 @@
       /* Whatever is in hand, marked in the list, so the strip at the bottom of
          the screen and the pack never disagree about what you are holding. */
       .card.in-hand { box-shadow: inset 3px 0 0 var(--warm); }
+      /* Worn reads as a state on the badge rather than another bar down the
+         side, so a thing that is both in hand and worn stays legible. */
+      .card.equipped .card-mode { color: var(--warm); }
 
       /* Right of the name: use mode, bench slot, and the control that takes the
          thing in hand. All small, all optional, none of them reflow the row. */
@@ -695,6 +736,20 @@
         <div class="inv-count" id="inv-count">Nothing yet</div>
       </header>
       <div class="rule"></div>
+
+      <!--
+        The equipment view. Every slot, always, whether or not anything is in
+        it, because the empty ones are how a player learns what kinds of thing
+        can be worn at all. Deliberately not a tab and not a third panel: worn
+        is a passive state, so it should be readable without being asked for.
+      -->
+      <div id="worn">
+        <div class="worn-head">
+          <span class="worn-title">Worn</span>
+          <span class="worn-count" id="worn-count">Nothing</span>
+        </div>
+        <div class="worn-slots" id="worn-slots"></div>
+      </div>
 
       <div id="filter-bar">
         <button id="filter-toggle" type="button" aria-expanded="false">

@@ -18,7 +18,7 @@
  *     ?debug=1 or F3; see `mountDebug` below.
  */
 
-import { useOf, type ItemDef, type Use } from '../items/catalog'
+import { CATALOG, useOf, type ItemDef, type Use, type WearSlot } from '../items/catalog'
 import { landingOf } from '../items/interactions'
 import { canMerge, isDiscovered, mergeId, refusal, tryMerge } from '../items/merge'
 import { itemIcon } from '../render/icons'
@@ -103,6 +103,22 @@ const MODES: Record<Use['mode'], { label: string; blurb: string; key?: string; v
  */
 const GLYPHED: Use['mode'][] = ['projected', 'panel', 'worn']
 
+/**
+ * Wear slots, in the order they are drawn, head down.
+ *
+ * The whole list is always on screen, not only the slots in use. One occupied
+ * slot and four empty ones is not a sparse equipment screen, it is the answer
+ * to "what kinds of thing can I wear", which is a question the player can
+ * otherwise only answer by finding one.
+ */
+const SLOTS: { id: WearSlot; label: string }[] = [
+  { id: 'head', label: 'Head' },
+  { id: 'eyes', label: 'Eyes' },
+  { id: 'body', label: 'Body' },
+  { id: 'hands', label: 'Hands' },
+  { id: 'feet', label: 'Feet' },
+]
+
 /** A live notice box. `label` is kept so a repeat can be told from a sequel. */
 interface Notice {
   node: HTMLElement
@@ -127,6 +143,13 @@ const GROUPS: { id: string; label: string }[] = [
 export interface UiHooks {
   onMerged: (result: ItemDef, a: ItemDef, b: ItemDef) => void
   onDropped: (def: ItemDef) => void
+  /**
+   * Put on the worn item with this id.
+   *
+   * `main.ts` owns the equipped map, because wearing changes what the world
+   * does and the world lives there. The pack only asks.
+   */
+  onEquip?: (itemId: string) => void
   /**
    * Put the pack item at `index` in hand.
    *
@@ -160,6 +183,10 @@ export class Ui {
   private heldIndex: number | null = null
   /** What the strip is currently showing, so a frame loop does not rebuild it. */
   private heldKey: string | null = null
+  /** Slot to item id, mirrored from `worn()`. `main.ts` owns the real map. */
+  private equipped = new Map<string, string>()
+  /** Signature of the equipment strip on screen, so a frame loop does not rebuild it. */
+  private wornKey = ''
 
   /** In-flight card drag. See `dragStart`. */
   private drag: {
@@ -197,6 +224,9 @@ export class Ui {
     })
     $('items').addEventListener('scroll', () => this.syncFade())
 
+    // Draw the empty sockets straight away. They are the answer to "what can be
+    // worn", which is worth having before anything has been worn.
+    this.renderWorn()
     this.render()
   }
 
@@ -598,6 +628,62 @@ export class Ui {
     return box
   }
 
+  // ---------------------------------------------------------------- equipment
+
+  /**
+   * What is being worn, pushed in from `main.ts`, which owns the map.
+   *
+   * Worn is A11's one passive mode: it changes what other things do without
+   * being invoked. So the interface owes the player an obvious STATE and a rare
+   * ACTION, not an equipment screen. That is the whole design here. A strip of
+   * slots at the top of the pack answers "what am I wearing" without being
+   * asked, and putting something on is one click on its card.
+   *
+   * Called from a frame loop, so it rebuilds only when something changed.
+   */
+  worn(equipped: ReadonlyMap<string, string>): void {
+    const key = SLOTS.map((s) => `${s.id}:${equipped.get(s.id) ?? ''}`).join('|')
+    if (key === this.wornKey) return
+    this.wornKey = key
+
+    this.equipped = new Map(equipped)
+    this.renderWorn()
+    // Card badges and the Equip control read from the same map.
+    this.render()
+  }
+
+  private renderWorn(): void {
+    const host = $('worn-slots')
+    host.replaceChildren()
+
+    for (const slot of SLOTS) {
+      const id = this.equipped.get(slot.id)
+      const def = id ? CATALOG[id] : undefined
+
+      const tile = el('div', 'worn-slot' + (def ? ' filled' : ''))
+      tile.title = def ? `${def.name}, worn on the ${slot.label.toLowerCase()}` : `Nothing on the ${slot.label.toLowerCase()}`
+
+      const well = el('div', 'worn-well')
+      if (def) {
+        const icon = el('img')
+        icon.src = itemIcon(def)
+        icon.alt = ''
+        well.append(icon)
+      }
+      tile.append(well, el('div', 'worn-label', def ? def.name : slot.label))
+      host.append(tile)
+    }
+
+    const count = this.equipped.size
+    $('worn-count').textContent = count === 0 ? 'Nothing' : `${count} worn`
+  }
+
+  /** True when this exact item is currently on. */
+  private isWorn(def: ItemDef): boolean {
+    const use = useOf(def)
+    return use.mode === 'worn' && this.equipped.get(use.slot) === def.id
+  }
+
   /** The 12x12 use-mode glyph, as an inline SVG so it inherits text colour. */
   private modeGlyph(mode: Use['mode']): HTMLElement {
     const box = el('span', 'glyph')
@@ -644,13 +730,31 @@ export class Ui {
 
     const actions = el('div', 'card-actions')
     const mode = useOf(def).mode
+    const worn = this.isWorn(def)
+    if (worn) card.classList.add('equipped')
+
     if (GLYPHED.includes(mode)) {
       const badge = this.modeGlyph(mode)
       badge.classList.add('card-mode')
-      badge.append(el('span', undefined, MODES[mode].label))
+      // Same badge, two readings: dim it is the mode, warm it is the state.
+      badge.append(el('span', undefined, worn ? 'On' : MODES[mode].label))
       actions.append(badge)
     }
     if (picked) actions.append(el('div', 'card-slot', String(picked)))
+
+    // Wearing is one click from the list. Making the player select the item and
+    // then press use was ceremony for a thing you do once and forget.
+    if (mode === 'worn' && !worn && this.hooks.onEquip) {
+      const equip = el('button', 'card-hold', 'Equip')
+      equip.type = 'button'
+      equip.title = `Put on the ${def.name}`
+      equip.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.hooks.onEquip!(def.id)
+      })
+      actions.append(equip)
+    }
+
     if (this.hooks.onHold) {
       const hold = el('button', 'card-hold', 'Hold')
       hold.type = 'button'

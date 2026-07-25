@@ -114,6 +114,15 @@ void main() {
   float screenPx = uHeight * pxPerWorld;
   float widthPx = clamp( screenPx * 0.017, 1.0, 3.0 );
 
+  // Below about six pixels tall, no outline at all.
+  //
+  // A one-pixel minimum is right for a torso and wrong for a face: an eye three
+  // pixels across with a pixel of border on each side is entirely border. The
+  // floor that keeps a small object readable is the same floor that erases a
+  // small FEATURE, so features have to fall off it. The ramp is well under the
+  // size of any item that has to be findable lying on the ground.
+  widthPx *= smoothstep( 5.0, 9.0, screenPx );
+
   mvPosition.xyz += normalize( normalMatrix * aSmoothNormal ) * ( widthPx / pxPerWorld );
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>

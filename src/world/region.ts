@@ -181,6 +181,41 @@ export interface Region {
 }
 
 /**
+ * Where the gate ends and the palisade begins.
+ *
+ * Exported as data, and derived from one number, because the two used to be
+ * laid down independently: the run started at +-1.5 and the gate pillars stand
+ * at +-1.35 with a 0.45 radius, so the first post on each side was buried
+ * whole inside a pillar. Invisible, destructible, and — because `fail` strips
+ * a felled thing's blocker — the pillar's collision was coming from it. Chop a
+ * post nobody can see and you open a hole through a pillar still standing.
+ *
+ * That is the general hazard rather than one bad number: where two structures
+ * overlap, one may be silently providing the other's collision, and any
+ * destructible thing standing in for a permanent one is a hole waiting to be
+ * opened. Hence the test.
+ */
+export const PALISADE = {
+  /** Half-width of the gate, and the radius of its blocker. */
+  gateHalf: 1.9,
+  /** Blocker radius of one post. */
+  postRadius: 0.62,
+  /** Visual radius of one post. */
+  postGirth: 0.36,
+  /** Radius of a gate pillar, which stands at +-1.35. */
+  pillarRadius: 0.45,
+  pillarAt: 1.35,
+  /** Post centres, outward from the gate on both sides. */
+  posts(): number[] {
+    const out: number[] = []
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 6; i++) out.push(side * (this.gateHalf + 0.38 + i * 0.76))
+    }
+    return out
+  },
+} as const
+
+/**
  * How world-up projects under this rig: a point `u` metres above something is
  * `0.816u` higher on screen AND `0.577u` nearer the camera. Both at once, which
  * is precisely what the first version of the occlusion test got wrong.
@@ -1456,11 +1491,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * was still standing. Authored together now: GATE_HALF is the one number
    * both the gate and the run are measured from.
    */
-  const GATE_HALF = 1.9
-  const postX: number[] = []
-  for (let side = -1; side <= 1; side += 2) {
-    for (let i = 0; i < 6; i++) postX.push(side * (GATE_HALF + 0.38 + i * 0.76))
-  }
+  const GATE_HALF = PALISADE.gateHalf
+  const postX: number[] = PALISADE.posts()
 
   for (const x of postX) {
     const z = PAL_Z + palRng.range(-0.16, 0.16)
@@ -1493,7 +1525,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       label: 'Palisade',
       props: { WOODEN: 0.95, FLAMMABLE: 0.62, RIGID: 0.9, HEAVY: 0.7 },
       structure: { hp: 82, maxHp: 82, height, label: 'Palisade' },
-      blocker: { radius: 0.62 },
+      blocker: { radius: PALISADE.postRadius },
     })
   }
 

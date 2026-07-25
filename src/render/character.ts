@@ -107,8 +107,16 @@ const HUE = {
   legs: 0x241d16,
   /** The pack. Dark, because it sits behind the head and must not compete. */
   pack: 0x5a4630,
-  /** The face. A hole, not a face. */
-  recess: 0x141014,
+  /**
+   * The face. Mid, so it separates from the hood without leaving the head's
+   * light band: the head has to stay one light mass at a distance and only
+   * resolve into a face when you look at it.
+   */
+  face: 0xc9a078,
+  /** Eyes. Two pixels, and the entire face. */
+  eye: 0x18131a,
+  /** Lenses. Bright, so worn glasses flip the eye band from dark to light. */
+  lens: 0xd7ecf2,
 } as const
 
 /** Hip height, and the origin of both the pelvis and the chest. */
@@ -229,6 +237,8 @@ export class Character {
   private readonly pack = new THREE.Group()
   private readonly legs: Leg[] = []
   private readonly arms: Arm[] = []
+  /** Worn item id to the geometry that shows it. See `setEquipment`. */
+  private readonly worn = new Map<string, THREE.Object3D>()
 
   /** Accumulated animation time. Drives everything the walk does not. */
   private t = 0
@@ -352,12 +362,42 @@ export class Character {
     hood.position.set(0, 0.19, -0.04)
     this.head.add(hood)
 
-    // No eyes, no face wrap. Both were about two pixels and read as dirt. A
-    // dark hole under the crown is all the face this size can carry, and it is
-    // the only thing that says which way the character is pointed.
-    const recess = box(0.24, 0.2, 0.06, HUE.recess)
-    recess.position.set(0, 0.15, 0.15)
-    this.head.add(recess)
+    /**
+     * The face.
+     *
+     * At 26x45 a face cannot be features. It is a small mid-value plate with
+     * two dark pixels on it, and that is the whole design: anything more turns
+     * into noise, and noise inside an outline turns into a smear.
+     *
+     * The plate stands proud of the hood front rather than sitting in a recess.
+     * A recess was tried first and it read as shadow, not as a face, which is
+     * the trap the brief names: the front of the character faces away from the
+     * sun at every camera angle, so anything set back into the hood is simply
+     * dark. Standing it forward puts it on its own lit plane.
+     */
+    const face = box(0.21, 0.14, 0.06, HUE.face)
+    face.position.set(0, 0.13, 0.16)
+    this.head.add(face)
+
+    for (const side of [-1, 1] as const) {
+      const eye = box(0.05, 0.05, 0.04, HUE.eye)
+      eye.position.set(side * 0.052, 0.145, 0.185)
+      this.head.add(eye)
+    }
+
+    /**
+     * Worn spectacles: one bright bar across the eye band, wide enough and
+     * proud enough to cover both eyes.
+     *
+     * Two light lenses on a light face would not read at this size. Replacing
+     * two dark pixels with one light bar is a change of sign rather than a
+     * change of detail, and that is legible at a glance, which is the test.
+     */
+    const lenses = box(0.19, 0.06, 0.03, HUE.lens)
+    lenses.position.set(0, 0.145, 0.2)
+    lenses.visible = false
+    this.head.add(lenses)
+    this.worn.set('glasses', lenses)
   }
 
   private buildCloth(): void {
@@ -404,6 +444,22 @@ export class Character {
     const sack = bevel(0.32, 0.38, 0.24, HUE.pack, 0.92)
     sack.position.y = 0.16
     this.pack.add(sack)
+  }
+
+  /**
+   * Show whatever is currently worn.
+   *
+   * Takes main.ts's `equipped` map straight, so the caller keeps no extra
+   * bookkeeping and can call this every frame: it walks a two-entry table, not
+   * the map. Keyed on item id rather than on slot, because a future second
+   * item in the same slot must not inherit this one's geometry.
+   */
+  setEquipment(equipped: ReadonlyMap<string, string>): void {
+    for (const [id, obj] of this.worn) obj.visible = false
+    for (const id of equipped.values()) {
+      const obj = this.worn.get(id)
+      if (obj) obj.visible = true
+    }
   }
 
   /**
