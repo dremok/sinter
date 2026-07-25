@@ -269,3 +269,30 @@ Every run starts from the same home: a hut, a hearth, a fence, a few familiar fa
 Why it earns its place, given D4 says the world regenerates completely on death: home is the fixed point that makes distance mean something. "Three regions out" is only a meaningful statement if there is a somewhere to be out from. It also gives the tutorial band a natural shape, gives NPCs a place to be found again, and gives a returning player something recognisable after a run ends.
 
 Open question, deliberately unresolved: whether home itself is generated from the run seed or is hand-authored and identical every time. Hand-authored is better for recognition and worse for replay. Leaning hand-authored for the layout with generated detail on top.
+
+
+---
+
+## D22: the world must stay procedurally generable
+**Date:** 2026-07-26
+
+Max's constraint, and it is a constraint on how we build rather than a feature.
+
+The world is hand-laid right now, and that is correct: at this size an authored clearing beats a generated one, and D21's home is deliberately recognisable. It will eventually be procedural. The rule is that nothing we build in between may make that impossible.
+
+**What that forbids:**
+
+- Hardcoded coordinates outside the generator. If `main.ts` or a system knows that the palisade is at z = -8, generation can never move it. Positions are generator output, and everything else asks.
+- Obstacles that only work at one location. An obstacle is facts plus properties; if it needs a specific hill behind it to be solvable, it is a set piece, not a system.
+- Authored interactions keyed to a place. D17 lets an item have a specific effect on a specific *kind* of thing. Keying one to a specific instance in a specific region does not survive generation.
+- Item placement by literal coordinate, long term. The current hand-placed layout is a legitimate shortcut, but it must stay a table the generator can replace, not spread into the code.
+- Anything that assumes exactly one region, one home, or one way out.
+
+**What it requires:**
+
+- Everything spatial comes from the seeded Rng, through forks, so a region is reproducible from a seed alone (already true).
+- Placement obeys stated rules rather than taste: "the water source is between home and the obstacle", "the tree line encloses the play area", "items are reachable without crossing the obstacle". A generator can satisfy a rule. It cannot satisfy an intention nobody wrote down.
+- Regions expose their meaning, not just their geometry: where home is, where the exits are, what the obstacle is, what solves it. Systems ask the region rather than knowing the map.
+- Validation. A generated region that cannot be completed is worse than a boring one, so generation needs a solvability check, which is why the reachability test in `merge.test.ts` computes what is obtainable rather than listing it.
+
+**And the corollary Max stated:** when a new feature makes the world feel too small, that is the signal to expand the world, not to shrink the feature. The region was cut from 120x120 to a clearing because the large one was empty; it grows again when there is something to fill it with. Vehicles (A10) are the clearest example: they need distance, and the answer is multi-region travel rather than an inflated clearing.

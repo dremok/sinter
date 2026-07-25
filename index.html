@@ -123,9 +123,9 @@
        * rather than sitting in the frame shouting no.
        */
       #prompt:has(.muted) {
-        background: rgba(14, 11, 9, 0.4);
+        background: rgba(14, 11, 9, 0.55);
         box-shadow: none;
-        opacity: 0.5;
+        opacity: 0.62;
       }
       #prompt:has(.muted) b { font-weight: 400; color: var(--ink-2); }
 
@@ -248,7 +248,9 @@
       #filter-clear[hidden] { display: none; }
 
       #filters {
-        padding: 2px 22px 14px; max-height: 42vh; overflow-y: auto;
+        padding: 12px 22px 14px; margin: 0 12px; max-height: 42vh; overflow-y: auto;
+        background: linear-gradient(rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0));
+        box-shadow: inset 0 -1px 0 rgba(240, 220, 190, 0.07);
       }
       #filters[hidden] { display: none; }
       .fgroup { margin-bottom: 11px; }
@@ -331,10 +333,10 @@
       .card-traits { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
       .trait {
         display: inline-flex; align-items: center; gap: 5px;
-        padding: 3px 6px; border-radius: 2px;
-        background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+        padding: 3.5px 6px; border-radius: 2px;
+        background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.32);
         font: 500 8.5px/1 var(--ui); letter-spacing: 0.1em; text-transform: uppercase;
-        color: var(--ink-2);
+        color: #d3c8b2;
       }
       /*
        * Pips, not floats. "FLAMMABLE 1.00" is a debug print; four pips say
@@ -374,6 +376,12 @@
       .slot span {
         font: 400 11px/1.15 var(--display); color: var(--ink);
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+      }
+      /* A ghost tile the size of an item icon. Says "something goes here"
+         without a third copy of the word "empty". */
+      .slot:not(.filled)::after {
+        content: ''; width: 22px; height: 22px; border-radius: 2px;
+        border: 1px dashed rgba(232, 224, 208, 0.18);
       }
       .slot.filled {
         border: 1px solid rgba(224, 163, 92, 0.45);

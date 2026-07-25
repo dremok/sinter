@@ -55,7 +55,7 @@ const FLAME = new THREE.Color(BAND0.flame)
 /** The deep base of the fire and the near-white core, both derived from the
  *  palette rather than invented, so a band retint carries through. */
 const DEEP = EMBER.clone().lerp(new THREE.Color(0x8c1e05), 0.55)
-const CORE = FLAME.clone().lerp(new THREE.Color(0xffffff), 0.55)
+const CORE = FLAME.clone().lerp(new THREE.Color(0xffffff), 0.28)
 
 interface TongueSpec {
   color: THREE.Color
@@ -73,8 +73,8 @@ const TONGUES: readonly TongueSpec[] = [
   { color: DEEP, height: 0.86, width: 1.05, angle: 0.0, radius: 0.17, rate: 7 },
   { color: EMBER, height: 0.94, width: 0.92, angle: 2.09, radius: 0.16, rate: 11 },
   { color: EMBER, height: 0.8, width: 0.86, angle: 4.19, radius: 0.18, rate: 9 },
-  { color: FLAME, height: 1.02, width: 0.6, angle: 0.0, radius: 0.0, rate: 14 },
-  { color: CORE, height: 1.3, width: 0.3, angle: 0.0, radius: 0.0, rate: 19 },
+  { color: FLAME, height: 1.04, width: 0.68, angle: 0.0, radius: 0.0, rate: 14 },
+  { color: CORE, height: 1.18, width: 0.46, angle: 0.0, radius: 0.0, rate: 19 },
 ]
 
 const EMBERS = 14
@@ -167,7 +167,7 @@ class Particles {
 
 // -------------------------------------------------------------------- fire
 
-const SMOKE_COLOR = new THREE.Color(0x4a4038)
+const SMOKE_COLOR = new THREE.Color(0x6b6058)
 const scratchColor = new THREE.Color()
 
 export class Flame {
@@ -264,7 +264,7 @@ export class Flame {
     if (light) {
       const pulse = 0.76 + hash01(Math.floor(t * 5) + this.seed) * 0.3
       this.light.position.y = size * heat * 0.5
-      this.light.intensity = heat * heat * 16 * pulse * size
+      this.light.intensity = heat * heat * 12 * pulse * size
       this.light.distance = 3 + heat * size * 5.5
       this.light.color.copy(EMBER).lerp(FLAME, pulse * 0.45)
     }
@@ -285,8 +285,8 @@ export class Flame {
 
       // Additive, so fading the colour to black fades the ember out. Cheaper
       // than a per-particle alpha ramp and it cools toward red on the way.
-      const fade = (1 - k) * (1 - k) * heat
-      scratchColor.copy(FLAME).lerp(DEEP, k)
+      const fade = (1 - k) * (1 - k) * heat * 0.75
+      scratchColor.copy(EMBER).lerp(DEEP, k * 0.8)
 
       this.embers.set(
         i,
@@ -314,7 +314,7 @@ export class Flame {
       const ang = b * Math.PI * 2
 
       // Fades in from the flame tip and out again, so it never pops.
-      const alpha = Math.min(k * 4, 1) * (1 - k) * 0.34 * heat
+      const alpha = Math.min(k * 4, 1) * (1 - k) * 0.46 * heat
 
       this.smoke.set(
         i,
