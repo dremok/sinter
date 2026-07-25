@@ -216,7 +216,7 @@ add({
   props: { WOODEN: 0.6, CLOTH: 0.3, FLAMMABLE: 1, RIGID: 0.45 },
   parts: [
     { part: 'haft_short', scale: [1, 1, 1], at: [0, -0.26, 0], material: 'wood' },
-    { part: 'torch_head', scale: [1.15, 1.15, 1.15], at: [0, 0.2, 0], material: 'cloth' },
+    { part: 'torch_head', scale: [1.15, 1.15, 1.15], at: [0, 0.2, 0], material: 'cloth', signature: true },
   ],
 })
 
@@ -255,7 +255,7 @@ add({
   desc: 'Six feet of hemp, frayed at one end.',
   props: { CLOTH: 0.5, ROPE_LIKE: 1, FLAMMABLE: 0.5 },
   parts: [
-    { part: 'rope_coil', scale: [1, 1, 1], at: [0, -0.04, 0], material: 'cloth' },
+    { part: 'rope_coil', scale: [1, 1, 1], at: [0, -0.04, 0], material: 'cloth', signature: true },
     { part: 'rope_coil', scale: [0.82, 0.82, 0.82], at: [0.02, 0.06, 0.01], rot: [0.25, 0.5, 0], material: 'cloth' },
   ],
 })
@@ -291,7 +291,7 @@ add({
   props: { METAL: 0.75, WOODEN: 0.3, SHARP: 0.85, TOOL_CUTTING: 0.8, RIGID: 0.8, HEAVY: 0.4 },
   parts: [
     { part: 'haft_long', scale: [1, 1, 1], at: [0, -0.46, 0], material: 'wood' },
-    { part: 'blade_axe', scale: [1.15, 1.15, 1.15], at: [0.09, 0.32, 0], rot: [0, 0, -0.16], material: 'steel' },
+    { part: 'blade_axe', scale: [1.15, 1.15, 1.15], at: [0.09, 0.32, 0], rot: [0, 0, -0.16], material: 'steel', signature: true },
   ],
 })
 
@@ -340,7 +340,7 @@ add({
   desc: 'Catches from a spark. Gone in seconds.',
   props: { PLANT: 0.9, FLAMMABLE: 1, BUOYANT: 0.4 },
   parts: [
-    { part: 'straw_bale', scale: [1.25, 1.25, 1.25], at: [0, -0.14, 0], material: 'straw' },
+    { part: 'straw_bale', scale: [1.25, 1.25, 1.25], at: [0, -0.14, 0], material: 'straw', signature: true },
     { part: 'ring_band', scale: [0.9, 1, 0.9], at: [0, 0.02, 0], rot: [0, 0, 1.57], material: 'cloth' },
   ],
 })
@@ -375,7 +375,9 @@ add({
   // day those land.
   parts: [
     { part: 'apple_body', scale: [1.15, 1.15, 1.15], at: [0, -0.11, 0], material: 'clay', signature: true },
-    { part: 'nail_spike', scale: [0.5, 0.45, 0.5], at: [0, 0.09, 0], material: 'wood' },
+    // A woody stalk, not a nail. An apple has a bare stalk in a well, so the
+    // five-point calyx the chili wears would read as a tomato here.
+    { part: 'stalk_short', scale: [1, 1, 1], at: [0, 0.085, 0], material: 'wood' },
   ],
 })
 

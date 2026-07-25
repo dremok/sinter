@@ -57,6 +57,63 @@ function lumaBusyness(b: Bitmap): number {
   return sum / (w * h * 2) / 255
 }
 
+/**
+ * Mean HSV saturation and hue.
+ *
+ * Saturation is the axis Max complained about by name ("too harsh and too
+ * saturated, hurts my eyes"), and `palette.ts` budgets it by role: 30-40% for
+ * ground and terrain, 50-80% for items. So it belongs in the standing
+ * comparison rather than in a one-off script.
+ *
+ * Note what this can and cannot show for a baked tile. Every texel in one is a
+ * step of a ramp in `palette.ts`, which `bake:verify` checks, so a baked texture
+ * cannot be off-ramp. What it can be is unevenly *distributed* over its ramps:
+ * leaning on the light end, which is the most chromatic part of most ramps, or
+ * spending more of itself on an accent ramp than the code-drawn version does.
+ * That is a real difference and this is what measures it.
+ */
+function meanSaturation(b: Bitmap): { sat: number; hue: number } {
+  const n = b.width * b.height
+  let sat = 0
+  let hx = 0
+  let hy = 0
+  for (let i = 0; i < n; i++) {
+    const r = b.data[i * 4]! / 255
+    const g = b.data[i * 4 + 1]! / 255
+    const bl = b.data[i * 4 + 2]! / 255
+    const max = Math.max(r, g, bl)
+    const min = Math.min(r, g, bl)
+    const d = max - min
+    sat += max === 0 ? 0 : d / max
+    if (d > 0) {
+      let h: number
+      if (max === r) h = ((g - bl) / d) % 6
+      else if (max === g) h = (bl - r) / d + 2
+      else h = (r - g) / d + 4
+      const rad = (h * 60 * Math.PI) / 180
+      // Averaged as a vector, since hue wraps and a plain mean of 350 and 10 is 180.
+      hx += Math.cos(rad) * d
+      hy += Math.sin(rad) * d
+    }
+  }
+  let hue = (Math.atan2(hy, hx) * 180) / Math.PI
+  if (hue < 0) hue += 360
+  return { sat: sat / n, hue }
+}
+
+/** How the tile spends itself across a palette, as a share per entry. */
+function paletteHistogram(b: Bitmap, palette: readonly string[]): number[] {
+  const index = new Map(palette.map((h, i) => [parseInt(h.slice(1), 16), i]))
+  const counts = new Array(palette.length).fill(0) as number[]
+  const n = b.width * b.height
+  for (let i = 0; i < n; i++) {
+    const key = (b.data[i * 4]! << 16) | (b.data[i * 4 + 1]! << 8) | b.data[i * 4 + 2]!
+    const at = index.get(key)
+    if (at !== undefined) counts[at]!++
+  }
+  return counts.map((c) => c / n)
+}
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const PORT = 5201
 

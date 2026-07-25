@@ -303,6 +303,66 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   ): void => {
     world.add({ transform: { pos: at, ry: 0 }, mesh, label, props, blocker: { radius } })
   }
+
+  /** Radius of one collision segment, and how far apart their centres sit. */
+  const SEG_R = 0.55
+  const SEG_STEP = 0.95
+
+  /**
+   * A rectangular thing, blocked with a run of overlapping circles round its
+   * footprint instead of one circle at its middle.
+   *
+   * A circle cannot be a rectangle. Small enough not to bulge past the short
+   * walls and it never reaches the ends of the long ones; big enough to cover
+   * the length and it stops people well outside the corners. Either way there
+   * are gaps, and the barn, being the longest building, failed worst: you could
+   * walk in through the middle of a wall.
+   *
+   * Same answer as the one already used for long standables. Centres sit
+   * `SEG_STEP` apart with radius `SEG_R`, so neighbours overlap by 0.15 before
+   * the player's own radius is counted, and nothing can squeeze between them.
+   * Only the perimeter is covered: nothing can reach the inside without
+   * crossing the edge first, and filling the middle would triple the count for
+   * no gain.
+   */
+  function solidFootprint(
+    mesh: THREE.Object3D,
+    cx: number,
+    cz: number,
+    w: number,
+    dep: number,
+    turn: number,
+    y: number,
+    label: string,
+    props: Entity['props'],
+  ): void {
+    const nx = Math.max(2, Math.ceil(w / SEG_STEP))
+    const nz = Math.max(2, Math.ceil(dep / SEG_STEP))
+    const local: [number, number][] = []
+
+    for (let i = 0; i <= nx; i++) {
+      const lx = -w / 2 + (i / nx) * w
+      local.push([lx, -dep / 2], [lx, dep / 2])
+    }
+    for (let j = 1; j < nz; j++) {
+      const lz = -dep / 2 + (j / nz) * dep
+      local.push([-w / 2, lz], [w / 2, lz])
+    }
+
+    const c = Math.cos(turn)
+    const s = Math.sin(turn)
+    for (const [lx, lz] of local) {
+      const x = cx + lx * c + lz * s
+      const z = cz - lx * s + lz * c
+      world.add({
+        transform: { pos: new THREE.Vector3(x, y, z), ry: 0 },
+        mesh,
+        label,
+        props,
+        blocker: { radius: SEG_R },
+      })
+    }
+  }
   const occluder = (
     object: THREE.Object3D,
     radius: number,
@@ -1404,7 +1464,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   for (const side of [-1, 1]) {
     let x = side * 6.9
     while (Math.abs(x) < 29.5) {
-      const z = PAL_Z + palRng.range(-1.1, 1.1)
+      const z = PAL_Z + palRng.range(-0.4, 0.4)
       const h = heightAt(x, z)
       const s = palRng.range(1.35, 2.15)
 
@@ -1438,7 +1498,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         group.add(small)
       }
 
-      x += side * palRng.range(1.35, 1.75)
+      x += side * palRng.range(1.3, 1.65)
     }
   }
 
@@ -1776,12 +1836,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     group.add(g)
     occluders.push(occluder(g, Math.max(w, dep) * 0.62, ridge + 0.9, true))
 
-    world.add({
-      transform: { pos: new THREE.Vector3(x, h + 0.9, z), ry: turn },
-      mesh: g,
-      label: 'Home',
-      props: { WOODEN: 0.8, FLAMMABLE: 0.3, RIGID: 0.9 },
-      blocker: { radius: Math.max(w, dep) * 0.6 },
+    solidFootprint(g, x, z, w, dep, turn, h + 0.9, 'Home', {
+      WOODEN: 0.8,
+      FLAMMABLE: 0.3,
+      RIGID: 0.9,
     })
   }
 
@@ -1867,12 +1925,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     group.add(g)
     occluders.push(occluder(g, Math.max(w, dep) * 0.5, ridge + 0.3, true))
 
-    world.add({
-      transform: { pos: new THREE.Vector3(x, h + 0.8, z), ry: turn },
-      mesh: g,
-      label: 'The shed',
-      props: { WOODEN: 0.9, FLAMMABLE: 0.45, RIGID: 0.8 },
-      blocker: { radius: Math.max(w, dep) * 0.5 },
+    solidFootprint(g, x, z, w, dep, turn, h + 0.8, 'The shed', {
+      WOODEN: 0.9,
+      FLAMMABLE: 0.45,
+      RIGID: 0.8,
     })
   }
 
@@ -2479,7 +2535,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       g.position.set(x, h, z)
       g.rotation.y = 0.9
       group.add(g)
-      solid(g, new THREE.Vector3(x, h + 0.5, z), 'Handcart', { WOODEN: 0.9, FLAMMABLE: 0.5, PLATFORM: 0.5, RIGID: 0.7 }, 0.85)
+      solidFootprint(g, x, z, 2.4, 1.0, 0.9, h + 0.5, 'Handcart', {
+        WOODEN: 0.9,
+        FLAMMABLE: 0.5,
+        PLATFORM: 0.5,
+        RIGID: 0.7,
+      })
     }
   }
 
@@ -2588,7 +2649,11 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.rotation.y = -0.3
     group.add(g)
     occluders.push(occluder(g, 1.2, 2.3, true))
-    solid(g, new THREE.Vector3(sx, h + 1, sz), 'The store', { WOODEN: 0.9, FLAMMABLE: 0.5, RIGID: 0.8 }, 1.05)
+    solidFootprint(g, sx, sz, 1.9, 1.3, -0.3, h + 1, 'The store', {
+      WOODEN: 0.9,
+      FLAMMABLE: 0.5,
+      RIGID: 0.8,
+    })
   }
 
   /**
@@ -2894,7 +2959,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.rotation.y = -0.22
     group.add(g)
     occluders.push(occluder(g, 2.4, ridge + 0.4, true))
-    solid(g, new THREE.Vector3(MILL.x, h + 1.5, MILL.z - 3.0), 'The mill', { WOODEN: 0.6, STONE: 0.5, FLAMMABLE: 0.35, RIGID: 0.9 }, 2.3)
+    solidFootprint(g, MILL.x, MILL.z - 3.0, 4.4, 3.6, -0.22, h + 1.5, 'The mill', {
+      WOODEN: 0.6,
+      STONE: 0.5,
+      FLAMMABLE: 0.35,
+      RIGID: 0.9,
+    })
 
     // The wheel, standing in the water where the brook actually runs.
     const wheelY = heightAt(MILL.x - 0.5, MILL.z - 0.9) + BROOK_D * 0.52 + 0.6
@@ -3109,7 +3179,11 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.rotation.y = 0.34
     group.add(g)
     occluders.push(occluder(g, 3.4, ridge + 0.4, true))
-    solid(g, new THREE.Vector3(BARN.x, h + 1.5, BARN.z), 'The barn', { WOODEN: 0.9, FLAMMABLE: 0.5, RIGID: 0.85 }, 3.1)
+    solidFootprint(g, BARN.x, BARN.z, w, dep, 0.34, h + 1.5, 'The barn', {
+      WOODEN: 0.9,
+      FLAMMABLE: 0.5,
+      RIGID: 0.85,
+    })
 
     // Bales stacked against the gable, and a cart shaft leaning on them.
     for (const [dx, dz, dy] of [

@@ -106,10 +106,16 @@ void RE_Direct_Toon( const in IncidentLight directLight, const in vec3 geometryP
 	reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );
 
 	float grazing = 1.0 - abs( dot( geometryNormal, geometryViewDir ) );
-	float rim = smoothstep( 0.46, 0.72, grazing );
+	float rim = smoothstep( 0.62, 0.80, grazing );
 	float away = 1.0 - smoothstep( -0.15, 0.45, dot( geometryNormal, directLight.direction ) );
 
-	reflectedLight.directDiffuse += directLight.color * rim * away * 0.26;
+	// Warm, narrow and weak. At 0.26 and half this width it ran the full length
+	// of every edge and picked up the cool fill as well as the key, which on a
+	// tree reads as a chrome strip down wet plastic rather than as sun catching
+	// matte foliage. The explicit warm tint is what stops the fill's blue from
+	// turning it cyan; a rim that takes its hue straight from whichever light
+	// happens to be grazing is not a rim, it is a specular.
+	reflectedLight.directDiffuse += directLight.color * rim * away * 0.11 * vec3( 1.0, 0.82, 0.6 );
 
 }
 
@@ -318,7 +324,7 @@ void main() {
    * completely different problems. This lifts the second without touching the
    * first.
    */
-  c *= 1.33;
+  c *= 1.48;
 
   // Highlight shoulder, in linear light, driven by the brightest channel and
   // applied to all three equally.
@@ -352,8 +358,8 @@ void main() {
     // Then lift the black point off zero. p1 had reached 1: the darkest percent
   // of the frame was pure black, where the baseline sat at 23. Shadow with no
   // information in it is a hole, not a shadow.
-  c = ( c - 0.40 ) * 1.30 + 0.45;
-  c = clamp( c * 0.94 + 0.05, 0.0, 1.0 );
+  c = ( c - 0.40 ) * 1.28 + 0.455;
+  c = clamp( c * 0.93 + 0.065, 0.0, 1.0 );
   float g = dot( c, LUMA );
   c = clamp( mix( vec3( g ), c, mix( 0.82, 1.22, smoothstep( 0.04, 0.58, l ) ) ), 0.0, 1.0 );
 
@@ -365,8 +371,8 @@ void main() {
   // the depth across the frame is only about twenty metres. This is the same
   // trick a painter uses when the horizon is out of shot.
   float far = smoothstep( 0.74, 1.0, vUv.y );
-  vec3 distant = mix( vec3( dot( c, LUMA ) ), c, 0.62 ) * vec3( 0.88, 0.92, 1.02 );
-  c = mix( c, distant, far * 0.18 );
+  vec3 distant = mix( vec3( dot( c, LUMA ) ), c, 0.75 ) * vec3( 0.88, 0.92, 1.02 );
+  c = mix( c, distant, far * 0.14 );
 
   // Vignette, cool rather than black, so the corners read as air between the
   // camera and the far trees rather than as a lens.

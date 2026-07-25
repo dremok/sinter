@@ -137,8 +137,19 @@ varying vec2 vUv;
 
 void main() {
   float n = texture2D( uNoise, vec2( vUv.x * 1.3, vUv.y * 0.9 - uTime ) ).r;
-  if ( n < uCut + vUv.y * 0.42 ) discard;
-  gl_FragColor = vec4( uColor, 1.0 );
+
+  // Soft, not binary. A hard discard gave the flame a crisp cut edge, which is
+  // the one thing fire never has: it made the tongues read as orange paper
+  // whatever shape they were cut into. The cut still rises with height, so the
+  // tip shreds; it just stops being a stencil.
+  float a = smoothstep( uCut, uCut + 0.17, n - vUv.y * 0.42 );
+
+  // And the tip fades out regardless of the mask, because a flame does not end,
+  // it thins until it is not there.
+  a *= 1.0 - smoothstep( 0.5, 1.0, vUv.y );
+
+  if ( a < 0.02 ) discard;
+  gl_FragColor = vec4( uColor, a );
 }
 `
 
@@ -182,6 +193,8 @@ const tongueMaterials = TONGUES.map(
       vertexShader: TONGUE_VERT,
       fragmentShader: TONGUE_FRAG,
       side: THREE.DoubleSide,
+      transparent: true,
+      depthWrite: false,
     }),
 )
 
@@ -528,6 +541,10 @@ export class Flame {
       const spec = TONGUES[i]!
       const mat = tongueMaterials[i]!
       const mesh = new THREE.Mesh(TONGUE, mat)
+      // Explicit, because transparent objects sort by depth and every tongue in
+      // a cluster sits at the same depth: without this the core is as likely to
+      // be drawn under the outer lobes as over them, and it flickers between.
+      mesh.renderOrder = i
       mesh.userData.noShadow = true
       mesh.userData.noOutline = true
       mesh.onBeforeRender = () => {

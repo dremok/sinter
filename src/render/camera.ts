@@ -120,7 +120,7 @@ export class IsoCamera {
   fogRange(): { near: number; far: number } {
     return {
       near: this.distance + this.viewSize * 0.2,
-      far: this.distance + this.viewSize * 4.5,
+      far: this.distance + this.viewSize * 9.0,
     }
   }
 

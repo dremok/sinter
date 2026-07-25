@@ -557,18 +557,16 @@ describe('items do not look like each other', () => {
   }
 
   /**
-   * Known, being fixed in the parts library, and listed here so the check can
-   * be green without being a lie. Each of these is a real collision that needs
-   * geometry rather than data: a rock is currently a scaled-up flint, and a
-   * sword is a knife blade stretched to 2.35 times its length.
+   * Collisions that need geometry rather than data, waiting on the parts
+   * library, listed here so the check can be green without being a lie.
    *
-   * Remove an entry when its parts land. The test below fails if an entry stops
-   * colliding, so this list cannot rot into a pile of stale excuses.
+   * Empty as of the parts rebuild. It held `flint`/`rock` (one was a scaled-up
+   * copy of the other) and `knife`/`sword` (a knife blade stretched to 2.35
+   * times its length); `stone_lump`, `blade_sword`, `guard_cross` and
+   * `pommel_round` retired both. The test below fails if an entry stops
+   * colliding, which is what emptied this rather than anyone remembering to.
    */
-  const PENDING_REBUILD: [string, string][] = [
-    ['flint', 'rock'],
-    ['knife', 'sword'],
-  ]
+  const PENDING_REBUILD: [string, string][] = []
 
   const key = (a: string, b: string) => [a, b].sort().join('+')
   const pending = new Set(PENDING_REBUILD.map(([a, b]) => key(a, b)))

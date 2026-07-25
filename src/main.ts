@@ -89,7 +89,7 @@ iso.viewSize = 13
  *
  * Range comes from `IsoCamera.fogRange()`, never from absolute numbers. (D9)
  */
-const HAZE = new THREE.Color(BAND0.sky).lerp(new THREE.Color(0xf7e6cc), 0.14)
+const HAZE = new THREE.Color(BAND0.sky).lerp(new THREE.Color(0xf7e6cc), 0.05)
 scene.background = HAZE
 const fogRange = iso.fogRange()
 scene.fog = new THREE.Fog(HAZE, fogRange.near, fogRange.far)

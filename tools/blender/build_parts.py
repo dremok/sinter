@@ -1263,21 +1263,28 @@ def make_blade_sword():
     running up +Z. That is the attachment point, so a hilt assembles by stacking
     downward from zero and nothing needs a fudge offset.
 
-    The distal taper matters as much as the profile taper. The blade narrows
-    from 96 to nothing in width, but it also thins from 23mm to 6mm in
-    thickness, and the two together are why the point looks like it was ground
-    rather than snapped off.
+    The distal taper matters as much as the profile taper. The blade narrows in
+    width, but it also thins from 25mm to 6mm in thickness, and the two together
+    are why the point looks like it was ground rather than snapped off.
+
+    Width is 130mm at the shoulder, against `blade_knife` at 106. That gap is
+    deliberate and it is the reason it exists: the inventory camera fits every
+    item to its own tile, so a sword and a knife arrive at the same height on
+    screen no matter that one is a third longer in metres. Relative SIZE cannot
+    separate two items in that list. Only shape can, so the sword has to be
+    broader in proportion as well as carrying a crossguard, or the pair are two
+    grey slivers and picking the wrong one at the merge bench is permanent.
     """
     bm = bmesh.new()
     #      along,   z0,     z1,   half_t, fuller
     stations = [
-        (0.000, -0.050, 0.050, 0.0120, 0.0048),   # shoulder
-        (0.055, -0.049, 0.049, 0.0117, 0.0048),
-        (0.250, -0.046, 0.046, 0.0106, 0.0044),
-        (0.410, -0.042, 0.042, 0.0092, 0.0036),
-        (0.520, -0.035, 0.035, 0.0078, 0.0022),
-        (0.585, -0.025, 0.025, 0.0060, 0.0),      # the point begins
-        (0.625, -0.010, 0.010, 0.0034, 0.0),
+        (0.000, -0.065, 0.065, 0.0126, 0.0050),   # shoulder
+        (0.055, -0.064, 0.064, 0.0122, 0.0050),
+        (0.250, -0.059, 0.059, 0.0110, 0.0046),
+        (0.410, -0.053, 0.053, 0.0094, 0.0038),
+        (0.520, -0.044, 0.044, 0.0079, 0.0023),
+        (0.585, -0.031, 0.031, 0.0060, 0.0),      # the point begins
+        (0.625, -0.013, 0.013, 0.0034, 0.0),
         (0.648, -0.002, 0.002, 0.0011, 0.0),      # point
     ]
     bm_loft(bm, [sword_section(*s) for s in stations])
@@ -1745,14 +1752,18 @@ def make_scabbard_long():
     `blade_sword` at every station, which is what a sheath is.
     """
     bm = bmesh.new()
+    # Every station is wider than `blade_sword` at the same distance from the
+    # mouth. It has to be, and the numbers moved when the blade was broadened
+    # to separate it from the knife; a sheath narrower than its sword is the
+    # kind of thing nobody notices until the two are placed together.
     stations = [
-        (0.000, 0.024, -0.058, 0.058, 0.30),    # mouth
-        (-0.028, 0.027, -0.062, 0.062, 0.28),   # throat collar
-        (-0.062, 0.022, -0.055, 0.055, 0.30),
-        (-0.380, 0.019, -0.048, 0.048, 0.30),
-        (-0.580, 0.017, -0.040, 0.040, 0.32),
-        (-0.628, 0.021, -0.040, 0.040, 0.34),   # chape
-        (-0.672, 0.016, -0.028, 0.028, 0.55),
+        (0.000, 0.026, -0.074, 0.074, 0.30),    # mouth
+        (-0.028, 0.029, -0.078, 0.078, 0.28),   # throat collar
+        (-0.062, 0.024, -0.071, 0.071, 0.30),
+        (-0.380, 0.021, -0.061, 0.061, 0.30),
+        (-0.580, 0.018, -0.049, 0.049, 0.32),
+        (-0.628, 0.022, -0.048, 0.048, 0.34),   # chape
+        (-0.672, 0.017, -0.033, 0.033, 0.55),
     ]
     bm_loft(bm, [box_section(*s) for s in stations])
     bm_rot_x_up(bm)
