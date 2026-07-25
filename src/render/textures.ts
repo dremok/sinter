@@ -397,8 +397,8 @@ const LUSH: Ground = {
   size: GROUND,
   main: RAMP.grass,
   accent: RAMP.dryGrass,
-  base: 0.5,
-  span: 1.6,
+  base: 1.7,
+  span: 1.4,
   tuft: 1400,
   litter: 11000,
 }
@@ -407,8 +407,8 @@ const DRY: Ground = {
   size: GROUND_VARIANT,
   main: RAMP.dryGrass,
   accent: RAMP.straw,
-  base: 0.8,
-  span: 1.5,
+  base: 1.85,
+  span: 1.3,
   tuft: 2600,
   litter: 5000,
 }
@@ -417,8 +417,8 @@ const WORN: Ground = {
   size: GROUND_VARIANT,
   main: RAMP.dirt,
   accent: RAMP.dryGrass,
-  base: 0.7,
-  span: 1.4,
+  base: 1.7,
+  span: 1.2,
   tuft: 9000,
   litter: 2600,
 }

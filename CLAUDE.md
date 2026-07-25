@@ -104,6 +104,18 @@ npm run shot -- --at 0,-11 --pack axe,flint,torch --slots 0,1
 
 The last four exist only to make things reachable in a single headless frame; nothing in `src/` depends on them. Unknown flags are silently ignored rather than rejected, so a mistyped flag hands you a confident screenshot of the wrong thing. The harness also collects page and console errors and exits non-zero if there were any, which makes it a smoke test as well as a camera.
 
+### Check the case the player is actually in
+
+Two rules, both learned by shipping something bad.
+
+**Verify the COMMON case, not the case you were thinking about.** A depth-inverted silhouette pass was added so the player could be seen through walls. It was verified in exactly that situation, standing behind a building, where it worked. It was never checked standing in the open, which is where a player spends almost all of their time, and there the character's lower body sits behind the ground surface so the silhouette drew over the entire world. It shipped looking, in Max's words, horrible. The screenshot that would have caught it took twenty seconds and was never taken, because the feature was verified against its own intent instead of against ordinary play.
+
+So: after a visual change, take a shot of the ORDINARY view first. Then the special case.
+
+**Look again after deploying.** Frequent deploys are wanted and good, but a deploy is not the end of the change. Pull up what actually went out and look at it. Twice now something reached production that a single glance would have stopped: primary-colour debug decals, and this. In both cases the code was correct by every automated check available.
+
+`npm run typecheck`, the tests and a successful build cannot see any of this. A shader that compiles draws something. A material with the wrong depth function is still a valid material. The picture is the only check that works, and it only works if you look at it.
+
 Never use `Math.random()` anywhere in this codebase. Everything routes through the seeded RNG in `src/core/rng.ts`. A seed must reproduce a run exactly, or the screenshot workflow above is worthless and bugs become unreproducible.
 
 ## Architecture

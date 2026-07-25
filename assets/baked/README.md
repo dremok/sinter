@@ -15,13 +15,15 @@ See `tools/bake-textures/`.
 
 ## textures/
 
-Fourteen tiling albedo maps, one per entry of `TextureSet` in
+Seventeen tiling albedo maps, one per entry of `TextureSet` in
 `src/render/textures.ts`. Indexed (8-bit palette) PNG, sRGB, no alpha.
-**110 kB for the set**, of which the ground is 93 kB.
+**175 kB for the set**, of which the three ground tiles are 157 kB.
 
 | File | Size | Covers | On disk | What uses it |
 |---|---|---|---|---|
 | `grass.png` | 1024 | 85.3 units | 92.7 kB | the ground plane, one tile across the whole region |
+| `grassWorn.png` | 512 | 42.7 units | 39.0 kB | ground variant, blended by noise in region.ts |
+| `grassDry.png` | 512 | 42.7 units | 25.3 kB | ground variant, blended by noise in region.ts |
 | `sand.png` | 256 | 21.3 units | 5.7 kB | the shore ring, and tinted for tracks, yards and tilled ground |
 | `water.png` | 128 | 10.7 units | 1.4 kB | the pond surface |
 | `cloth.png` | 64 | 5.3 units | 1.4 kB | sacking, rope, awnings |
@@ -33,15 +35,22 @@ Fourteen tiling albedo maps, one per entry of `TextureSet` in
 | `glass.png` | 64 | 5.3 units | 0.9 kB | bottles, lenses |
 | `plank.png` | 64 | 5.3 units | 0.7 kB | hut walls, fences |
 | `gold.png` | 64 | 5.3 units | 0.7 kB | item material |
+| `fruit.png` | 64 | 5.3 units | 0.7 kB | the apple, once kitbash stops asking it for `ember` |
 | `steel.png` | 64 | 5.3 units | 0.6 kB | tools, fittings |
 | `clay.png` | 64 | 5.3 units | 0.6 kB | pots |
 
-Thirteen of the fourteen are under 1.5 kB, which is not a typo. Each is at most
-ten colours, all of them steps of a ramp in `src/render/palette.ts`, so an
-indexed PNG of a 64px tile is mostly header. The whole set costs less than a
-fiftieth of the 400 kB the parts library is budgeted in `docs/PERFORMANCE.md`,
-and it removes the largest boot cost that file lists: the 1024x1024 ground tile
-is no longer drawn texel by texel at startup.
+Every prop tile is under 1.5 kB, which is not a typo. Each is at most ten
+colours, all of them steps of a ramp in `src/render/palette.ts`, so an indexed
+PNG of a 64px tile is mostly header. The whole set costs less than half the
+400 kB the parts library is budgeted in `docs/PERFORMANCE.md`, and it removes the
+largest boot cost that file lists: the ground tiles are no longer drawn texel by
+texel at startup.
+
+`npm run bake:verify` re-derives size, palette conformance and seam ratios from
+the committed bytes. It needs no key and calls nothing, so it is safe in CI.
+Note what it catches: because the palette is read live from
+`src/render/palette.ts`, a ramp edit that the bake has not been re-run against
+fails the check rather than quietly shipping textures in last week's colours.
 
 ### Two of these should probably not be adopted
 
@@ -61,13 +70,13 @@ where an accurate bed of coals reads as a patch of dirt with orange specks on it
 
 The files are committed anyway, because they are on-palette and seamless and
 having them is free at 2 kB, and because the comparison is worth being able to
-re-run. But the recommendation is to load twelve of the fourteen and leave those
+re-run. But the recommendation is to load fifteen of the seventeen and leave those
 two drawn. `tools/bake-textures/compare.ts` renders both side by side if you want
 to disagree.
 
 `manifest.json` records the prompt hash, model, seed, byte count and measured
 quality metrics for each. It is provenance and cache state for the bake, and the
-game must not read it: the loader below hardcodes the fourteen names, so a
+game must not read it: the loader below hardcodes the seventeen names, so a
 missing file is a build error rather than a blank surface at runtime.
 
 ### Why these sizes, and why they are not a quality dial
@@ -78,7 +87,7 @@ resolution *is* a statement about how much world one tile covers. A 64px tile
 spans 5.3 world units; 1024px spans 85.
 
 These files therefore match the constants already in that file exactly
-(`GROUND` 1024, `SHORE` 256, `POOL` 128, `PROP` 64). Doubling one would not add
+(`GROUND` 1024, `GROUND_VARIANT` 512, `SHORE` 256, `POOL` 128, `PROP` 64). Doubling one would not add
 detail, it would halve the texel density of everything it lands on and make the
 surface read as wallpaper, which is the failure D14 names. If higher-resolution
 textures are ever wanted, `TEXELS_PER_UNIT` has to move with them, and that is an
@@ -120,6 +129,11 @@ const FILES: Record<keyof TextureSet, string> = {
   // ...
 }
 ```
+
+`tools/bake-textures/urls.ts` has all seventeen imports written out, so that
+block can be copied rather than retyped. Nothing under `src/` imports it; it
+exists because the probe that proved this contract works needed the same list,
+and a contract that has been run beats one that has been written down.
 
 Vite rewrites each to a content-hashed URL at build time, so the files are part
 of the build output and a rename fails the build rather than 404ing in a player's
@@ -216,6 +230,15 @@ thatch course, two to a woven thread) is chosen for it.
 
 `TextureSet`, `loadedTextures()` and every call in `src/world/region.ts` stay
 exactly as they are.
+
+### This has been run, not just written
+
+`tiled()`'s arithmetic was executed in a real browser against these seventeen
+files loaded through the `?url` imports above. All seventeen decode, keep
+`NearestFilter` and `SRGBColorSpace`, and produce a ground repeat of 1.078 and a
+bark repeat of 0.281 x 0.563, which are the same numbers the current canvas
+textures produce for tiles of the same size. There were no page errors. The swap
+really is mechanical.
 
 ### 5. What happens to the seed
 

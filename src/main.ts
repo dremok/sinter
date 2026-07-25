@@ -196,64 +196,6 @@ const player = {
 iso.target.copy(player.pos)
 iso.update()
 
-/**
- * The player's silhouette, drawn only where something is in front of them.
- *
- * This replaces fading the world, which was the wrong lever. Ghosting trees and
- * buildings made the scenery flicker as the player moved, dissolved the
- * landmarks the game relies on for navigation now that D20 bans quest markers,
- * and still left the world unreadable in the moment it mattered.
- *
- * Placement alone cannot solve it either, because the PLAYER moves. An item can
- * be placed where the camera can see it, and generation now does exactly that,
- * but a walking character will inevitably pass behind a wall and with the
- * camera locked there is no second angle to fall back on.
- *
- * So the world stays solid and the character is drawn twice. The second pass
- * uses GreaterDepth, meaning it renders ONLY where it fails the normal depth
- * test, which is precisely the region where something is covering it. Flat,
- * unlit, no outline. Standard practice in isometric games for the same reason.
- *
- * Cost is one extra draw of one small mesh. It replaces a system that was
- * cloning materials and pushing whole buildings into the transparent pass.
- */
-const silhouette = new THREE.Group()
-{
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0xf2d9a8,
-    depthTest: true,
-    // Draw where the depth test FAILS: exactly the occluded pixels.
-    depthFunc: THREE.GreaterDepth,
-    depthWrite: false,
-    transparent: true,
-    opacity: 0.85,
-    fog: false,
-  })
-
-  character.group.traverse((o) => {
-    const mesh = o as THREE.Mesh
-    if (!mesh.isMesh || mesh.userData.outlineHull === true) return
-    const ghost = new THREE.Mesh(mesh.geometry, mat)
-    ghost.userData.follows = mesh
-    silhouette.add(ghost)
-  })
-
-  silhouette.renderOrder = 999
-  scene.add(silhouette)
-}
-
-/** Keep every silhouette piece on top of the body part it shadows. */
-function syncSilhouette(): void {
-  for (const child of silhouette.children) {
-    const src = child.userData.follows as THREE.Object3D | undefined
-    if (!src) continue
-    src.updateWorldMatrix(true, false)
-    child.matrix.copy(src.matrixWorld)
-    child.matrixAutoUpdate = false
-    child.matrixWorldNeedsUpdate = true
-  }
-}
-
 // ---------------------------------------------------------------- ui
 
 const ui = new Ui({
@@ -1045,7 +987,6 @@ function syncMeshes(dt: number): void {
 
   character.group.position.copy(player.pos)
   character.update(dt, player.speed01, player.heading)
-  syncSilhouette()
 
   for (const e of queries.bobbing) {
     e.bob.phase += dt * 2
@@ -1057,10 +998,15 @@ function syncMeshes(dt: number): void {
   iso.update()
 
   groundEverything()
-  // Nothing in the world fades any more. See the silhouette pass below: the
-  // thing that must never be hidden is the PLAYER, not the tree, and dissolving
-  // scenery to achieve that was worse than the problem. Max, on the live build:
-  // "This constant transparency flickering is really annoying."
+  // Ghost whatever is genuinely between the camera and the player.
+  //
+  // A depth-inverted silhouette pass was tried here instead and reverted: it
+  // drew the character over the terrain as well, because the lower body sits
+  // behind the ground surface, so the figure floated on top of the whole world.
+  //
+  // The fade itself is now correct. Its earlier over-firing was a projection
+  // bug rather than a tuning miss, and landmarks are pinned so they never fade.
+  region.fadeOccluders(player.pos, iso.camera, dt)
 
   syncFireVisuals()
   placeLights()

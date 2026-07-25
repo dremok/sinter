@@ -161,6 +161,18 @@ export class Ui {
   /** What the strip is currently showing, so a frame loop does not rebuild it. */
   private heldKey: string | null = null
 
+  /** In-flight card drag. See `dragStart`. */
+  private drag: {
+    from: number
+    x: number
+    y: number
+    moved: boolean
+    ghost: HTMLElement | null
+    over: HTMLElement | null
+  } | null = null
+  /** A drag ends in a click event the card must not act on. */
+  private swallowClick = false
+
   constructor(private hooks: UiHooks) {
     this.buildFilters()
     this.mountDebug()
@@ -243,18 +255,27 @@ export class Ui {
 
   private doMerge(): void {
     if (this.slotA === null || this.slotB === null) return
-    const a = this.pack[this.slotA]
-    const b = this.pack[this.slotB]
-    if (!a || !b) return
+    this.commitMerge(this.slotA, this.slotB)
+  }
+
+  /**
+   * The one place two pack entries become one. Both the bench button and a
+   * card dropped onto another card come through here, so the two routes cannot
+   * drift apart on what they destroy or what they record.
+   */
+  private commitMerge(i: number, j: number): void {
+    const a = this.pack[i]
+    const b = this.pack[j]
+    if (!a || !b || i === j) return
+
     // D18: a pair either has an authored result or it does not combine, and
     // refusing costs nothing. There are TWO ways to refuse and only one of them
     // is `noMerge`: the common case is an ordinary pair nobody authored, which
     // is most of them. Guarding on `noMerge` alone let apple + sword reach
     // merge(), which throws.
     //
-    // Unreachable from the UI now, because the bench announces the refusal as
-    // soon as the second slot fills and the button is disabled behind it. Kept
-    // so a future caller cannot reach merge() by another route.
+    // Both callers say so before they get here, the bench in its result band
+    // and a drag on the ghost under the pointer, so this is the backstop.
     const result = tryMerge(a.id, b.id)
     if (!result) return
 
@@ -262,7 +283,7 @@ export class Ui {
 
     // Both inputs are destroyed. Splice the higher index first so the lower
     // index stays valid; getting this backwards silently deletes the wrong item.
-    const [hi, lo] = this.slotA > this.slotB ? [this.slotA, this.slotB] : [this.slotB, this.slotA]
+    const [hi, lo] = i > j ? [i, j] : [j, i]
     this.pack.splice(hi, 1)
     this.pack.splice(lo, 1)
     this.pack.push(result)
@@ -413,6 +434,170 @@ export class Ui {
     }
   }
 
+  // -------------------------------------------------------------- drag merge
+
+  /**
+   * Drag one card onto another to merge them.
+   *
+   * The bench is four interactions and a mode switch for the game's central
+   * verb: open, click, click, confirm. Most of that is ceremony. Picking the
+   * second thing IS the decision, and the Merge button existed only to catch a
+   * misclick, which it does by asking for a second click that can also be a
+   * misclick.
+   *
+   * A drag solves it better than a confirmation does, because the safety is in
+   * the shape of the gesture rather than in an extra step: you have to press,
+   * travel a real distance, and release on one specific card. Nobody does that
+   * by accident. It is also the honest metaphor for the verb, since merging is
+   * literally putting one thing onto another.
+   *
+   * Rule 3 survives intact. Nothing is hidden: the ghost that follows the
+   * pointer names the result before you let go, says so when the pair does not
+   * combine, and shows a question mark plus the cost when the pair has never
+   * been tried. The bench stays exactly as it was for a deliberate merge and
+   * for anyone not using a mouse.
+   */
+  private dragStart(e: PointerEvent, from: number): void {
+    // Left button only, and never from the Hold control, which is its own verb.
+    if (e.button !== 0) return
+    if ((e.target as HTMLElement).closest('.card-hold')) return
+
+    this.drag = { from, x: e.clientX, y: e.clientY, moved: false, ghost: null, over: null }
+    addEventListener('pointermove', this.onDragMove)
+    addEventListener('pointerup', this.onDragEnd)
+    addEventListener('pointercancel', this.onDragEnd)
+  }
+
+  private onDragMove = (e: PointerEvent): void => {
+    const drag = this.drag
+    if (!drag) return
+
+    // A few pixels of slop, so a click with a shaky hand stays a click and the
+    // list can still be scrolled by dragging it.
+    if (!drag.moved) {
+      if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return
+      drag.moved = true
+      const from = this.pack[drag.from]
+      if (!from) return
+      drag.ghost = this.buildGhost(from)
+      document.body.append(drag.ghost)
+      $('items').querySelector<HTMLElement>(`.card[data-index="${drag.from}"]`)?.classList.add('dragging')
+    }
+
+    if (drag.ghost) {
+      drag.ghost.style.left = `${e.clientX + 14}px`
+      drag.ghost.style.top = `${e.clientY + 16}px`
+    }
+
+    const onto = this.cardUnder(e.clientX, e.clientY, drag.from)
+    if (onto !== drag.over) {
+      drag.over?.classList.remove('drag-over', 'drag-refuse')
+      drag.over = onto
+    }
+    this.previewDrop(drag)
+  }
+
+  private onDragEnd = (e: PointerEvent): void => {
+    const drag = this.drag
+    removeEventListener('pointermove', this.onDragMove)
+    removeEventListener('pointerup', this.onDragEnd)
+    removeEventListener('pointercancel', this.onDragEnd)
+    this.drag = null
+    if (!drag) return
+
+    drag.ghost?.remove()
+    drag.over?.classList.remove('drag-over', 'drag-refuse')
+    $('items').querySelector<HTMLElement>(`.card[data-index="${drag.from}"]`)?.classList.remove('dragging')
+    if (!drag.moved) return
+
+    // The pointerup that ends a drag also fires a click on the source card.
+    this.swallowClick = true
+    setTimeout(() => (this.swallowClick = false), 0)
+
+    const onto = e.type === 'pointercancel' ? null : this.cardUnder(e.clientX, e.clientY, drag.from)
+    const to = onto ? Number(onto.dataset.index) : NaN
+    if (Number.isNaN(to)) return
+
+    this.commitMerge(drag.from, to)
+  }
+
+  /** The card under the pointer, if it is a card and not the one being dragged. */
+  private cardUnder(x: number, y: number, from: number): HTMLElement | null {
+    const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>('.card') ?? null
+    return hit && Number(hit.dataset.index) !== from ? hit : null
+  }
+
+  /** Names the outcome on the ghost, before the player commits to it. */
+  private previewDrop(drag: NonNullable<Ui['drag']>): void {
+    const ghost = drag.ghost
+    if (!ghost) return
+
+    const out = ghost.querySelector<HTMLElement>('.ghost-out')
+    if (!out) return
+
+    const a = this.pack[drag.from]
+    const b = drag.over ? this.pack[Number(drag.over.dataset.index)] : undefined
+    ghost.classList.remove('can', 'refuse')
+    out.replaceChildren()
+
+    if (!a || !b) {
+      out.append(el('span', 'ghost-hint', 'Drop it on something.'))
+      return
+    }
+
+    if (!canMerge(a.id, b.id)) {
+      ghost.classList.add('refuse')
+      drag.over?.classList.add('drag-refuse')
+      out.append(el('span', 'ghost-hint', refusal(a.id, b.id)))
+      return
+    }
+
+    ghost.classList.add('can')
+    drag.over?.classList.add('drag-over')
+    if (isDiscovered(a.id, b.id, this.codex)) {
+      out.append(el('span', 'ghost-arrow', '→'), el('span', 'ghost-name', tryMerge(a.id, b.id)!.name))
+    } else {
+      out.append(el('span', 'ghost-arrow', '→'), el('span', 'ghost-q', '?'))
+    }
+    // The cost, at the moment of the decision rather than in a footnote.
+    out.append(el('span', 'ghost-cost', 'Both are destroyed.'))
+  }
+
+  private buildGhost(def: ItemDef): HTMLElement {
+    const ghost = el('div', 'drag-ghost')
+    const icon = el('img')
+    icon.src = itemIcon(def)
+    icon.alt = ''
+    ghost.append(icon, el('span', 'ghost-name', def.name), el('span', 'ghost-out'))
+    return ghost
+  }
+
+  /**
+   * A plan view of the throw: you, the distance, and the circle it lands in,
+   * both to the same scale.
+   *
+   * This is not the ground reticle. A reticle has to live in the scene, where
+   * it can be hidden by the wall you are throwing over, and a DOM overlay
+   * cannot be. What this answers is the question the pack asks instead: of the
+   * things I am carrying, which one reaches, and how wide does it land? Two
+   * items drawn to one scale answer that faster than two sentences do.
+   */
+  private throwPlan(range: number, radius: number): HTMLElement {
+    const px = 6.2 // pixels per pace, shared by both axes so the shapes compare
+    const r = Math.max(3, radius * px)
+    const cx = Math.min(4 + range * px, 84 - r)
+    const box = el('span', 'throw-plan')
+    box.innerHTML =
+      `<svg viewBox="0 0 88 20" width="88" height="20" fill="none" aria-hidden="true">` +
+      `<circle cx="4" cy="10" r="2.2" fill="currentColor" opacity="0.55"/>` +
+      `<path d="M8 10H${(cx - r - 2).toFixed(1)}" stroke="currentColor" stroke-width="1"` +
+      ` stroke-dasharray="2 2.5" opacity="0.45"/>` +
+      `<circle cx="${cx.toFixed(1)}" cy="10" r="${r.toFixed(1)}" fill="currentColor" fill-opacity="0.18"` +
+      ` stroke="currentColor" stroke-width="1.2"/>` +
+      `</svg>`
+    return box
+  }
+
   /** The 12x12 use-mode glyph, as an inline SVG so it inherits text colour. */
   private modeGlyph(mode: Use['mode']): HTMLElement {
     const box = el('span', 'glyph')
@@ -442,7 +627,11 @@ export class Ui {
     // The card body loads the bench, because the bench is the thing directly
     // below it. Taking something in hand is a different verb and gets its own
     // control rather than a second meaning for the same click.
-    card.addEventListener('click', () => this.pick(index))
+    card.addEventListener('click', () => {
+      if (this.swallowClick) return
+      this.pick(index)
+    })
+    card.addEventListener('pointerdown', (e) => this.dragStart(e, index))
 
     const swatch = el('img', 'swatch')
     swatch.src = itemIcon(def)
@@ -770,6 +959,7 @@ export class Ui {
       const aim = el('div', 'held-aim')
       const across = land ? Math.max(1, Math.round(land.radius * 2)) : 1
       aim.append(
+        this.throwPlan(use.range, land?.radius ?? 0.5),
         el('span', 'held-reach', `${use.range} paces`),
         el('span', 'held-dot', '·'),
         el('span', 'held-reach', `${across} across`),

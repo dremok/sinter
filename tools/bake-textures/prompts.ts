@@ -484,7 +484,13 @@ export const SPEC_BY_NAME = new Map(SPECS.map((s) => [s.name, s]))
  * Bumped whenever anything in the pipeline changes what a committed PNG would
  * look like for an unchanged prompt: the reducer, the snapper, the model, the
  * shared style string. It is hashed alongside each spec, so bumping it is how a
- * pipeline change invalidates the cache without anyone editing fourteen prompts.
+ * pipeline change invalidates the cache without anyone editing seventeen prompts.
+ *
+ * Do NOT bump it to add a texture, or to edit one texture's prompt or settings.
+ * Each spec is hashed on its own contents as well, so those invalidate exactly
+ * themselves; bumping this invalidates all seventeen and sends the next person a
+ * bake that looks like it is doing something expensive. That mistake has already
+ * been made once here, adding the ground variants.
  */
 export const PIPELINE_VERSION = 13
 

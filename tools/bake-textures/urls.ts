@@ -7,6 +7,8 @@
  * Nothing under `src/` imports this file; it is the contract's fixture.
  */
 import grassUrl from '../../assets/baked/textures/grass.png?url'
+import grassDryUrl from '../../assets/baked/textures/grassDry.png?url'
+import grassWornUrl from '../../assets/baked/textures/grassWorn.png?url'
 import sandUrl from '../../assets/baked/textures/sand.png?url'
 import waterUrl from '../../assets/baked/textures/water.png?url'
 import barkUrl from '../../assets/baked/textures/bark.png?url'
@@ -20,9 +22,12 @@ import clayUrl from '../../assets/baked/textures/clay.png?url'
 import glassUrl from '../../assets/baked/textures/glass.png?url'
 import goldUrl from '../../assets/baked/textures/gold.png?url'
 import emberUrl from '../../assets/baked/textures/ember.png?url'
+import fruitUrl from '../../assets/baked/textures/fruit.png?url'
 
 export const URLS = {
   grass: grassUrl,
+  grassDry: grassDryUrl,
+  grassWorn: grassWornUrl,
   sand: sandUrl,
   water: waterUrl,
   bark: barkUrl,
@@ -36,4 +41,5 @@ export const URLS = {
   glass: glassUrl,
   gold: goldUrl,
   ember: emberUrl,
+  fruit: fruitUrl,
 } as const
