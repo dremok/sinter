@@ -20,18 +20,55 @@ Where a change legitimately alters output (a better algorithm that is not bit-id
 
 These are ceilings, not targets. Crossing one is a regression to be explained, not a number to be admired.
 
-| Metric | Budget | How to measure |
-|---|---|---|
-| Bundle, gzipped | 250 kB | `npm run build`, read the gzip column |
-| Bundle, raw | 900 kB | same |
-| Parts library `parts.glb` | 400 kB | `ls -l assets/parts/parts.glb` |
-| Boot to first frame, headless | 6 s | time `npm run shot -- --ticks 1` |
-| Simulation, 1000 ticks | 4 s | time `npm run shot -- --ticks 1000` against `--ticks 1` |
-| Draw calls, typical frame | 400 | `renderer.info.render.calls` |
-| Triangles, typical frame | 350k | `renderer.info.render.triangles` |
-| Live fps, desktop GPU | 60 sustained | in-game HUD, not the headless run |
+Runtime comes first. Bundle size is last on purpose: a slightly larger download is a one-time cost, a dropped frame happens sixty times a second.
 
-Do not read fps from the headless harness. It runs on SwiftShader software rendering, where 10 fps is normal and says nothing about a real machine.
+### GPU load
+
+Hardware-independent proxies, because they are what actually cause bad frame times and they can be measured reliably anywhere.
+
+| Metric | Budget | How |
+|---|---|---|
+| Draw calls per frame | 400 | `renderer.info.render.calls` |
+| Triangles per frame | 350k | `renderer.info.render.triangles` |
+| Shader programs | 40 | `renderer.info.programs.length` |
+| Transparent surfaces stacked at any pixel | 4 | count transparent materials in the frame |
+| Shadow map | one 2048, tightly fitted | shadow camera bounds vs visible area |
+
+Overdraw is the one to watch. Tree fading, the pond and the flame quads are all transparent, and stacked transparency is usually the largest GPU cost in a scene like this.
+
+### Response
+
+| Metric | Budget | How |
+|---|---|---|
+| Input to visible response | 1 tick | keypress lands on the next fixed tick, not a frame later |
+| Allocation in the render loop | none per frame | audit hot paths; `new THREE.Vector3()` in a loop is the classic |
+| Single-frame spikes during play | none | texture generation, icon rendering and part loading belong at boot |
+| Frame time, relative | no regression | same seed and framing, before vs after, same machine |
+
+**Never report FPS from the headless harness.** It runs on SwiftShader software rendering, where 10 fps is normal and says nothing about a real machine. Frame time from it is useful only as a relative before-and-after on the same machine. Absolute FPS is a claim only a real GPU can support.
+
+### No clipping
+
+Max called this out specifically, and it covers several distinct faults.
+
+| Fault | Where it bites here |
+|---|---|
+| Z-fighting | Ground decals on terrain, the pond surface against its bed, the shore ring |
+| Depth precision | An orthographic near/far spread wider than the scene wastes precision and causes the above |
+| Interpenetration | Objects sunk into or floating above terrain, the character through props |
+| Near/far clipping | Tall things sliced off, especially trees near the top of frame |
+| Shadow acne, peter-panning | Bias tuning |
+
+A clipping fix legitimately changes pixels, so it is exempt from the byte-identical rule. It is a bug fix, not an optimisation. Show a before and after image instead.
+
+### Size
+
+| Metric | Budget | How |
+|---|---|---|
+| Bundle, gzipped | 250 kB | `npm run build`, gzip column |
+| Parts library | 400 kB | `ls -l assets/parts/parts.glb` |
+| Boot to first frame, headless | 6 s | time `npm run shot -- --ticks 1` |
+| Simulation, 1000 ticks | 4 s | `--ticks 1000` minus `--ticks 1` |
 
 ## Where the costs actually are
 
