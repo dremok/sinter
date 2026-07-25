@@ -368,10 +368,13 @@ export const sand = (rng: Rng) =>
       for (let x = 0; x < n; x++) {
         const u = x / n
         // Ripple crests: a sine whose phase is dragged around by low-frequency
-        // noise, which is what stops them reading as corduroy.
-        const ripple = Math.sin((v * 9 + warp(u, v) * 2.2) * Math.PI * 2)
-        let idx = 3 + (ripple > 0.45 ? 1 : ripple < -0.5 ? -1 : 0)
-        idx -= Math.round(damp(u, v) * 2.2)
+        // noise, which is what stops them reading as corduroy. Kept tight and
+        // low contrast, because region.ts tints this same bitmap for tracks,
+        // yards and tilled ground, and a bold ripple on all of them reads as
+        // wood grain rather than as worn earth.
+        const ripple = Math.sin((v * 13 + warp(u, v) * 2.4) * Math.PI * 2)
+        let idx = 3 + (ripple > 0.62 ? 1 : ripple < -0.66 ? -1 : 0)
+        idx -= Math.round(damp(u, v) * 1.6)
         if (grain(u, v) > 0.72) idx += 1
         else if (grain(u, v) < 0.3) idx -= 1
         put(x, y, tone(RAMP.sand, idx + 1))

@@ -229,6 +229,32 @@ addEventListener('keydown', (e) => {
 // azimuth and the design still wants "see behind buildings" eventually. It just
 // needs to be a considered gesture rather than a stray keypress.
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()))
+/**
+ * Scroll to zoom.
+ *
+ * Deliberately a narrow range around the default. A wide zoom would let the
+ * player pull back until the world is a diorama, which flatters an isometric
+ * scene and ruins the sense of being in it; and push in until the fixed camera
+ * angle stops working. This is a comfort adjustment, not a strategic view.
+ *
+ * Fog is derived from viewSize (D9), so zooming changes the fog range too and
+ * the far edge stays consistently hazed rather than snapping.
+ */
+const ZOOM_MIN = 9
+const ZOOM_MAX = 19
+let zoomTarget = iso.viewSize
+
+addEventListener(
+  'wheel',
+  (e) => {
+    // Trackpads report small deltas continuously and mice report large ones in
+    // steps, so scale by magnitude rather than treating every event as a notch.
+    const step = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY) * 0.01, 0.8)
+    zoomTarget = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoomTarget + step))
+  },
+  { passive: true },
+)
+
 addEventListener('resize', () => {
   sizeToPixelBuffer(renderer, innerWidth, innerHeight)
   iso.setAspect(innerWidth / innerHeight)
@@ -637,6 +663,19 @@ function stepSimulation(): void {
 }
 
 function syncMeshes(dt: number): void {
+  // Ease toward the scroll target. Applying the wheel delta directly makes a
+  // trackpad flick feel like a lurch.
+  if (Math.abs(iso.viewSize - zoomTarget) > 0.001) {
+    iso.viewSize += (zoomTarget - iso.viewSize) * Math.min(1, dt * 12)
+    iso.setAspect(innerWidth / innerHeight)
+    const fog = scene.fog as THREE.Fog | null
+    if (fog) {
+      const r = iso.fogRange()
+      fog.near = r.near
+      fog.far = r.far
+    }
+  }
+
   character.group.position.copy(player.pos)
   character.update(dt, player.speed01, player.heading)
 

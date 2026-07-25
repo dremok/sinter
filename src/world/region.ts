@@ -458,11 +458,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // To the pond, for water. Narrow, because one person walks it at a time.
   layTrack(
     [
-      [-2.6, 12.4],
-      [-5.4, 11.4],
-      [-7.6, 9.4],
-      [-7.9, 7.2],
-      [-7.2, 5.4],
+      [-2.4, 13.6],
+      [-5.6, 12.8],
+      [-7.8, 11.3],
+      [-8.2, 8.8],
+      [-7.6, 6.4],
+      [-7.0, 5.2],
     ],
     0.62,
     M.track,
@@ -1377,10 +1378,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   {
     const rx = 8.4
     const rz = 4.7
+    // Gaps are in the parametric angle of the ellipse, and each one has to line
+    // up with a track or the track walks through the fence.
     const gaps = [
-      [1.28, 1.75], // the main track leaving north
-      [2.5, 3.0], // the pond path leaving west
-      [-0.35, 0.1], // the track east to the chopping block
+      [-1.95, -1.15], // the main track, leaving for the gate
+      [-2.95, -2.4], // the pond path, leaving west
+      [-0.62, -0.12], // east, to the chopping block
     ]
     const postGeo = new THREE.CylinderGeometry(0.085, 0.1, 1, 6)
     let prev: THREE.Vector3 | null = null
@@ -1425,8 +1428,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
     // A hurdle gate standing open where the main track leaves.
     {
-      const gx = 1.9
-      const gz = 9.3
+      const gx = 1.6
+      const gz = 9.0
       const h = heightAt(gx, gz)
       const leaf = new THREE.Group()
       for (let i = 0; i < 3; i++) {
@@ -1447,9 +1450,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Kitchen garden. Tilled rows, cabbages, and beans up sticks. */
   {
-    const gx = -5.6
-    const gz = 11.6
-    layPatch(gx, gz, 2.0, M.tilled, homeRng, 0.12, 14, 0.075)
+    const gx = -2.4
+    const gz = 10.2
+    layPatch(gx, gz, 1.9, M.tilled, homeRng, 0.12, 14, 0.075)
 
     const cabbageGeo = new THREE.SphereGeometry(0.2, 6, 5)
     const cabbageMat = toonUnique({ color: 0x7fb04e, map: tiled(tex.foliage, 0.7, 0.7) })
@@ -1705,8 +1708,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
     // A handcart by the yard gate, tipped forward onto its handles.
     {
-      const x = -1.2
-      const z = 10.4
+      const x = 3.7
+      const z = 9.7
       const h = heightAt(x, z)
       const g = new THREE.Group()
       const bed = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.42, 0.9), M.plank)
