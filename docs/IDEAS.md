@@ -1111,3 +1111,126 @@ Candidate skills, all earned by doing rather than by spending points:
 
 The gate to Band 3 should be a skill threshold rather than an item, so that
 reaching it is re-earned but genuinely easier each run.
+
+
+## A8. Objects Max asked for (2026-07-25)
+
+Requested directly. Band assignments are proposals, not decisions. The point of
+placing them by band is that the genre gradient is the spine of the game, and an
+object arriving in the wrong band spends its surprise early.
+
+**Band 0, Hearth**
+
+| Object | Properties | Notes |
+|---|---|---|
+| Rock | `STONE 1, HEAVY 0.5` | The most basic thing in the game. Should exist from the first minute |
+| Rope | `ROPE_LIKE 1, CLOTH 0.5, FLAMMABLE 0.5` | Already in |
+| Knife | `METAL 0.8, SHARP 0.9, TOOL_CUTTING 0.6, RIGID 0.7` | Smaller and faster than the axe; worse on structures, better on `LIVING` |
+| Sword | `METAL 0.9, SHARP 0.95, TOOL_CUTTING 0.7, RIGID 0.85, VALUABLE 0.5` | Also `FRIGHTENING`. Carrying one openly should change how NPCs greet you |
+| Crossbow | `LAUNCHER 0.9, RIGID 0.8, WOODEN 0.5, METAL 0.4` | Needs a `PROJECTILE`. Reach without approach, which is a genuinely new verb |
+| Slingshot | `LAUNCHER 0.5, ELASTIC 0.8, WOODEN 0.4` | The cheap version. Pairs with Rock, which is the joke and the point |
+| Key | `METAL 0.7, noMerge` | The flagship for D18's "some things do not merge". Opens exactly one thing |
+| Poison | `TOXIC 0.9, EDIBLE 0.2` | Only useful delivered. Wants `EDIBLE` or a blade to coat |
+| Chili fruit | `EDIBLE 0.6, PLANT 0.7, CAUSTIC 0.5` | Eaten, thrown, or rubbed on something. Blinds and burns |
+| Glasses | `GLASS 0.9, FRAGILE 0.8, IDENTIFYING 0.3` | Two uses: focus sunlight to start a fire, and read small print. Both earned, not stated |
+
+**Band 1, The Turn** (modernity intrudes without comment)
+
+| Object | Properties | Notes |
+|---|---|---|
+| Balloon | `BUOYANT 1, FRAGILE 0.9, ELASTIC 0.6` | Lift. Carries a light thing up, or over. Pops on anything `SHARP` |
+| Rubber band | `ELASTIC 1, RUBBER 0.9` | The enabling part for every launcher. Also binds things |
+| Gun | `LAUNCHER 1, METAL 0.9, LOUD 1, FRIGHTENING 0.9` | The loudest object in the game. Should solve some things and ruin others |
+| Magazine (printed) | `PAPER 0.9, FLAMMABLE 0.9, WRITTEN 0.6` | Tinder, or reading, depending on how desperate you are |
+| Magazine (ammunition) | `METAL 0.8, PROJECTILE 0.9` | Listed separately because the word is ambiguous and both are worth having |
+| Orange | `EDIBLE 0.9, PLANT 0.5, CAUSTIC 0.2` | Out of place in a pastoral fantasy region, which is the point in Band 1 |
+| Banana | `EDIBLE 0.9, PLANT 0.5, SLIPPERY 0.8` | The peel is the item. A `SLIPPERY` thing on a floor is a real tool |
+
+**New properties these would need**
+
+`ELASTIC`, `RUBBER`, `PAPER`, `CAUSTIC`, `TOXIC`, `SLIPPERY`, `FRAGILE`,
+`LAUNCHER`, `PROJECTILE`, `LOUD`, `FRIGHTENING`, `WRITTEN`.
+
+Several are already listed in `docs/DESIGN.md` but absent from
+`src/props/registry.ts`. Per the standing rule, add each one only when a system
+is about to read it in the next hour.
+
+**Merges these unlock**
+
+- rubber band + forked stick → slingshot
+- slingshot + rock → loaded sling; the first ranged option
+- crossbow + rope → windlass crossbow, faster to span
+- knife + poison → coated blade
+- poison + orange → dosed fruit, which is how you get something to eat it
+- glasses + sunlight → fire without flint (an interaction, not a merge)
+- balloon + rope → tethered lift
+- balloon + rock → it does not lift. An honest failure worth having
+- magazine (printed) + oil → firelighter
+- chili + rag → face wrap that hurts to remove
+- banana peel + oil → very slippery, comedic, effective
+
+**Specific interactions they unlock**
+
+| Item | Target | Effect | Unauthored alternative |
+|---|---|---|---|
+| Key | The one lock it fits | Opens it | Break the door, burn it, go round |
+| Glasses | Dry tinder in sunlight | Starts a fire | Flint and iron, or a hearth |
+| Banana peel | A floor an NPC walks | They fall | Trip line, grease, or distraction |
+| Gun | Any NPC | Everyone in earshot reacts, mostly badly | Threaten with a sword, or do not |
+| Chili | Anything with eyes | Blinds it briefly | Smoke, darkness, or a sack |
+| Balloon | Something light you cannot reach past | Floats it over | Throw it, or find another route |
+
+**Design note on the gun.** It is the strongest object on this list and the one
+most likely to flatten the game. Suggested constraint: it is `LOUD 1` and the
+world genuinely reacts, so firing it solves the immediate problem and creates a
+larger one. That keeps it exciting without making it the answer to everything.
+
+
+## A9. Item HUDs: things you USE, not just carry
+
+Max's idea, and it generalises further than the example. Some items should open
+their own interface when used, rather than resolving into a single effect.
+
+The pattern: an item declares an optional `hud`. Pressing use with it selected
+opens a small purpose-built panel. The panel is the item, and the item is a
+puzzle surface rather than a verb.
+
+Why this is worth building: it is the strongest possible expression of D17. A
+specific item having a specific effect is good; a specific item having its own
+*interface* is a different order of thing, and it is what makes an object feel
+authored rather than generated. It also gives the outer bands somewhere to go
+that is not just harder combat.
+
+| Item | HUD | What it is really for |
+|---|---|---|
+| Phone (Band 1) | Keypad, recent calls, battery, signal bars | Dial a number found written somewhere. Signal depends on where you stand, so it becomes a reason to climb. Battery is a real resource |
+| Radio (Band 2) | Tuning dial, static, a signal meter | Tune to a frequency scrawled on a wall. Some stations only broadcast in some regions. Static is a proximity sensor for something |
+| Map and compass | Hand-drawn map that fills in as you walk | The anti-quest-marker. It shows where you HAVE been, never where to go |
+| Lockpicks | Tension and pick, a feel-based minigame | Skill-gated. Better Hands means fewer pins to hold |
+| Camera | Viewfinder, limited film | Photograph things for the codex. Film is finite, so what you choose to record matters |
+| Ledger or letter | Readable text, gated on the Reading skill | Illegible until you can read. Names, numbers, a lock combination |
+| Music box / cassette | Play, stop | Sound as a tool. Attracts, soothes, or drives things off |
+| Bomb timer (Band 2) | Countdown, dial to set | Set the delay, then the tension is entirely yours to create |
+| Terminal (Band 3) | A prompt that answers wrongly | It should not make sense. Band 3 says less, not more |
+
+**Design rules for item HUDs, so they do not become minigame soup:**
+
+1. A HUD must let you *do* something the world cannot express otherwise. If it
+   could have been a button press, it should have been a button press.
+2. It must be usable in under ten seconds once understood. This is an adventure
+   game, not a puzzle box collection.
+3. It must be diegetic. The phone has a battery because phones do, not because
+   we wanted a resource.
+4. It must be able to FAIL informatively. Dialling a wrong number should tell you
+   something.
+5. No more than five in the whole game. Scarcity is what makes them special.
+
+**Implementation shape, when it happens:** a `hud` field on `ItemDef` naming a
+registered panel; a registry in `src/ui/huds/` mapping name to a component that
+gets the item instance and a handle back into the world; the pack gets a USE
+action alongside merge. Panels are DOM, like the rest of the UI, so they can be
+authored quickly and styled like real devices.
+
+The phone is the right first one to build. It is the most recognisable, it makes
+signal and elevation matter, and a number written on a wall somewhere is exactly
+the kind of discovery this game is about.
