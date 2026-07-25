@@ -161,11 +161,11 @@ export class Ui {
     // is `noMerge`: the common case is an ordinary pair nobody authored, which
     // is most of them. Guarding on `noMerge` alone let apple + sword reach
     // merge(), which now throws.
+    // Unreachable through the UI, because the bench announces a refusal the
+    // moment the second slot fills and disables the button. Kept as a guard so
+    // a future caller cannot reach merge(), which throws on an unauthored pair.
     const result = tryMerge(a.id, b.id)
-    if (!result) {
-      this.toast('Nothing', refusal(a.id, b.id))
-      return
-    }
+    if (!result) return
 
     this.codex.add(mergeId(a.id, b.id))
 
@@ -272,10 +272,10 @@ export class Ui {
     const count = $('inv-count')
     count.replaceChildren()
     if (this.pack.length === 0) {
-      count.append('empty')
+      count.append('Nothing yet')
     } else {
-      count.append(el('b', undefined, String(this.pack.length)), ' carried')
-      if (this.filters.size > 0) count.append(' · ', el('b', undefined, String(visible.length)), ' shown')
+      count.append(el('b', undefined, String(this.pack.length)), ' Carried')
+      if (this.filters.size > 0) count.append(' · ', el('b', undefined, String(visible.length)), ' Shown')
     }
 
     $('carry').hidden = this.pack.length === 0

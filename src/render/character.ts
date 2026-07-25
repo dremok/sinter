@@ -75,6 +75,7 @@ const HUE = {
   /** Lighter than the thigh: the shin is the only leg the hem leaves showing. */
   shin: 0x5b6a9e,
   leather: 0x6b4526,
+  boot: 0x835733,
   leatherDark: BAND0.hair,
   canvas: 0xc4894a,
   cloth: 0xdcc9a4,
@@ -262,11 +263,11 @@ export class Character {
       // Oversized boots pushed forward at the toe. Below the hem they are the
       // only part of the lower body that is not covered, so they carry the
       // whole step: a boot that is only as wide as its leg reads as a stick.
-      const boot = bevel(0.21, 0.155, 0.26, HUE.leatherDark)
+      const boot = bevel(0.21, 0.155, 0.26, HUE.boot)
       boot.position.set(0, -0.078, 0.04)
       ankle.add(boot)
 
-      const cuff = bevel(0.17, 0.06, 0.17, HUE.leather)
+      const cuff = bevel(0.17, 0.06, 0.17, HUE.leatherDark)
       cuff.position.y = 0.02
       ankle.add(cuff)
 
@@ -290,15 +291,19 @@ export class Character {
     flapPouch.position.set(-0.2, 0.06, 0.06)
     this.chest.add(flapPouch)
 
-    // Pack straps over the shoulders. Two dark lines down a red mantle, which
-    // at this size is texture rather than detail, but it stops the chest
-    // reading as one flat slab.
-    for (const side of [-1, 1] as const) {
-      const strap = box(0.05, 0.3, 0.05, HUE.leatherDark)
-      strap.position.set(side * 0.1, 0.2, 0.12)
-      strap.rotation.x = -0.12
-      this.chest.add(strap)
-    }
+    // One pale strap across the chest. Two dark vertical ones were tried first
+    // and were invisible: at this size the only marks that survive are the ones
+    // that run across the shape rather than along it, and that are a different
+    // value from what they lie on. The mid body was otherwise a single flat
+    // slab of dark red between the collar and the hem.
+    const strap = bevel(0.06, 0.44, 0.06, HUE.cloth)
+    strap.position.set(0, 0.19, 0.115)
+    strap.rotation.z = 0.62
+    this.chest.add(strap)
+
+    const buckle = bevel(0.07, 0.06, 0.07, HUE.brass)
+    buckle.position.set(-0.09, 0.06, 0.13)
+    this.chest.add(buckle)
   }
 
   private buildArms(): void {
@@ -379,9 +384,9 @@ export class Character {
     // Narrow. The first pass had this at 0.325 and the character read as a
     // bell with a point on top: at 36 pixels a cloth mass much wider than the
     // head stops being a garment and becomes the whole body.
-    const mantleGeo = new THREE.CylinderGeometry(0.185, 0.27, 0.28, 8, 1, true)
+    const mantleGeo = new THREE.CylinderGeometry(0.18, 0.255, 0.26, 8, 1, true)
     mantleGeo.rotateY(Math.PI / 8)
-    mantleGeo.translate(0, -0.14, 0)
+    mantleGeo.translate(0, -0.13, 0)
     const mantleMesh = new THREE.Mesh(
       faceted(mantleGeo),
       toonUnique({ color: HUE.cloakDeep, side: THREE.DoubleSide }),
@@ -391,8 +396,8 @@ export class Character {
 
     // A hard dark lip at the hem. One dark row of pixels is what turns a
     // continuous red mass into shoulders, then skirt, then legs.
-    const trim = bevel(0.63, 0.06, 0.63, HUE.leatherDark)
-    trim.position.y = -0.275
+    const trim = bevel(0.6, 0.06, 0.6, HUE.leatherDark)
+    trim.position.y = -0.255
     this.mantle.add(trim)
 
     this.cloak.position.set(0, 0.32, -0.03)

@@ -14,7 +14,8 @@ import { spatial } from './sim/spatial'
 import { applyReactions } from './props/derive'
 import { p } from './props/registry'
 import { buildItemMesh } from './render/kitbash'
-import { CATALOG, type ItemDef } from './items/catalog'
+import { CATALOG, useOf, type ItemDef } from './items/catalog'
+import { landingOf } from './items/interactions'
 import { Ui } from './ui/interface'
 
 /**
@@ -569,6 +570,60 @@ function updateFocus(): void {
   ui.prompt(null)
 }
 
+/**
+ * Throwing, which is A11's projected use mode and the first verb in the game
+ * that does not require standing next to the thing.
+ *
+ * The whole implementation is the middle four lines, and that is the point. It
+ * stamps the landing's properties onto everything within its radius and stops.
+ * It does not ask what the player aimed at, does not decide what caught, and
+ * does not special-case the palisade or anything else. The next stepSimulation
+ * reads HOT and FLAMMABLE and works out the rest.
+ *
+ * So a fire flask thrown short of the wall can still take it, by way of the dry
+ * grass in between, and the same flask does nothing at all against something
+ * already soaked. Neither of those outcomes is written down anywhere. The verb
+ * is authored; the consequences are simulated.
+ */
+function throwCarried(def: ItemDef): boolean {
+  const use = useOf(def)
+  if (use.mode !== 'projected') return false
+
+  const land = landingOf(def.id)
+  if (!land) return false
+
+  // Straight ahead, at the item's range. No arc and no aim reticle yet; those
+  // are UI and belong with whoever owns the pack panel.
+  const basis = iso.screenBasis()
+  const dir = player.heading === null
+    ? { x: basis.forward.x, z: basis.forward.z }
+    : { x: Math.sin(player.heading), z: Math.cos(player.heading) }
+
+  const x = player.pos.x + dir.x * use.range
+  const z = player.pos.z + dir.z * use.range
+
+  spatial.rebuild(queries.simulated)
+  let touched = 0
+  for (const e of spatial.near(x, z, land.radius)) {
+    e.props = applyReactions({ ...e.props, ...land.applies })
+    touched++
+  }
+
+  ui.consume(def)
+  if (use.leaves === 'lands') placeInWorld(def, x, z)
+
+  const hot = (land.applies.HOT ?? 0) > 0.3
+  ui.toast(
+    hot ? 'Thrown' : 'Thrown',
+    touched > 0
+      ? `${def.name} lands. ${touched} thing${touched === 1 ? '' : 's'} caught in it.`
+      : `${def.name} lands on bare ground.`,
+    hot ? 'fire' : 'normal',
+  )
+  if (hot) ui.flash()
+  return true
+}
+
 function handleInput(): void {
   if (pressed.has('f') && focus?.item) {
     ui.add(focus.item.def)
@@ -579,6 +634,13 @@ function handleInput(): void {
     focus.mesh?.removeFromParent()
     world.remove(focus)
     focus = null
+  }
+
+  // R throws the first projected thing carried. A11's mode 3.
+  if (pressed.has('r')) {
+    const throwable = ui.pack.find((d) => useOf(d).mode === 'projected')
+    if (throwable) throwCarried(throwable)
+    else if (ui.count > 0) ui.toast('Nothing to throw', 'None of what you carry is meant to leave your hands.')
   }
 
   if (pressed.has('g')) {

@@ -94,7 +94,7 @@
         border-radius: 2px; padding: 9px 13px 10px;
       }
       #hud::before {
-        content: 'debug  F3';
+        content: 'Debug  F3';
         display: block; margin-bottom: 6px; padding-bottom: 5px;
         border-bottom: 1px solid rgba(120, 200, 150, 0.18);
         color: #6f8a7a; letter-spacing: 0.18em;
@@ -133,6 +133,9 @@
         opacity: 0.62;
       }
       #prompt:has(.muted) b { font-weight: 400; color: var(--ink-2); }
+      /* The negative line is written in main.ts. House style is sentence case
+         and nothing in this UI starts lowercase, so it starts here. */
+      #prompt .muted::first-letter { text-transform: uppercase; }
 
       /* -------------------------------------------------------------- keys */
       /*
@@ -161,9 +164,9 @@
         pointer-events: none; backdrop-filter: blur(7px);
       }
       #controls .ctrl {
-        display: flex; align-items: center; gap: 7px; padding: 0 13px;
-        font: 500 10px/1 var(--ui); letter-spacing: 0.13em; text-transform: uppercase;
-        color: #d9d1c1;
+        display: flex; align-items: center; gap: 8px; padding: 0 14px;
+        font: 500 11.5px/1 var(--ui); letter-spacing: 0.05em;
+        color: #e2dac9;
       }
       #controls .ctrl + .ctrl { box-shadow: inset 1px 0 0 rgba(240, 220, 190, 0.11); }
       #controls .ctrl span:last-child { padding-top: 1px; }
@@ -215,10 +218,8 @@
         margin: 0; font: 400 22px/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase;
         color: #f4e9d3; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
       }
-      .inv-count {
-        font: 500 10px/1 var(--ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
-      }
-      .inv-count b { font: 600 11px/1 var(--mono); color: var(--ink-2); font-weight: 600; }
+      .inv-count { font: 500 11px/1 var(--ui); letter-spacing: 0.06em; color: var(--dim); }
+      .inv-count b { font: 600 12px/1 var(--mono); color: var(--ink-2); font-weight: 600; }
 
       /* Dashed, so every divider in the panel is the same stitch as the frame. */
       .rule { height: 0; margin: 0 22px; flex: none; border-top: 1px dashed var(--stitch); }
@@ -235,7 +236,7 @@
         display: inline-flex; align-items: center; gap: 7px;
         padding: 5px 10px 5px 9px; border: 1px solid var(--edge); border-radius: 3px;
         background: rgba(255, 255, 255, 0.06); cursor: pointer;
-        font: 500 9.5px/1 var(--ui); letter-spacing: 0.15em; text-transform: uppercase;
+        font: 500 11px/1 var(--ui); letter-spacing: 0.05em;
         color: var(--ink-2);
       }
       #filter-toggle:hover { color: var(--ink); border-color: rgba(232, 224, 208, 0.26); }
@@ -246,7 +247,7 @@
       #filter-active { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
       #filter-clear {
         margin-left: auto; padding: 4px 2px; border: 0; background: none; cursor: pointer;
-        font: 500 9.5px/1 var(--ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+        font: 500 11px/1 var(--ui); letter-spacing: 0.04em; color: var(--dim);
         text-decoration: underline; text-underline-offset: 3px;
       }
       #filter-clear:hover { color: var(--warm); }
@@ -378,7 +379,7 @@
       .bench-title {
         font: 400 12.5px/1 var(--display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-2);
       }
-      .bench-hint { font: 400 10px/1 var(--ui); letter-spacing: 0.1em; color: var(--dim); }
+      .bench-hint { font: 400 11px/1 var(--ui); letter-spacing: 0.03em; color: var(--dim); }
       .bench-hint[hidden] { display: none; }
 
       .slots { display: grid; grid-template-columns: 1fr 18px 1fr; gap: 9px; align-items: center; }
@@ -412,11 +413,26 @@
       }
       #result[hidden] { display: none; }
       #result img { width: 26px; height: 26px; }
-      #result .rtext { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      #result .rtext { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
       #result .name { font: 400 14px/1.1 var(--display); color: var(--ink); }
       #result .q { font: 400 22px/1 var(--display); color: var(--warm); width: 26px; text-align: center; }
       #result .sub { font: 400 11px/1.35 var(--ui); color: var(--dim); }
-      #result.refused { border-color: rgba(255, 130, 68, 0.3); }
+
+      /*
+       * A refusal is information, not an error. It costs nothing and consumes
+       * nothing, so it gets the panel's own parchment accent rather than a red
+       * alarm, but it gets full width, a lead line in the display face and body
+       * copy at reading size, because a player must never have to click the
+       * button to find out. The button stays disabled behind it.
+       */
+      #result.refused {
+        align-items: flex-start; padding: 12px 14px;
+        border-color: rgba(226, 198, 150, 0.32);
+        background: linear-gradient(rgba(226, 198, 150, 0.11), rgba(226, 198, 150, 0.035));
+        box-shadow: inset 3px 0 0 rgba(226, 198, 150, 0.6);
+      }
+      #result.refused .name { font-size: 15px; color: #f5ead4; }
+      #result.refused .sub { font-size: 12px; line-height: 1.45; color: var(--ink-2); }
 
       #merge-btn {
         display: block; width: 100%; margin-top: 11px; padding: 11px; cursor: pointer;
@@ -457,7 +473,7 @@
         animation: rise 300ms ease-out;
       }
       .toast .label {
-        font: 500 8.5px/1 var(--ui); letter-spacing: 0.2em; text-transform: uppercase;
+        font: 500 10px/1 var(--ui); letter-spacing: 0.1em;
         color: var(--dim); margin-bottom: 4px;
       }
       .toast .body { font: 400 12.5px/1.3 var(--ui); color: var(--ink); }
@@ -486,12 +502,18 @@
 
     <div id="prompt"></div>
 
+    <!--
+      The always-true verbs, and only those. Camera rotation is gone from
+      main.ts, so Q and E are gone from here. The number keys are deliberately
+      absent: they act on whatever you are facing and only exist while the
+      prompt above is offering them, and a legend entry that is dead most of
+      the time teaches the player to stop reading the legend.
+    -->
     <div id="controls">
-      <span class="ctrl"><span><span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span></span><span>move</span></span>
-      <span class="ctrl"><span><span class="key">Q</span><span class="key">E</span></span><span>turn</span></span>
-      <span class="ctrl"><span class="key">F</span><span>take</span></span>
-      <span class="ctrl"><span class="key">G</span><span>drop</span></span>
-      <span class="ctrl"><span class="key">TAB</span><span>pack</span></span>
+      <span class="ctrl"><span><span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span></span><span>Move</span></span>
+      <span class="ctrl"><span class="key">F</span><span>Take</span></span>
+      <span class="ctrl"><span class="key">G</span><span>Drop</span></span>
+      <span class="ctrl"><span class="key">Tab</span><span>Pack</span></span>
     </div>
 
     <div id="toasts"></div>
@@ -500,7 +522,7 @@
     <aside id="inventory">
       <header class="inv-head">
         <h2 class="inv-title">Pack</h2>
-        <div class="inv-count" id="inv-count">empty</div>
+        <div class="inv-count" id="inv-count">Nothing yet</div>
       </header>
       <div class="rule"></div>
 
@@ -509,7 +531,7 @@
           <span class="caret">&#9660;</span>Traits
         </button>
         <div id="filter-active"></div>
-        <button id="filter-clear" type="button" hidden>clear</button>
+        <button id="filter-clear" type="button" hidden>Clear</button>
       </div>
       <div id="filters" hidden></div>
 
@@ -518,7 +540,7 @@
       <div id="bench">
         <div class="bench-head">
           <span class="bench-title">Merge Bench</span>
-          <span class="bench-hint" id="bench-hint">pick two</span>
+          <span class="bench-hint" id="bench-hint">Pick two things.</span>
         </div>
         <div class="slots">
           <div class="slot" id="slot-a"></div>

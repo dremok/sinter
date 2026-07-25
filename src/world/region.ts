@@ -95,7 +95,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const heightAt = (x: number, z: number): number => {
     let h = noise(x * 0.033, z * 0.033) * 0.62 + noise(x * 0.095, z * 0.095) * 0.2
 
-    h += bump(x, z, 9.2, 7.0, 4.6, 1.55)
+    h += bump(x, z, 10.6, 8.4, 4.6, 1.6)
     h -= bump(x, z, -3.0, 1.0, 5.6, 1.0)
     h += bump(x, z, -15.0, -0.5, 4.2, 0.9)
     h += smoothstep(-5, -17, z) * 2.3
@@ -605,7 +605,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
   }
 
-  const SOUTH: readonly Species[] = ['oak', 'oak', 'birch', 'oak', 'scrub', 'birch']
+  const SOUTH: readonly Species[] = ['oak', 'birch', 'oak', 'scrub', 'birch', 'dead', 'pine']
   const FLANK: readonly Species[] = ['oak', 'pine', 'oak', 'birch', 'scrub']
   const NORTH: readonly Species[] = ['pine', 'pine', 'dead', 'pine', 'oak']
 
@@ -634,10 +634,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // The great oak on the knoll. The one thing visible from everywhere in the
   // clearing, and the reason the knoll is there.
   {
-    const x = 9.2
-    const z = 7.2
-    const mesh = plantTree(x, z, 'oak', 2.5, treeRng)
-    treeEntity(mesh, x, z, 2.5, 'The old oak')
+    const x = 10.6
+    const z = 8.8
+    const mesh = plantTree(x, z, 'oak', 2.1, treeRng)
+    treeEntity(mesh, x, z, 2.1, 'The old oak')
   }
 
   // Scrub scattered inside, to soften the step from lawn to wall. Kept low and
@@ -786,6 +786,46 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         cap.position.set(x, h + 0.08, z)
         group.add(cap)
       }
+    }
+  }
+
+  // Something to walk past. The ground between home and the wall was an empty
+  // lawn, and an empty lawn gives the eye nothing to measure distance against:
+  // a boulder group on the lip of the hollow, and one thorn standing alone.
+  {
+    const midRng = rng.fork('midfield')
+    for (const [cx, cz, n] of [
+      [-6.6, 0.4, 5],
+      [7.2, -4.2, 3],
+    ] as const) {
+      for (let i = 0; i < n; i++) {
+        const x = cx + midRng.range(-2.2, 2.2)
+        const z = cz + midRng.range(-1.8, 1.8)
+        const s = midRng.range(0.6, 1.9)
+        const rock = new THREE.Mesh(midRng.chance(0.5) ? boulderGeo : rubbleGeo, M.stone)
+        rock.scale.set(s, s * midRng.range(0.55, 0.85), s * midRng.range(0.8, 1.3))
+        rock.position.set(x, heightAt(x, z) + s * 0.24, z)
+        rock.rotation.set(midRng.range(0, 3), midRng.range(0, 3), midRng.range(0, 3))
+        rock.castShadow = true
+        rock.receiveShadow = true
+        group.add(rock)
+        if (s > 1.2) {
+          world.add({
+            transform: { pos: new THREE.Vector3(x, heightAt(x, z) + s * 0.3, z), ry: 0 },
+            mesh: rock,
+            label: 'Rock',
+            props: { STONE: 1, HEAVY: 1, RIGID: 1 },
+            blocker: { radius: s * 0.75 },
+          })
+        }
+      }
+    }
+
+    for (const [x, z, s] of [
+      [5.4, -1.8, 0.95],
+      [-9.4, -7.2, 0.8],
+    ] as const) {
+      plantTree(x, z, 'oak', s, midRng)
     }
   }
 
@@ -1524,9 +1564,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
 
     const shirts: [number, number, number, THREE.Material][] = [
-      [0.24, 0.62, 0.7, M.cloth],
-      [0.5, 0.5, 0.55, M.clothBlue],
-      [0.74, 0.7, 0.62, M.clothRed],
+      [0.2, 0.9, 1.0, M.cloth],
+      [0.48, 0.76, 0.85, M.clothBlue],
+      [0.76, 1.0, 0.9, M.clothRed],
     ]
     for (const [t, w, hh, mat] of shirts) {
       const x = a.x + (b.x - a.x) * t
@@ -1764,8 +1804,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * (IDEAS A1: progress made visible with no UI.)
    */
   {
-    const mx = 8.0
-    const mz = 8.6
+    const mx = 9.3
+    const mz = 10.0
     const h = heightAt(mx, mz)
     const marker = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.0, 0.12), M.plankDark)
     marker.position.set(mx, h + 0.5, mz)
@@ -1822,7 +1862,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     ['bucket', -6.2, 4.3],
     ['plank', -14.0, -1.2],
     ['oil', 6.2, 1.0],
-    ['apple', 8.4, 5.2],
+    ['apple', 9.4, 6.2],
     ['axe', 10.0, 12.1],
   ]
 
