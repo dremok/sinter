@@ -40,7 +40,7 @@
  *       ├ arms    shoulder → elbow → mitt
  *       ├ head    counter-yaw, glances
  *       ├ mantle / cloak   sway, lagged behind the body
- *       └ pack    bounce → lantern (a pendulum)
+ *       └ pack    bounce
  *
  * One stride is 2*pi of `phase`. Everything in the walk hangs off that:
  *
@@ -54,9 +54,9 @@
  * sole flat through the stance, hips and shoulders counter-rotating, and the
  * hips sliding over whichever foot is carrying the weight.
  *
- * Secondary motion is a damped spring per degree of freedom. The cloak, the
- * pack and the lantern chase the body rather than being welded to it, so they
- * arrive late and overshoot when the body stops, which is the whole point.
+ * Secondary motion is a damped spring per degree of freedom. The cloak and the
+ * pack chase the body rather than being welded to it, so they arrive late and
+ * overshoot when the body stops, which is the whole point.
  *
  * Idle is driven by accumulated time, never by randomness: a weight shift that
  * holds on each foot instead of swinging, a slow breath at a different period,
@@ -70,46 +70,40 @@ import { toon, toonUnique } from './toon'
 const TAU = Math.PI * 2
 
 /**
- * Values first, hue second.
+ * Three masses, three values.
  *
- * The frame is about to be desaturated and already carries near-black outlines
- * on everything, so hue does none of the work of finding the player. Measured
- * against the hedge line at the hearth, the old red-on-red character was 57%
- * dark pixels sitting on a background that was 50% dark: in greyscale it was
- * gone, which is the defect. Red simply cannot be a light value, so the biggest
- * mass on the character had to stop being red.
+ * At play size the figure is about 26 by 45 pixels and the scene's outline pass
+ * is a fixed world-space width, so it eats roughly 3 pixels off every edge and
+ * bites irregular wedges out of anything narrow. Under that, a character whose
+ * parts differ only in hue collapses into one smear: the previous pass had a
+ * hood at luma 194 sitting on a mantle at luma 211 and the head could not be
+ * told from the shoulders, which is exactly what happened.
  *
- * The garment is now sun-bleached canvas and the red survives as the lining,
- * the sleeves and the trailing cloak. That gives three separated bands top to
- * bottom, and the character carries its own light AND its own dark, so it
- * separates from a pale sand background and a black hedge alike rather than
- * relying on the ground behind it being green.
+ * So the blocking is value first and everything else second. Head is light,
+ * torso is mid, legs are near-black, and the steps between them are about 90
+ * points each. That reads as three bands even when the outline has eaten the
+ * edges, the frame is desaturated, and every piece of detail is gone.
+ *
+ * The corollary is that detail below about 3 pixels is not detail, it is noise
+ * for the outline to bisect. A lantern, a bedroll, a chest strap, a buckle, hip
+ * pouches, boot cuffs and pack lashings were all modelled here and all deleted:
+ * individually good ideas, collectively a smear.
  */
 const HUE = {
-  /**
-   * The hood. Warm tan rather than bone: the light mass belongs on the mantle,
-   * where the shape is widest, not on the point. A near-white pointed hood over
-   * a dark body is also a silhouette nobody wants on their player character.
-   */
-  cloak: 0xd2c39c,
-  /** The mantle. The light mass, at the widest part of the shape. */
-  mantle: 0xdfd3b4,
-  /** The red, kept as lining, sleeves and the trailing cloak panel. */
-  cloakDeep: 0xb03a30,
-  under: 0x2e3555,
-  trouser: 0x2e3555,
-  /** Lighter than the thigh: the shin is the only leg the hem leaves showing. */
-  shin: 0x4a5680,
-  leather: 0x7a5432,
-  leatherDark: 0x2c1f14,
-  /** Deliberately near-black. This is the dark end of the character's range. */
-  boot: 0x33261a,
-  /** Mid, so the pack reads as a separate object against the pale mantle. */
-  canvas: 0x8a6238,
-  cloth: 0xc9b48a,
-  wrap: 0xf2e7cc,
-  shadow: 0x1a1418,
-  brass: 0xe8a34c,
+  /** Head. The lightest thing on the character by a wide margin. */
+  head: 0xe8dcc0,
+  /** A plane change on the hood brow. Still firmly inside the light band. */
+  headShade: 0xcdbf9e,
+  /** Torso, mantle and sleeves. Mid, and where the red identity now lives. */
+  torso: 0xc16a48,
+  /** The trailing cloak panel, a step under the torso so it reads as behind. */
+  cloak: 0x9c4632,
+  /** Legs, boots, mitts and the collar. One near-black mass. */
+  legs: 0x241d16,
+  /** The pack. Dark, because it sits behind the head and must not compete. */
+  pack: 0x5a4630,
+  /** The face. A hole, not a face. */
+  recess: 0x141014,
 } as const
 
 /** Hip height, and the origin of both the pelvis and the chest. */
@@ -228,7 +222,6 @@ export class Character {
   private readonly mantle = new THREE.Group()
   private readonly cloak = new THREE.Group()
   private readonly pack = new THREE.Group()
-  private readonly lantern = new THREE.Group()
   private readonly legs: Leg[] = []
   private readonly arms: Arm[] = []
 
@@ -250,8 +243,6 @@ export class Character {
   private readonly cloakRoll = new Spring(105, 13)
   private readonly mantleRoll = new Spring(190, 20)
   private readonly packLift = new Spring(150, 16)
-  private readonly lanternRoll = new Spring(260, 11)
-  private readonly lanternPitch = new Spring(260, 11)
 
   constructor() {
     this.group.add(this.root)
@@ -270,34 +261,31 @@ export class Character {
   private buildLegs(): void {
     for (const side of [-1, 1] as const) {
       const hip = new THREE.Group()
-      hip.position.set(side * 0.105, 0, 0)
+      // Half a leg-width apart, so at rest the two legs touch and the lower
+      // body is a single dark block. Thin legs with a gap between them do not
+      // survive: at 26px wide with 3px of outline on each edge, the previous
+      // pair came out as two stray pixels.
+      hip.position.set(side * 0.1, 0, 0)
 
-      const thigh = bevel(0.15, 0.23, 0.16, HUE.trouser)
-      thigh.position.y = -0.115
+      const thigh = bevel(0.2, 0.24, 0.19, HUE.legs)
+      thigh.position.y = -0.12
       hip.add(thigh)
 
       const knee = new THREE.Group()
-      knee.position.y = -0.21
+      knee.position.y = -0.23
       hip.add(knee)
 
-      const shin = bevel(0.13, 0.19, 0.14, HUE.shin, 0.92)
-      shin.position.y = -0.095
+      const shin = bevel(0.19, 0.2, 0.18, HUE.legs, 0.95)
+      shin.position.y = -0.1
       knee.add(shin)
 
       const ankle = new THREE.Group()
-      ankle.position.y = -0.185
+      ankle.position.y = -0.2
       knee.add(ankle)
 
-      // Oversized boots pushed forward at the toe. Below the hem they are the
-      // only part of the lower body that is not covered, so they carry the
-      // whole step: a boot that is only as wide as its leg reads as a stick.
-      const boot = bevel(0.21, 0.155, 0.26, HUE.boot)
-      boot.position.set(0, -0.078, 0.04)
+      const boot = bevel(0.24, 0.16, 0.29, HUE.legs)
+      boot.position.set(0, -0.04, 0.045)
       ankle.add(boot)
-
-      const cuff = bevel(0.17, 0.06, 0.17, HUE.leatherDark)
-      cuff.position.y = 0.02
-      ankle.add(cuff)
 
       this.hips.add(hip)
       this.legs.push({ side, hip, knee, ankle, offset: side < 0 ? 0 : Math.PI })
@@ -305,41 +293,20 @@ export class Character {
   }
 
   private buildTorso(): void {
-    const torso = bevel(0.36, 0.42, 0.27, HUE.under, 1.06)
-    torso.position.y = 0.19
+    const torso = bevel(0.38, 0.44, 0.28, HUE.torso, 1.05)
+    torso.position.y = 0.2
     this.chest.add(torso)
-
-    // Hangs below the mantle hem, on the opposite side to the lantern, so the
-    // outline is never the same on both sides.
-    const pouch = bevel(0.15, 0.17, 0.12, HUE.leather)
-    pouch.position.set(-0.2, -0.02, 0.06)
-    this.chest.add(pouch)
-
-    const flapPouch = bevel(0.16, 0.05, 0.13, HUE.leatherDark)
-    flapPouch.position.set(-0.2, 0.06, 0.06)
-    this.chest.add(flapPouch)
-
-    // One pale strap across the chest. Two dark vertical ones were tried first
-    // and were invisible: at this size the only marks that survive are the ones
-    // that run across the shape rather than along it, and that are a different
-    // value from what they lie on. The mid body was otherwise a single flat
-    // slab of dark red between the collar and the hem.
-    const strap = bevel(0.06, 0.44, 0.06, HUE.leatherDark)
-    strap.position.set(0, 0.19, 0.115)
-    strap.rotation.z = 0.62
-    this.chest.add(strap)
-
-    const buckle = bevel(0.07, 0.06, 0.07, HUE.brass)
-    buckle.position.set(-0.09, 0.06, 0.13)
-    this.chest.add(buckle)
   }
 
   private buildArms(): void {
     for (const side of [-1, 1] as const) {
       const shoulder = new THREE.Group()
-      shoulder.position.set(side * 0.2, SHOULDER, 0)
+      shoulder.position.set(side * 0.17, SHOULDER, 0)
 
-      const upper = bevel(0.12, 0.22, 0.13, HUE.cloakDeep)
+      // The whole arm is dark and tucked inside the mantle's shoulder radius.
+      // Only the forearm and mitt clear the hem, so the arm swings inside the
+      // lower dark mass rather than leaving a lit sliver beside the torso.
+      const upper = bevel(0.13, 0.22, 0.14, HUE.legs)
       upper.position.y = -0.11
       shoulder.add(upper)
 
@@ -347,11 +314,11 @@ export class Character {
       elbow.position.y = -0.2
       shoulder.add(elbow)
 
-      const fore = bevel(0.11, 0.18, 0.12, HUE.cloakDeep)
+      const fore = bevel(0.12, 0.18, 0.13, HUE.legs)
       fore.position.y = -0.09
       elbow.add(fore)
 
-      const mitt = bevel(0.12, 0.11, 0.13, HUE.leather)
+      const mitt = bevel(0.13, 0.12, 0.14, HUE.legs)
       mitt.position.y = -0.215
       elbow.add(mitt)
 
@@ -364,83 +331,58 @@ export class Character {
     this.head.position.y = NECK
     this.chest.add(this.head)
 
-    // A dark collar where the hood meets the mantle. One row of shadow, and
-    // the head stops being the top of a continuous red lump.
-    const collar = bevel(0.3, 0.06, 0.28, HUE.leatherDark)
-    collar.position.y = -0.02
+    // A near-black collar between the light head and the mid torso. The value
+    // step already separates them; this makes the join a hard edge rather than
+    // a gradient the outline can smudge.
+    const collar = bevel(0.3, 0.09, 0.28, HUE.legs)
+    collar.position.y = -0.03
     this.head.add(collar)
 
-    // The hood is the character. Big, square, and set back so its brow hangs
-    // over the face.
-    const hood = bevel(0.32, 0.3, 0.31, HUE.cloak)
-    hood.position.set(0, 0.16, -0.01)
+    // ONE form. A separate brow and a separate swept-back tip were modelled
+    // here and both are gone: each carried its own outline, and where they met
+    // the hood the two outlines doubled into black wedges that cut the head to
+    // pieces. Deeper than it is wide and tapered toward the crown, which gives
+    // a cowl profile out of a single unbroken light mass.
+    const hood = bevel(0.36, 0.34, 0.42, HUE.head, 0.88)
+    hood.position.set(0, 0.19, -0.04)
     this.head.add(hood)
 
-    // No eyes. At nine pixels of head an eye is one pixel and reads as dirt.
-    // A dark recess with one pale band across it reads as a wrapped face, and
-    // more usefully it says which way the character is pointed.
-    const recess = box(0.23, 0.19, 0.06, HUE.shadow)
-    recess.position.set(0, 0.14, 0.145)
+    // No eyes, no face wrap. Both were about two pixels and read as dirt. A
+    // dark hole under the crown is all the face this size can carry, and it is
+    // the only thing that says which way the character is pointed.
+    const recess = box(0.24, 0.2, 0.06, HUE.recess)
+    recess.position.set(0, 0.15, 0.15)
     this.head.add(recess)
-
-    const wrap = bevel(0.2, 0.09, 0.09, HUE.wrap)
-    wrap.position.set(0, 0.09, 0.145)
-    this.head.add(wrap)
-
-    // Brow forward, crown back to a point. Both are outline, nothing else.
-    const brow = bevel(0.31, 0.08, 0.15, HUE.cloakDeep)
-    brow.position.set(0, 0.25, 0.125)
-    brow.rotation.x = 0.24
-    this.head.add(brow)
-
-    const tipGeo = new THREE.CylinderGeometry(0.02, 0.125, 0.24, 4)
-    tipGeo.rotateY(Math.PI / 4)
-    tipGeo.translate(0, 0.12, 0)
-    const tip = mesh(faceted(tipGeo), HUE.cloakDeep)
-    tip.position.set(0, 0.25, -0.12)
-    tip.rotation.x = -0.7
-    this.head.add(tip)
   }
 
   private buildCloth(): void {
     this.mantle.position.y = 0.35
     this.chest.add(this.mantle)
 
-    // A short cone off the shoulders. Covers the upper arms and swallows the
-    // neck, so the head sits straight on a flaring wedge with no join.
-    //
-    // Narrow. The first pass had this at 0.325 and the character read as a
-    // bell with a point on top: at 36 pixels a cloth mass much wider than the
-    // head stops being a garment and becomes the whole body.
-    const mantleGeo = new THREE.CylinderGeometry(0.18, 0.255, 0.26, 8, 1, true)
+    // The mantle IS the torso band, so it takes the torso value rather than a
+    // separate one. It hangs to just above the knee, which leaves a long dark
+    // leg mass below it: the previous hem sat high enough that the legs were
+    // barely present at all.
+    const mantleGeo = new THREE.CylinderGeometry(0.195, 0.275, 0.32, 8, 1, true)
     mantleGeo.rotateY(Math.PI / 8)
-    mantleGeo.translate(0, -0.13, 0)
+    mantleGeo.translate(0, -0.16, 0)
     const mantleMesh = new THREE.Mesh(
       faceted(mantleGeo),
-      toonUnique({ color: HUE.mantle, side: THREE.DoubleSide }),
+      toonUnique({ color: HUE.torso, side: THREE.DoubleSide }),
     )
     mantleMesh.castShadow = true
     this.mantle.add(mantleMesh)
 
-    // A hard dark lip at the hem. One dark row of pixels is what turns a
-    // continuous red mass into shoulders, then skirt, then legs.
-    const trim = bevel(0.6, 0.06, 0.6, HUE.leatherDark)
-    trim.position.y = -0.255
-    this.mantle.add(trim)
-
     this.cloak.position.set(0, 0.32, -0.03)
     this.chest.add(this.cloak)
 
-    // The long panel behind. 120 degrees of arc, so it wraps the back and
-    // stops well short of the arms instead of crossing in front of the legs,
-    // and it hangs to the knee rather than the ankle. This is the piece that
-    // does the follow-through, and the piece a player would draw from memory.
+    // The long panel behind, and the only piece left that does follow-through.
     const arc = 2.1
-    const cloakGeo = new THREE.CylinderGeometry(0.195, 0.335, 0.45, 8, 1, true, Math.PI - arc / 2, arc)
-    cloakGeo.translate(0, -0.225, 0)
+    const cloakGeo = new THREE.CylinderGeometry(0.2, 0.32, 0.44, 8, 1, true, Math.PI - arc / 2, arc)
+    cloakGeo.translate(0, -0.22, 0)
     const cloakMesh = new THREE.Mesh(
       faceted(cloakGeo),
-      toonUnique({ color: HUE.cloakDeep, side: THREE.DoubleSide }),
+      toonUnique({ color: HUE.cloak, side: THREE.DoubleSide }),
     )
     cloakMesh.castShadow = true
     this.cloak.add(cloakMesh)
@@ -450,45 +392,13 @@ export class Character {
     this.pack.position.copy(PACK)
     this.chest.add(this.pack)
 
-    const sack = bevel(0.33, 0.36, 0.24, HUE.canvas, 0.92)
-    sack.position.y = 0.15
+    // One mass. The lid, the bedroll, the lashings and the hanging lantern all
+    // lived here and all had to go: the bedroll in particular stuck out either
+    // side of the hood, which is precisely what made head and shoulders
+    // impossible to tell apart.
+    const sack = bevel(0.32, 0.38, 0.24, HUE.pack, 0.92)
+    sack.position.y = 0.16
     this.pack.add(sack)
-
-    const lid = bevel(0.34, 0.08, 0.25, HUE.leather)
-    lid.position.y = 0.35
-    this.pack.add(lid)
-
-    // Bedroll lashed across the top, half again as wide as the hood and
-    // brighter than everything around it. In outline it is a pale bar sticking
-    // out either side of the head, and it is the single fastest way to say
-    // "this person is carrying their whole life". Anything narrower than the
-    // hood disappears inside the silhouette and may as well not be modelled.
-    const rollGeo = new THREE.CylinderGeometry(0.065, 0.065, 0.5, 6)
-    rollGeo.rotateZ(Math.PI / 2)
-    const roll = mesh(faceted(rollGeo), HUE.cloth)
-    roll.position.set(0, 0.29, 0.01)
-    this.pack.add(roll)
-
-    for (const side of [-1, 1] as const) {
-      const lash = box(0.035, 0.16, 0.25, HUE.leatherDark)
-      lash.position.set(side * 0.1, 0.24, 0.01)
-      this.pack.add(lash)
-    }
-
-    this.lantern.position.set(0.19, 0.12, -0.02)
-    this.pack.add(this.lantern)
-
-    const hook = box(0.025, 0.08, 0.025, HUE.leatherDark)
-    hook.position.y = -0.04
-    this.lantern.add(hook)
-
-    const cap = bevel(0.11, 0.03, 0.11, HUE.leatherDark)
-    cap.position.y = -0.09
-    this.lantern.add(cap)
-
-    const lamp = bevel(0.1, 0.11, 0.1, HUE.brass)
-    lamp.position.y = -0.155
-    this.lantern.add(lamp)
   }
 
   /**
@@ -632,11 +542,5 @@ export class Character {
     this.packLift.step(h, rise)
     this.pack.position.y = PACK.y + (this.packLift.value - rise) * 0.8
     this.pack.rotation.x = -this.cloakPitch.value * 0.22
-
-    // The lantern is a pendulum, so it hangs down whatever the body is doing.
-    this.lanternRoll.step(h, -cp * 0.34 * w - turn * 0.07)
-    this.lanternPitch.step(h, clamp(accel * 0.02, -0.35, 0.45) + rise * 1.2)
-    this.lantern.rotation.z = this.lanternRoll.value - this.chest.rotation.z - this.root.rotation.z
-    this.lantern.rotation.x = this.lanternPitch.value - this.chest.rotation.x - this.root.rotation.x
   }
 }

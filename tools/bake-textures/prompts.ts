@@ -119,7 +119,7 @@ export const SPECS: readonly TextureSpec[] = [
       'tenth of the image wide. Densely covered in small individual tufts of grass ' +
       'blades a few pixels across, so it reads as separate plants rather than as a ' +
       'uniform carpet. Olive and sage green, never emerald, never bright.',
-    palette: [...RAMP.grass, ...steps(RAMP.dirt, 1, 4)],
+    palette: [...RAMP.grass, ...steps(RAMP.dirt, 0, 3)],
     stretch: 0.85,
     gamma: 1,
     sharpen: 0.4,
@@ -129,7 +129,10 @@ export const SPECS: readonly TextureSpec[] = [
       'One tile spans the whole 92-unit region, so nothing in it may repeat, and it ' +
       'is the one texture that wants variation at three separate scales. The dirt ' +
       'ramp is in the palette because worn soil belongs inside the grass tile, ' +
-      'exactly as in the code-drawn version.',
+      'exactly as in the code-drawn version, but it is taken from the dark end: ' +
+      'steps 1 to 4 put a mid red-brown patch against sage green and it read as raw ' +
+      'meat, which is precisely the kind of thing Max meant by too saturated. Value ' +
+      'separates the soil from the turf here, not chroma.',
   },
   {
     name: 'sand',
@@ -218,14 +221,15 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 5.3,
     prompt:
-      `${STYLE} A wall of rough hewn granite blocks seen flat on, about seven large ` +
-      'blocks across the image and seven down. Thin dark joints between the blocks, ' +
-      'each block a distinctly different flat tone from its neighbours, one or two ' +
-      'chipped corners, one crack. Nearly neutral warm grey.',
+      `${STYLE} A wall of only five or six very large rough hewn granite boulders ` +
+      'across the image and five or six down, each one filling a big area. Thin dark ' +
+      'joints between them, every block a strongly different flat tone from its ' +
+      'neighbours, some near black and some almost white, one or two chipped corners, ' +
+      'one crack. Nearly neutral warm grey.',
     palette: [...RAMP.stone],
-    stretch: 0.8,
+    stretch: 0.95,
     gamma: 1,
-    sharpen: 0.6,
+    sharpen: 0.5,
     flatten: 1,
     notes:
       'Blocks rather than a rock face, because the joints are what survives reduction ' +
@@ -264,12 +268,13 @@ export const SPECS: readonly TextureSpec[] = [
       'stacked from top to bottom of the image. Each course is one bold flat band of ' +
       'straw with a strong dark shadow line along its top edge where the course above ' +
       'overlaps it, and a paler band of cut ends along its lower edge. Only a few ' +
-      'large clumps of stalks are picked out; the rest of each band is flat. Dry pale ' +
-      'golden brown, dusty, not yellow.',
+      'large clumps of stalks are picked out; the rest of each band is flat. Grey ' +
+      'weathered sun-bleached straw, dull greyish brown rather than gold, dusty, ' +
+      'barely any colour in it at all.',
     palette: [...RAMP.straw],
     stretch: 0.85,
     gamma: 1,
-    sharpen: 0.6,
+    sharpen: 0.2,
     flatten: 1,
     notes:
       'Courses, not fur. Eight courses over 5.3 units is eight texels each, so a ' +
@@ -401,7 +406,7 @@ export const SPEC_BY_NAME = new Map(SPECS.map((s) => [s.name, s]))
  * shared style string. It is hashed alongside each spec, so bumping it is how a
  * pipeline change invalidates the cache without anyone editing fourteen prompts.
  */
-export const PIPELINE_VERSION = 7
+export const PIPELINE_VERSION = 10
 
 /** The fal.ai endpoint. PATINA is fal's tiling material model; see ASSET_PIPELINE. */
 export const MODEL = 'fal-ai/patina/material'

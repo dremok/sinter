@@ -456,9 +456,10 @@ export class Ui {
     const actions = el('div', 'card-actions')
     const mode = useOf(def).mode
     if (GLYPHED.includes(mode)) {
-      const glyph = this.modeGlyph(mode)
-      glyph.classList.add('card-mode')
-      actions.append(glyph)
+      const badge = this.modeGlyph(mode)
+      badge.classList.add('card-mode')
+      badge.append(el('span', undefined, MODES[mode].label))
+      actions.append(badge)
     }
     if (picked) actions.append(el('div', 'card-slot', String(picked)))
     if (this.hooks.onHold) {
@@ -796,10 +797,27 @@ export class Ui {
     node.append(act)
   }
 
+  /**
+   * The targeting pill, shown only when there is a key to press.
+   *
+   * `main.ts` also sends a prompt for a thing you cannot act on, which used to
+   * mean "Dry grass. Nothing you carry acts on this." sat in the frame more or
+   * less permanently. Greying it back made it illegible instead of making it
+   * go away, so the rule is now structural rather than a matter of degree: a
+   * prompt with no keycap in it is not an offer, and the frame stays clear.
+   *
+   * Asking the rendered markup, rather than matching on the string, because
+   * "does this offer a key" is exactly the question and it keeps being the
+   * right question when the wording changes.
+   */
   prompt(html: string | null): void {
     const node = $('prompt')
-    node.classList.toggle('on', html !== null)
-    if (html !== null) node.innerHTML = html
+    if (html === null) {
+      node.classList.remove('on')
+      return
+    }
+    node.innerHTML = html
+    node.classList.toggle('on', node.querySelector('.key') !== null)
   }
 
   flash(): void {

@@ -399,7 +399,17 @@
       /* Right of the name: use mode, bench slot, and the control that takes the
          thing in hand. All small, all optional, none of them reflow the row. */
       .card-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 7px; }
-      .card-mode { color: var(--ink-2); }
+      /*
+       * Glyph AND word. A lone arc at the end of a row is an artifact until
+       * something tells you what it means, and a tooltip only helps a player
+       * who already suspected it was meaningful. Two of these in a pack of ten
+       * is affordable; the mode is the point of the badge.
+       */
+      .card-mode {
+        display: flex; align-items: center; gap: 4px;
+        color: var(--ink-2);
+        font: 500 8.5px/1 var(--ui); letter-spacing: 0.14em; text-transform: uppercase;
+      }
       .card:hover .card-mode { color: var(--ink); }
       .card-slot { font: 400 12px/1 var(--display); color: var(--warm); }
 

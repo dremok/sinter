@@ -71,6 +71,21 @@ export interface PartSpec {
   at: [number, number, number]
   rot?: [number, number, number]
   material: MaterialKind
+
+  /**
+   * The part that IS the item, for anything asking "what does this look like".
+   * Optional; without it the largest part by scale product wins, which is right
+   * for most items and wrong for anything whose identity is a solid body next
+   * to something wide and thin.
+   *
+   * The bucket is the case that proved it. Its hoop is 1.3 by 1 by 1.3 and its
+   * body is 1.1 cubed, so the hoop scored higher and every merge involving a
+   * bucket inherited a steel band and a disc of water without the bucket. D6
+   * says a merge result should visibly contain its parents, and it did not.
+   * Scale alone cannot know that a hoop is a thin ring and a body is a volume,
+   * because the intrinsic size lives in the glb.
+   */
+  signature?: true
 }
 
 /** Distance from home. The genre gradient in `docs/DESIGN.md` is this axis. */
@@ -238,7 +253,7 @@ add({
   // through the affordance list, which asks about WATER and not about this.
   use: { mode: 'projected', range: 6, onLand: 'water_burst', leaves: 'lands' },
   parts: [
-    { part: 'bucket_body', scale: [1.1, 1.1, 1.1], at: [0, -0.16, 0], material: 'wood' },
+    { part: 'bucket_body', scale: [1.1, 1.1, 1.1], at: [0, -0.16, 0], material: 'wood', signature: true },
     { part: 'disc_flat', scale: [1.25, 1, 1.25], at: [0, 0.11, 0], material: 'water' },
     { part: 'ring_band', scale: [1.3, 1, 1.3], at: [0, 0.13, 0], rot: [1.57, 0, 0], material: 'steel' },
   ],
@@ -306,7 +321,9 @@ add({
   // Two actions, neither of which authors what burns.
   use: { mode: 'projected', range: 8, onLand: 'oil_spill', leaves: 'shatters' },
   parts: [
-    { part: 'flask_body', scale: [1, 1, 1], at: [0, -0.15, 0], material: 'glass' },
+    // Ties with the stopper on scale product, and a tie is decided by sort
+    // order, which is not a thing to leave to chance.
+    { part: 'flask_body', scale: [1, 1, 1], at: [0, -0.15, 0], material: 'glass', signature: true },
     { part: 'stopper', scale: [1, 1, 1], at: [0, 0.14, 0], material: 'clay' },
   ],
 })
@@ -316,8 +333,15 @@ add({
   name: 'Red Apple',
   desc: 'Windfall. One side is bruised.',
   props: { EDIBLE: 0.9, SEED: 0.25, PLANT: 0.4 },
+  // `clay` is a holding position, not the intended colour. This was `ember`,
+  // which is the fire ramp AND emissive at intensity 1.5, so the apple was not
+  // merely the wrong orange, it was a light source, and every merge inheriting
+  // apple_body glowed too. `clay` is matte and closer to red. The real answer
+  // is the `fruit` ramp that already exists in palette.ts and textures.ts and
+  // needs two lines to reach kitbash's material map; this becomes `fruit` the
+  // day those land.
   parts: [
-    { part: 'apple_body', scale: [1.15, 1.15, 1.15], at: [0, -0.11, 0], material: 'ember' },
+    { part: 'apple_body', scale: [1.15, 1.15, 1.15], at: [0, -0.11, 0], material: 'clay', signature: true },
     { part: 'nail_spike', scale: [0.5, 0.45, 0.5], at: [0, 0.09, 0], material: 'wood' },
   ],
 })
@@ -325,11 +349,18 @@ add({
 add({
   id: 'chili',
   name: 'Chili Fruit',
-  desc: 'Small, red, and hotter than it has any right to be.',
+  desc: 'Green, thin, and hotter than it has any right to be.',
   props: { EDIBLE: 0.6, PLANT: 0.7, TOXIC: 0.3 },
+  // Green rather than red, which is a design call and not a limitation. Both
+  // this and the apple were on `ember`, so they were the same pumpkin orange at
+  // near the same size, and picking the wrong one at the bench costs an item
+  // permanently. Silhouette alone will not save it at 240p, so the hue has to
+  // differ too. A green chili is just as recognisable as a red one and the
+  // collision cannot come back. The woody stem is there for internal contrast,
+  // since a green pod on a green cap reads as one flat blob.
   parts: [
-    { part: 'apple_body', scale: [0.55, 1.35, 0.55], at: [0, -0.16, 0], material: 'ember' },
-    { part: 'leaf_cluster', scale: [0.45, 0.45, 0.45], at: [0, 0.15, 0], material: 'leaf' },
+    { part: 'apple_body', scale: [0.5, 1.45, 0.5], at: [0, -0.16, 0], material: 'leaf' },
+    { part: 'leaf_cluster', scale: [0.4, 0.4, 0.4], at: [0, 0.16, 0], material: 'wood' },
   ],
 })
 
@@ -339,7 +370,7 @@ add({
   desc: 'Kept in the barn for the barn’s problem. A grey powder, no smell.',
   props: { TOXIC: 0.9, EDIBLE: 0.2 },
   parts: [
-    { part: 'jar_body', scale: [0.85, 0.9, 0.85], at: [0, -0.16, 0], material: 'clay' },
+    { part: 'jar_body', scale: [0.85, 0.9, 0.85], at: [0, -0.16, 0], material: 'clay', signature: true },
     { part: 'stopper', scale: [0.9, 0.9, 0.9], at: [0, 0.12, 0], material: 'wood' },
   ],
 })

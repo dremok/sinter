@@ -1,207 +1,279 @@
 {
   "bark": {
-    "hash": "752be40eb77dbc4f",
+    "hash": "a50c2bbf0473a947",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9043,
-    "bytes": 1106,
+    "bytes": 1138,
+    "phase": [
+      6,
+      15
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.23,
-      "seamY": 0.391,
-      "busyness": 0.0403,
+      "seamX": 0.785,
+      "seamY": 0.358,
+      "busyness": 0.0412,
       "used": 6,
-      "dominance": 0.371
+      "dominance": 0.328
     }
   },
   "clay": {
-    "hash": "2f49301f18951dd7",
+    "hash": "454f366c777a6a62",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9043,
-    "bytes": 649,
+    "bytes": 663,
+    "phase": [
+      0,
+      14
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.208,
-      "seamY": 1.594,
-      "busyness": 0.0257,
+      "seamX": 0.206,
+      "seamY": 1.188,
+      "busyness": 0.0264,
       "used": 5,
-      "dominance": 0.371
+      "dominance": 0.39
     }
   },
   "cloth": {
-    "hash": "55528ef3a9f03f37",
+    "hash": "76105d3751fb5744",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 1396,
+    "bytes": 1419,
+    "phase": [
+      14,
+      13
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 1.145,
-      "seamY": 1.116,
-      "busyness": 0.0641,
+      "seamX": 1.097,
+      "seamY": 0.97,
+      "busyness": 0.0705,
       "used": 5,
-      "dominance": 0.401
+      "dominance": 0.364
     }
   },
   "ember": {
-    "hash": "87db37a1a8fe080a",
+    "hash": "24b51886484600da",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 1132,
+    "bytes": 1172,
+    "phase": [
+      14,
+      1
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 1.127,
-      "seamY": 1.423,
-      "busyness": 0.0983,
+      "seamX": 0.741,
+      "seamY": 1.344,
+      "busyness": 0.1023,
       "used": 6,
-      "dominance": 0.544
+      "dominance": 0.528
     }
   },
   "foliage": {
-    "hash": "7d8cbf14d5c740b1",
+    "hash": "21d7aea760b6ab7d",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9136,
     "bytes": 1370,
+    "phase": [
+      0,
+      2
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.97,
-      "seamY": 0.785,
-      "busyness": 0.0489,
+      "seamX": 0.947,
+      "seamY": 0.723,
+      "busyness": 0.0488,
       "used": 6,
-      "dominance": 0.256
+      "dominance": 0.254
     }
   },
   "glass": {
-    "hash": "bb93958dbc7c7d4f",
+    "hash": "9b40b162cb213bc1",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 867,
+    "bytes": 879,
+    "phase": [
+      0,
+      15
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.731,
-      "seamY": 1.105,
-      "busyness": 0.0225,
+      "seamX": 0.714,
+      "seamY": 0.85,
+      "busyness": 0.0229,
       "used": 5,
-      "dominance": 0.438
+      "dominance": 0.432
     }
   },
   "gold": {
-    "hash": "dc2c75f2f5782832",
+    "hash": "3451ecc2fcf6238c",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9043,
-    "bytes": 734,
+    "bytes": 741,
+    "phase": [
+      15,
+      9
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.771,
-      "seamY": 1.335,
+      "seamX": 0.866,
+      "seamY": 0.782,
       "busyness": 0.0293,
       "used": 6,
-      "dominance": 0.352
+      "dominance": 0.354
     }
   },
   "grass": {
-    "hash": "b62adc1e87e93f4e",
+    "hash": "864145611c54c524",
     "size": 1024,
     "worldUnits": 85.3,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 94322,
+    "bytes": 94916,
+    "phase": [
+      1,
+      1
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 1.067,
-      "seamY": 0.839,
-      "busyness": 0.0127,
-      "used": 9,
-      "dominance": 0.358
+      "seamX": 1.05,
+      "seamY": 0.804,
+      "busyness": 0.0128,
+      "used": 8,
+      "dominance": 0.356
+    }
+  },
+  "plank": {
+    "hash": "de2d90dbdebae5fb",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9074,
+    "bytes": 741,
+    "phase": [
+      3,
+      15
+    ],
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.644,
+      "seamY": 0.944,
+      "busyness": 0.0502,
+      "used": 5,
+      "dominance": 0.326
     }
   },
   "sand": {
-    "hash": "1ea962cb5195944c",
+    "hash": "3b2ddfd89b3e66c6",
     "size": 256,
     "worldUnits": 21.3,
     "model": "fal-ai/patina/material",
     "seed": 16962,
-    "bytes": 5431,
+    "bytes": 5794,
+    "phase": [
+      3,
+      0
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
       "seamX": 0.488,
-      "seamY": 0.832,
-      "busyness": 0.0182,
-      "used": 8,
-      "dominance": 0.279
+      "seamY": 1.358,
+      "busyness": 0.0187,
+      "used": 9,
+      "dominance": 0.242
     }
   },
   "steel": {
-    "hash": "524e0de751cc80a6",
+    "hash": "ae52aac74f6f7d1b",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 631,
+    "bytes": 623,
+    "phase": [
+      14,
+      0
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.419,
-      "seamY": 1.306,
-      "busyness": 0.038,
+      "seamX": 0.396,
+      "seamY": 1.231,
+      "busyness": 0.0378,
       "used": 6,
-      "dominance": 0.447
+      "dominance": 0.446
     }
   },
   "stone": {
-    "hash": "b5e5b02f280b68db",
+    "hash": "f0f740772723a20c",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9074,
+    "bytes": 884,
+    "phase": [
+      15,
+      6
+    ],
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.584,
+      "seamY": 0.078,
+      "busyness": 0.0344,
+      "used": 6,
+      "dominance": 0.224
+    }
+  },
+  "straw": {
+    "hash": "ec061f94b462da59",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 24912,
-    "bytes": 1031,
+    "bytes": 991,
+    "phase": [
+      2,
+      13
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.799,
-      "seamY": 1.017,
-      "busyness": 0.0473,
-      "used": 5,
-      "dominance": 0.286
-    }
-  },
-  "straw": {
-    "hash": "34e14bd2234935f5",
-    "size": 64,
-    "worldUnits": 5.3,
-    "model": "fal-ai/patina/material",
-    "seed": 32831,
-    "bytes": 1180,
-    "generatedAt": "2026-07-25",
-    "metrics": {
-      "seamX": 0.648,
-      "seamY": 0.467,
-      "busyness": 0.0734,
-      "used": 5,
-      "dominance": 0.496
+      "seamX": 1.062,
+      "seamY": 0.482,
+      "busyness": 0.0617,
+      "used": 6,
+      "dominance": 0.478
     }
   },
   "water": {
-    "hash": "bc7a0a0a6fc48763",
+    "hash": "f8cef5292a8537a2",
     "size": 128,
     "worldUnits": 10.7,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 1456,
+    "bytes": 1448,
+    "phase": [
+      4,
+      0
+    ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.851,
-      "seamY": 1.226,
+      "seamX": 1.056,
+      "seamY": 1.221,
       "busyness": 0.0122,
       "used": 5,
       "dominance": 0.31

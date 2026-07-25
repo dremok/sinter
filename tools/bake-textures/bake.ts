@@ -39,6 +39,7 @@ import { fileURLToPath } from 'node:url'
 
 import { decodePng, encodeIndexedPng, type Bitmap } from './png'
 import {
+  bestPhase,
   chromaDistance,
   flattenLighting,
   inspectTiling,
@@ -132,6 +133,11 @@ const LIMIT_OVERRIDES: Record<string, Partial<Limits>> = {
   ember: { maxDominance: 0.7, maxBusyness: 0.12 },
   // The weave is two texels a thread, which is deliberately at the noise ceiling.
   cloth: { maxBusyness: 0.11 },
+  // Tighter than the default, not looser. Thatch is the material the models most
+  // want to render as a fine woven mat, and at 16:1 a fine mat reduces to static:
+  // the first draw passed the general ceiling at 0.075 and still looked like
+  // grain on a lens rather than like courses of cut straw.
+  straw: { maxBusyness: 0.062 },
 }
 
 function limitsFor(spec: TextureSpec): Limits {
@@ -147,6 +153,7 @@ interface Entry {
   model: string
   seed: number
   bytes: number
+  phase: [number, number]
   generatedAt: string
   metrics: { seamX: number; seamY: number; busyness: number; used: number; dominance: number }
 }
@@ -204,12 +211,18 @@ interface Attempt {
   drift: number
   /** The palette's own mean chroma, which scales the drift bound. */
   paletteChroma: number
+  /** The sub-block reduction offset chosen for this source. */
+  phase: [number, number]
   seed: number
   failures: string[]
 }
 
 function pipeline(spec: TextureSpec, source: Bitmap): Omit<Attempt, 'seed' | 'failures'> {
-  const small = sharpen(flattenLighting(reduce(source, spec.size), spec.flatten), spec.sharpen)
+  const phase = bestPhase(source, spec.size)
+  const small = sharpen(
+    flattenLighting(reduce(source, spec.size, phase), spec.flatten),
+    spec.sharpen,
+  )
   const snapped = snapToPalette(small, {
     palette: spec.palette,
     stretch: spec.stretch,
@@ -233,6 +246,7 @@ function pipeline(spec: TextureSpec, source: Bitmap): Omit<Attempt, 'seed' | 'fa
     // model painted the right material.
     drift: chromaDistance(meanLab(small), paletteMean),
     paletteChroma: Math.hypot(paletteMean.a, paletteMean.b),
+    phase,
   }
 }
 
@@ -443,6 +457,7 @@ async function main(): Promise<void> {
           `  busy ${done.report.busyness.toFixed(3)}` +
           `  steps ${done.used}/${spec.palette.length}` +
           `  dominance ${(done.dominance * 100).toFixed(0)}%` +
+          `  phase ${done.phase[0]},${done.phase[1]}` +
           `  drift ${done.drift.toFixed(3)}`,
       )
 
@@ -466,6 +481,7 @@ async function main(): Promise<void> {
         model: MODEL,
         seed,
         bytes: png.length,
+        phase: done.phase,
         generatedAt: new Date().toISOString().slice(0, 10),
         metrics: {
           seamX: Number(done.report.seamX.toFixed(3)),

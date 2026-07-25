@@ -495,9 +495,16 @@ export const RECIPES: Recipe[] = [
   },
 ]
 
-/** Volume proxy, used to find each parent's signature part. */
+/**
+ * How much a part counts as the item's identity.
+ *
+ * The scale product is only a proxy, and it is wrong for anything whose body
+ * sits next to something wide and thin: a bucket's hoop outscored its own body,
+ * so every merge involving a bucket inherited a steel band and no bucket. An
+ * explicit `signature` beats the proxy, which is why `PartSpec` has one.
+ */
 function bulk(s: PartSpec): number {
-  return s.scale[0] * s.scale[1] * s.scale[2]
+  return s.signature ? Infinity : s.scale[0] * s.scale[1] * s.scale[2]
 }
 
 /**
@@ -510,14 +517,17 @@ function inheritParts(a: ItemDef, b: ItemDef): PartSpec[] {
   const primary = pick(a, 2).map(
     (s): PartSpec => ({ ...s, scale: [s.scale[0] * 0.92, s.scale[1] * 0.92, s.scale[2] * 0.92] }),
   )
-  const secondary = pick(b, 1).map(
-    (s): PartSpec => ({
-      ...s,
-      scale: [s.scale[0] * 0.78, s.scale[1] * 0.78, s.scale[2] * 0.78],
-      at: [s.at[0] + 0.12, s.at[1] + 0.2, s.at[2] + 0.06],
-      rot: [(s.rot?.[0] ?? 0) + 0.35, s.rot?.[1] ?? 0, (s.rot?.[2] ?? 0) + 0.5],
-    }),
-  )
+  // The secondary parent's signature is dropped, not copied. Two parts both
+  // claiming to be the identity is a tie, and a tie is resolved by sort order,
+  // which is not a thing to leave to chance in a module whose first promise is
+  // determinism. The result keeps ONE identity part, inherited from the parent
+  // that sorts first, and a result with no marked part falls back to scale.
+  const secondary = pick(b, 1).map(({ signature: _drop, ...s }): PartSpec => ({
+    ...s,
+    scale: [s.scale[0] * 0.78, s.scale[1] * 0.78, s.scale[2] * 0.78],
+    at: [s.at[0] + 0.12, s.at[1] + 0.2, s.at[2] + 0.06],
+    rot: [(s.rot?.[0] ?? 0) + 0.35, s.rot?.[1] ?? 0, (s.rot?.[2] ?? 0) + 0.5],
+  }))
 
   return [...primary, ...secondary]
 }

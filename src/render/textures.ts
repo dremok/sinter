@@ -109,6 +109,14 @@ const GROUND = 1024
 const SHORE = 256
 /** One tile across the pond. */
 const POOL = 128
+/**
+ * The dry and trodden ground variants. Half the resolution of the main tile,
+ * so 42 world units rather than 85, because region.ts blends these in patches
+ * rather than laying them across the whole region: the distance before they
+ * repeat only has to beat the size of a patch, not the size of the view.
+ * Density is identical either way, since `tiled()` derives repeat from size.
+ */
+const GROUND_VARIANT = 512
 /** Props, which are all smaller than one tile at this density anyway. */
 const PROP = 64
 
@@ -360,85 +368,170 @@ function ditherStep(put: Put, x: number, y: number, ramp: readonly string[], f: 
  *   3. Tufts, sparse and large: roughly one every one and a half metres, each a
  *      fan of blades pointing its own way.
  */
-export const grass = (rng: Rng) =>
-  build(GROUND, rng, (put, r, n) => {
-    const drift = normalized(fbm(r, 5))
-    const patch = normalized(fbm(r, 9, 3))
+/**
+ * How one ground tile differs from another. The three grounds share every line
+ * of generator below; only these numbers change.
+ *
+ * They exist because region.ts owns the decals and the blending and needs
+ * something to blend *between*. A single tile can carry "somewhere between lush
+ * and dry" but it cannot carry "lush here, trampled there" at region scale,
+ * because the whole point of one 85-unit tile is that it has no period.
+ */
+interface Ground {
+  /** Tile size. The main ground gets the big one; variants are blended in patches. */
+  size: number
+  /** The ramp the field is mostly made of. */
+  main: readonly string[]
+  /** Dithered in where `patch` runs high, at the same ramp index, so hue only. */
+  accent: readonly string[]
+  /** Value range, as ramp-step positions. */
+  base: number
+  span: number
+  /** One tuft per this many texels. Higher is sparser. */
+  tuft: number
+  /** One stone or stick per this many texels. */
+  litter: number
+}
 
-    for (let y = 0; y < n; y++) {
-      const v = y / n
-      for (let x = 0; x < n; x++) {
-        const u = x / n
-        // The whole value range of the ramp, spent on one slow gradient, and
-        // snapped rather than dithered.
-        //
-        // Snapping a gradient this slow ought to band into contour rings, and
-        // it does not: at 85 world units to the tile each step covers ten to
-        // twenty metres, so the boundaries land as large organic patches that
-        // read as sun on a rise. Dithering them instead put a wide field of
-        // stipple on the one surface in the frame with no outline to hold it
-        // together, which at native resolution is simply grain. Value is
-        // decided here and only here, so the hue change below cannot show up as
-        // a shape in a greyscale check.
-        const idx = clamp(0.85 + drift(u, v) * 3.3, 0, 4.9)
-        // Thin, parched turf where `patch` runs high, chosen at the *same*
-        // ramp index so the change is hue only. Confined to a narrow band for
-        // the same reason the value steps are snapped: a 50/50 stipple of two
-        // hues across a whole region is invisible in greyscale, which is what
-        // the matched luminances bought, but in colour it is still grain.
-        const dry = clamp((patch(u, v) - 0.55) * 2.2, 0, 1)
-        const dryT = dry < 0.35 ? 0 : dry > 0.65 ? 1 : (dry - 0.35) / 0.3
-        const ramp = dryT > hashDither(x + 977, y) ? RAMP.dryGrass : RAMP.grass
-        put(x, y, tone(ramp, idx))
+const LUSH: Ground = {
+  size: GROUND,
+  main: RAMP.grass,
+  accent: RAMP.dryGrass,
+  base: 0.85,
+  span: 3.3,
+  tuft: 1400,
+  litter: 11000,
+}
+
+const DRY: Ground = {
+  size: GROUND_VARIANT,
+  main: RAMP.dryGrass,
+  accent: RAMP.straw,
+  base: 1.1,
+  span: 3.0,
+  tuft: 2600,
+  litter: 5000,
+}
+
+const WORN: Ground = {
+  size: GROUND_VARIANT,
+  main: RAMP.dirt,
+  accent: RAMP.dryGrass,
+  base: 1.0,
+  span: 2.8,
+  tuft: 9000,
+  litter: 2600,
+}
+
+/**
+ * Ground cover: the most important texture in the game, since it is most of
+ * what is on screen and the only large surface with no outline to hold it.
+ *
+ * ## Three frequencies, and the one that went missing
+ *
+ * An art review of the last pass was blunt and correct: "you removed the
+ * micro-noise I complained about without ever adding the macro variation I
+ * asked for", with 70% of a crop a single flat olive. Both halves of that are
+ * true, and the cause was a gap in the frequency ladder rather than too little
+ * variation overall.
+ *
+ * The slow drift was there, at five cells across a 1024 tile, which is about
+ * seventeen world units per feature. A screen-sized crop of the ground is about
+ * twelve units across. So one crop sat *inside* a single feature and the
+ * variation existed only at a scale nobody could see in one glance. Meanwhile
+ * the tuft layer sat at half a unit. Nothing at all lived in between.
+ *
+ * So there are now three bands, and the middle one is the fix:
+ *   - **low**, ~21 units, the soft blotches that make the field drift;
+ *   - **mid**, ~6 units, quiet, about one ramp step, which is the band that
+ *     reads as texture within a single view rather than across the region;
+ *   - **tufts**, ~half a unit, sparse marks on top.
+ *
+ * All of it snapped rather than dithered. At these scales each ramp step covers
+ * metres, so the boundaries land as organic patches rather than contour rings,
+ * and dithering a gradient this slow just puts stipple everywhere.
+ */
+function ground(look: Ground) {
+  return (rng: Rng) =>
+    build(look.size, rng, (put, r, n) => {
+      // Cell counts scale with tile size so a variant at half the resolution
+      // has the same feature size in world units, not half of it.
+      const k = n / GROUND
+      const low = normalized(fbm(r, Math.max(2, Math.round(4 * k))))
+      const mid = normalized(fbm(r, Math.max(4, Math.round(14 * k)), 3))
+      const patch = normalized(fbm(r, Math.max(3, Math.round(9 * k)), 3))
+
+      for (let y = 0; y < n; y++) {
+        const v = y / n
+        for (let x = 0; x < n; x++) {
+          const u = x / n
+          // Low carries most of the swing; mid adds about one step on top.
+          const idx = clamp(look.base + low(u, v) * look.span + (mid(u, v) - 0.5) * 1.15, 0, 4.9)
+          // A second ramp dithered in at the *same* index, so what changes is
+          // hue and not value. Confined to a narrow band: a 50/50 stipple of
+          // two hues over a whole region is invisible in greyscale, which is
+          // what the matched luminances bought, but in colour it is grain.
+          const dry = clamp((patch(u, v) - 0.55) * 2.2, 0, 1)
+          const dryT = dry < 0.35 ? 0 : dry > 0.65 ? 1 : (dry - 0.35) / 0.3
+          put(x, y, tone(dryT > hashDither(x + 977, y) ? look.accent : look.main, idx))
+        }
       }
-    }
 
-    // Tufts, and there are far fewer of them than there were.
-    //
-    // At 720p through a pixel buffer this layer merged into texture. At native
-    // resolution it stopped merging and became a field of discrete pale specks
-    // on the one surface in the frame that has no outline to hold it together.
-    // The ground now does its work through the slow value drift above; these
-    // are an accent on top of it, not the thing that makes it grass.
-    const tufts = Math.round((n * n) / 1400)
-    for (let i = 0; i < tufts; i++) {
-      const x = r.int(0, n - 1)
-      const y = r.int(0, n - 1)
-      const u = x / n
-      const v = y / n
-      // Only weakly tied to the drift. Keying density hard to it gathered them
-      // into dense pale clusters exactly where the ground was already lightest,
-      // which read as a spill rather than as meadow.
-      if (!r.chance((0.5 + drift(u, v) * 0.2) * (patch(u, v) > 0.72 ? 0.5 : 1))) continue
+      // Tufts. Blades within one tuft lean the SAME way, with only a little
+      // spread. Fanning them around a point drew a five-pointed star, and at
+      // 1:1 a field of those reads as literal plus signs rather than as plants;
+      // per-tuft direction is what stops the whole field running one diagonal,
+      // and per-blade direction was never what bought that.
+      for (let i = 0; i < Math.round((n * n) / look.tuft); i++) {
+        const x = r.int(0, n - 1)
+        const y = r.int(0, n - 1)
+        if (!r.chance(0.5 + low(x / n, y / n) * 0.2)) continue
 
-      const aim = r.range(0, Math.PI * 2)
-      const blades = r.int(3, 5)
-      put(x, y, tone(RAMP.grass, 1))
-      for (let b = 0; b < blades; b++) {
-        const a = aim + r.range(-1, 1)
-        // Tips stay close to the base tone. Contrast here buys nothing at
-        // native resolution and costs the whole field its calm.
-        stroke(put, x, y, Math.cos(a), Math.sin(a), r.int(4, 7), RAMP.grass, 2.2, 3.5)
+        const aim = r.range(0, Math.PI * 2)
+        const dx = Math.cos(aim)
+        const dy = Math.sin(aim)
+        for (let b = 0; b < r.int(2, 3); b++) {
+          const spread = r.range(-0.22, 0.22)
+          stroke(
+            put,
+            x + Math.round(-dy * b * 1.3),
+            y + Math.round(dx * b * 1.3),
+            dx + spread * -dy,
+            dy + spread * dx,
+            r.int(4, 6),
+            look.main,
+            2.2,
+            3.5,
+          )
+        }
       }
-    }
 
-    // Stones and fallen sticks, in the thin turf only, where a stone would
-    // actually show through. Sparse: this is the last texel-scale layer left on
-    // the ground and it is one mark short of being speckle again.
-    for (let i = 0; i < Math.round((n * n) / 11000); i++) {
-      const x = r.int(0, n - 1)
-      const y = r.int(0, n - 1)
-      if (patch(x / n, y / n) < 0.84) continue
-      if (r.chance(0.55)) {
-        const rx = r.range(1.6, 3)
-        blob(put, x, y, rx, rx * 0.8, tone(RAMP.stone, 2))
-        blob(put, x, y - 1, rx * 0.7, rx * 0.4, tone(RAMP.stone, 4))
-      } else {
-        const a = r.range(0, Math.PI * 2)
-        stroke(put, x, y, Math.cos(a), Math.sin(a), r.int(5, 9), RAMP.bark, 1, 2)
+      // Stones and fallen sticks, in the thin turf where something would
+      // actually show through. This is the last texel-scale layer on the
+      // ground and it is one mark short of being speckle again.
+      for (let i = 0; i < Math.round((n * n) / look.litter); i++) {
+        const x = r.int(0, n - 1)
+        const y = r.int(0, n - 1)
+        if (patch(x / n, y / n) < 0.7) continue
+        if (r.chance(0.55)) {
+          const rx = r.range(1.6, 3)
+          blob(put, x, y, rx, rx * 0.8, tone(RAMP.stone, 2))
+          blob(put, x, y - 1, rx * 0.7, rx * 0.4, tone(RAMP.stone, 4))
+        } else {
+          const a = r.range(0, Math.PI * 2)
+          stroke(put, x, y, Math.cos(a), Math.sin(a), r.int(5, 9), RAMP.bark, 1, 2)
+        }
       }
-    }
-  })
+    })
+}
+
+/** Meadow. The default ground, and the one tile that must never repeat. */
+export const grass = ground(LUSH)
+/** Parched pasture, for region.ts to blend over the meadow by noise. */
+export const grassDry = ground(DRY)
+/** Trodden ground: earth showing through, almost nothing growing. */
+export const grassWorn = ground(WORN)
+
 
 /**
  * Shore sand, and the tinted base region.ts uses for tracks, yards and tilled
@@ -457,13 +550,33 @@ export const sand = (rng: Rng) =>
       }
     }
 
-    // A few long ripple marks rather than a modulation of every texel.
-    for (let i = 0; i < 26; i++) {
+    // Ripple marks, short and broken rather than long and parallel.
+    //
+    // These used to be 26 strokes of up to 40 texels at a shallow angle. On
+    // pale sand that is fine; once region.ts tints the same bitmap dark for a
+    // mud bank or a tilled bed it is a fine horizontal hatch, and an art review
+    // called those surfaces sanded plywood and a furrow field. It was right,
+    // and the cause was the mark shape, not the density: every surface using
+    // this tile measures 12.0 texels per world unit, exactly on target. Long
+    // parallel lines read as machined grain at any density.
+    for (let i = 0; i < 14; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      const a = r.range(-0.5, 0.5)
-      const len = r.int(14, 40)
-      stroke(put, x, y, Math.cos(a), Math.sin(a) * 0.35, len, RAMP.sand, 1, 2)
+      const a = r.range(-1.1, 1.1)
+      for (let seg = 0; seg < r.int(2, 3); seg++) {
+        const wobble = r.range(-0.3, 0.3)
+        stroke(
+          put,
+          x + r.int(-6, 6),
+          y + r.int(-4, 4),
+          Math.cos(a + wobble),
+          Math.sin(a + wobble) * 0.5,
+          r.int(4, 9),
+          RAMP.sand,
+          1,
+          2,
+        )
+      }
     }
 
     // Stones, lit from above so the shore has something with a top and a bottom
@@ -683,17 +796,20 @@ export const plank = (rng: Rng) =>
         for (let x = 0; x < n; x++) put(x, y, tone(RAMP.wood, idx))
       }
 
-      // One grain line down the middle of most boards, wandering a little.
-      if (r.chance(0.7)) {
+      // A grain line on some boards only. On a wall this reads as timber; on
+      // the dock, where the same bitmap arrives stretched seven to one, one
+      // grain line plus one join per board crossed into a regular grid that an
+      // art review called a doormat. Halving both is what breaks the grid.
+      if (r.chance(0.35)) {
         const y = b * BOARD + 2
-        const len = r.int(Math.round(n * 0.4), n)
+        const len = r.int(Math.round(n * 0.3), Math.round(n * 0.7))
         const x0 = r.int(0, n - 1)
         for (let k = 0; k < len; k++) put(x0 + k, y + (r.chance(0.06) ? 1 : 0), tone(RAMP.wood, 1))
       }
 
-      // A butt join on most boards, at a different x on each, so a wall is
+      // A butt join on some boards, at a different x on each, so a wall is
       // boards somebody cut rather than one extruded ribbon.
-      if (r.chance(0.7)) {
+      if (r.chance(0.45)) {
         const jx = r.int(0, n - 1)
         for (let row = 1; row < BOARD; row++) {
           put(jx, b * BOARD + row, tone(RAMP.wood, 0))
@@ -874,6 +990,13 @@ export const ember = (rng: Rng) =>
  */
 export interface TextureSet {
   grass: THREE.CanvasTexture
+  /**
+   * Ground variants for region.ts to blend by noise. It owns the decals and the
+   * blending; these are the tiles to blend between. Both are 512px, so they
+   * cover 42 world units rather than the main tile's 85.
+   */
+  grassDry: THREE.CanvasTexture
+  grassWorn: THREE.CanvasTexture
   sand: THREE.CanvasTexture
   bark: THREE.CanvasTexture
   foliage: THREE.CanvasTexture
@@ -914,6 +1037,8 @@ export function textures(rng: Rng): TextureSet {
   const r = rng.fork('textures')
   cached = {
     grass: grass(r),
+    grassDry: grassDry(r),
+    grassWorn: grassWorn(r),
     sand: sand(r),
     bark: bark(r),
     foliage: foliage(r),

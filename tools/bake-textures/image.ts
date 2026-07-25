@@ -150,6 +150,93 @@ export function reduce(src: Bitmap, size: number, phase: [number, number] = [0, 
   return { width: size, height: size, data: out }
 }
 
+/** Torus shift. Free on a tiling image: it changes which part is at the edge. */
+export function roll(b: Bitmap, dx: number, dy: number): Bitmap {
+  const { width: w, height: h } = b
+  const out = new Uint8Array(b.data.length)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const s = (((((y + dy) % h) + h) % h) * w + ((((x + dx) % w) + w) % w)) * 4
+      const o = (y * w + x) * 4
+      out[o] = b.data[s]!
+      out[o + 1] = b.data[s + 1]!
+      out[o + 2] = b.data[s + 2]!
+      out[o + 3] = 255
+    }
+  }
+  return { width: w, height: h, data: out }
+}
+
+/**
+ * Pick the sub-block offset that reduces most cleanly.
+ *
+ * A box reduction is phase sensitive, and at 16:1 it is *violently* phase
+ * sensitive, which was worth a long detour to find. The plank tile failed the
+ * seam check five times running, and measuring it showed the model was not at
+ * fault: the source wrapped, but it happened to place a dark board gap straddling
+ * the wrap, so the sixteen source rows folded into the top texel and the sixteen
+ * folded into the bottom texel got different halves of that gap. One dark row
+ * against one light one, and a visible band across every plank wall.
+ *
+ * Rolling a tiling image is free. Sweeping the sixteen possible offsets took the
+ * same generation from a seam ratio of 4.9 to 0.1, and another from 3.1 to 0.1.
+ * So the fix is to choose the phase rather than to keep asking the model for a
+ * different picture, which was the thing that was not working.
+ *
+ * Separable and exact for what it measures: averaging a row and then reducing
+ * gives the same answer as reducing and then averaging, so the whole sweep runs
+ * on two 1D profiles rather than on sixteen reductions of a megapixel each. It
+ * therefore sees discontinuities that survive averaging along the seam, which is
+ * the kind a directional material produces, and it will not see a seam that
+ * cancels out along its own length. Offsets that are whole multiples of the
+ * block size are skipped because they cannot change a box reduction at all.
+ */
+export function bestPhase(src: Bitmap, size: number): [number, number] {
+  const f = src.width / size
+  if (f <= 1) return [0, 0]
+  const w = src.width
+
+  const rowMean = new Float64Array(w)
+  const colMean = new Float64Array(w)
+  for (let y = 0; y < w; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4
+      // Luminance in linear light, matching how `reduce` averages.
+      const v = 0.2126 * LIN[src.data[i]!]! + 0.7152 * LIN[src.data[i + 1]!]! + 0.0722 * LIN[src.data[i + 2]!]!
+      rowMean[y]! += v / w
+      colMean[x]! += v / w
+    }
+  }
+
+  const score = (mean: Float64Array, offset: number): number => {
+    const bins = new Float64Array(size)
+    for (let b = 0; b < size; b++) {
+      let s = 0
+      for (let k = 0; k < f; k++) s += mean[(offset + b * f + k) % w]!
+      bins[b] = s / f
+    }
+    let interior = 0
+    for (let b = 0; b < size - 1; b++) interior += Math.abs(bins[b + 1]! - bins[b]!)
+    interior = Math.max(interior / (size - 1), 1e-6)
+    return Math.abs(bins[size - 1]! - bins[0]!) / interior
+  }
+
+  const argmin = (mean: Float64Array): number => {
+    let best = 0
+    let bestScore = Infinity
+    for (let o = 0; o < f; o++) {
+      const s = score(mean, o)
+      if (s < bestScore) {
+        bestScore = s
+        best = o
+      }
+    }
+    return best
+  }
+
+  return [argmin(colMean), argmin(rowMean)]
+}
+
 /**
  * A one-texel unsharp mask, applied *after* reduction and before snapping.
  *

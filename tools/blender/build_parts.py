@@ -809,49 +809,64 @@ def make_horseshoe():
 
 def make_rope_coil():
     """
-    A coil with a lay to it.
+    A FLAT SPIRAL with a long loose end, not a torus and not a tall helix.
 
-    A smooth torus is a doughnut. Rotating a lobed section as it travels round
-    the loop gives the diagonal ridging that says rope at any size, and it costs
-    the same triangles. Nine twists per turn closes exactly, so there is no seam
-    where the sweep meets itself.
+    Two attempts got this wrong and both failures were instructive. A torus with
+    a twisted lay on it was called a bread roll, correctly: one closed ring of
+    even thickness has a single continuous outline, so at 25 pixels it fills in
+    solid whatever the surface does. A tall stacked helix was worse, because
+    `items/catalog.ts` places TWO of these overlapping, and two tall coils
+    interleave into one lump with no gaps left anywhere.
 
-    The loose end matters more than the lay does. Dropped on sand this is a pale
-    ring on a pale ground about 26 by 12 pixels, and a ring is a shape the eye
-    slides off. One tail spiralling out of it and hanging off the side gives the
-    outline a break, and a break is the only thing that survives when the fill
-    colour is the same as what it is lying on. `items/catalog.ts` stacks two of
-    these, so the coil ends up with two ends, which is what a coil has.
+    What survives is a flat spiral: the turns lie beside each other rather than
+    on top, so the strand separations run across the face of the object where
+    the camera can see them, and the middle stays open. The hole is 110mm across
+    against a 60mm rope, which is wide enough that the second coil in the recipe
+    cannot plug it.
+
+    The long trailing end does the rest of the work. It is the one feature no
+    other item in the catalog has, and unlike surface lay it is silhouette, so
+    it is still there after the frame is downsampled.
     """
     bm = bmesh.new()
-    lobes, twists, sides = 3, 9, 6
+    lobes, sides = 3, 6
 
     def sec(i, t):
         pts = []
         for k in range(sides):
             a = 2.0 * math.pi * k / sides
-            rr = 0.037 * (1.0 + 0.34 * math.cos(lobes * a + twists * 2.0 * math.pi * t))
+            rr = 0.030 * (1.0 + 0.30 * math.cos(lobes * a + 11.0 * 2.0 * math.pi * t))
             pts.append((rr * math.cos(a), rr * math.sin(a)))
         return pts
 
-    bm_sweep(bm, arc_frames(0.148, 0.0, 2.0 * math.pi, 18, closed=True), sec, closed=True)
+    turns = 2.15
+    steps = 28
+    coil = []
+    for i in range(steps):
+        t = i / (steps - 1)
+        a = t * turns * 2.0 * math.pi
+        r = 0.158 - 0.073 * t                 # winds inward, turns side by side
+        c, s = math.cos(a), math.sin(a)
+        coil.append((Vector((r * c, r * s, -0.014 + 0.030 * t)),
+                     Vector((c, s, 0.0)), Vector((0.0, 0.0, 1.0)), t))
+    bm_sweep(bm, coil, sec)
 
-    # The loose end: spirals out of the coil, drops off its side, and frays.
+    # The loose end: leaves the outside of the coil and trails away.
     tail = []
     steps = 8
     for i in range(steps):
         t = i / (steps - 1)
-        a = math.radians(-30.0) + t * math.radians(95.0)
-        r = 0.148 + 0.098 * t * t
+        a = math.radians(-24.0) - t * math.radians(120.0)
+        r = 0.158 + 0.150 * t * t
         c, s = math.cos(a), math.sin(a)
-        tail.append((Vector((r * c, r * s, 0.024 - 0.062 * t * t)),
+        tail.append((Vector((r * c, r * s, -0.014 - 0.016 * t)),
                      Vector((c, s, 0.0)), Vector((0.0, 0.0, 1.0)), t))
 
     def tail_sec(i, t):
         pts = []
         for k in range(sides):
             a = 2.0 * math.pi * k / sides
-            rr = 0.036 * (1.0 - 0.48 * t) * (1.0 + 0.30 * math.cos(lobes * a + 5.0 * t))
+            rr = 0.029 * (1.0 - 0.46 * t) * (1.0 + 0.28 * math.cos(lobes * a + 5.0 * t))
             pts.append((rr * math.cos(a), rr * math.sin(a)))
         return pts
 
@@ -1015,6 +1030,41 @@ def make_torch_head():
     # The cords used to be two swept rings here. They were 160 triangles for
     # something under a pixel wide, and the lathe profile above already dips
     # twice at the same heights, so the grooves read without them.
+
+    # Torn rag ends, splaying up and out of the crown.
+    #
+    # Widening the head was not enough on its own: a wide smooth dome on a stick
+    # is still a lollipop, which is what the art director called it, and being
+    # bigger only made it a bigger lollipop. The problem was never size, it was
+    # that the outline had no corners. Four irregular tips break the top of the
+    # silhouette into something spiky, and spiky is a shape nothing else in the
+    # catalog has.
+    # Five, at uneven lengths, leaning out rather than up. Four evenly spaced
+    # tips pointing skyward gave the head two symmetric horns in profile and it
+    # read as an animal's face. Torn cloth is not symmetric and does not stand
+    # up straight: what works is a scatter where one flap is twice the length of
+    # its neighbour and most of the reach is sideways.
+    #
+    # They start at radius 0.118, ON the shoulder, not at 0.070. At 0.070 they
+    # were inside a head that is 0.135 wide there, so four fifths of each flap
+    # was buried in the bundle and only the tips broke the outline. A protrusion
+    # has to begin at the surface it protrudes from.
+    rng = _Lcg(67)
+    for k in range(5):
+        yaw = 2.0 * math.pi * k / 5 + 0.85 * (rng.next() - 0.5)
+        length = 0.045 + 0.070 * rng.next() ** 2
+        rise = 0.020 + 0.055 * rng.next()
+        z0 = 0.168 + 0.040 * rng.next()
+        ca, sa = math.cos(yaw), math.sin(yaw)
+        secs = []
+        for (u, half) in ((0.0, 0.032), (0.45, 0.023), (0.80, 0.012), (1.0, 0.003)):
+            d = 0.118 + length * u
+            z = z0 + rise * u - 0.030 * u * u
+            secs.append([(d * ca - half * sa * 0.5, d * sa + half * ca * 0.5, z + half * 0.8),
+                         (d * ca + half * sa, d * sa - half * ca, z),
+                         (d * ca + half * sa * 0.5, d * sa - half * ca * 0.5, z - half * 0.8),
+                         (d * ca - half * sa, d * sa + half * ca, z)])
+        bm_loft(bm, secs)
 
     o = emit(bm, "torch_head", "base", bevel_width=0.004)
     jitter(o, 0.010, 41)

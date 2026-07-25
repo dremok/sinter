@@ -523,3 +523,95 @@ describe('the verb is authored, the consequences are simulated', () => {
     }
   })
 })
+
+describe('items do not look like each other', () => {
+  /**
+   * The pack list is how a player picks merge inputs, and merging is
+   * irreversible, so two items that read the same at a glance cost somebody an
+   * item permanently. This runs the check over the catalog's own data, which
+   * finds the next collision before anyone has to look at a screenshot.
+   *
+   * It is not a substitute for looking. It cannot see that a stretched knife
+   * blade reads as a trowel. It only catches "these two are built from the same
+   * parts in the same material", which is what produces the collisions.
+   */
+  const bulk = (s: { scale: [number, number, number]; signature?: true }) =>
+    s.signature ? Infinity : s.scale[0] * s.scale[1] * s.scale[2]
+
+  const signature = (id: string) => [...CATALOG[id]!.parts].sort((a, b) => bulk(b) - bulk(a))[0]!
+  const kinds = (id: string) => [...new Set(CATALOG[id]!.parts.map((s) => s.part))].sort()
+
+  const overlap = (a: string[], b: string[]) => {
+    const A = new Set(a)
+    const B = new Set(b)
+    const shared = [...A].filter((x) => B.has(x)).length
+    return shared / (A.size + B.size - shared)
+  }
+
+  /** True if two items would read as the same object on a card at 240p. */
+  const confusable = (x: string, y: string): boolean => {
+    const sx = signature(x)
+    const sy = signature(y)
+    if (sx.material !== sy.material) return false
+    return sx.part === sy.part || overlap(kinds(x), kinds(y)) >= 0.5
+  }
+
+  /**
+   * Known, being fixed in the parts library, and listed here so the check can
+   * be green without being a lie. Each of these is a real collision that needs
+   * geometry rather than data: a rock is currently a scaled-up flint, and a
+   * sword is a knife blade stretched to 2.35 times its length.
+   *
+   * Remove an entry when its parts land. The test below fails if an entry stops
+   * colliding, so this list cannot rot into a pile of stale excuses.
+   */
+  const PENDING_REBUILD: [string, string][] = [
+    ['flint', 'rock'],
+    ['knife', 'sword'],
+  ]
+
+  const key = (a: string, b: string) => [a, b].sort().join('+')
+  const pending = new Set(PENDING_REBUILD.map(([a, b]) => key(a, b)))
+
+  it('finds no collision that is not already known', () => {
+    const found: string[] = []
+    for (let i = 0; i < STARTING_ITEMS.length; i++) {
+      for (let j = i + 1; j < STARTING_ITEMS.length; j++) {
+        const a = STARTING_ITEMS[i]!
+        const b = STARTING_ITEMS[j]!
+        if (confusable(a, b) && !pending.has(key(a, b))) {
+          found.push(`${CATALOG[a]!.name} and ${CATALOG[b]!.name} (${key(a, b)})`)
+        }
+      }
+    }
+    expect(found, 'these two items read as the same object').toEqual([])
+  })
+
+  it('keeps the pending list honest', () => {
+    for (const [a, b] of PENDING_REBUILD) {
+      expect(confusable(a, b), `${key(a, b)} no longer collides, drop it from the list`).toBe(true)
+    }
+  })
+
+  it('gives each item at most one signature part', () => {
+    for (const id of Object.keys(CATALOG)) {
+      const marked = CATALOG[id]!.parts.filter((s) => s.signature)
+      expect(marked.length, `${id} marks ${marked.length} signature parts`).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('passes the part that IS the parent down to the merge result', () => {
+    // The bucket bug: its hoop scored higher than its body on scale product, so
+    // Well Bucket inherited a steel band and a disc of water, and no bucket.
+    // D6's whole claim is that a result visibly contains its parents.
+    for (const [parent, child] of [
+      ['bucket', 'well_bucket'],
+      ['oil', 'pitch_torch'],
+      ['poison', 'coated_blade'],
+    ] as const) {
+      const want = signature(parent).part
+      const got = CATALOG[child]!.parts.map((s) => s.part)
+      expect(got, `${child} lost the ${want} that makes it a ${parent}`).toContain(want)
+    }
+  })
+})

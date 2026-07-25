@@ -106,6 +106,18 @@ interface Occluder {
   object: THREE.Object3D
   radius: number
   top: number
+  /**
+   * Never fade this, whatever it covers.
+   *
+   * For landmarks and buildings. D20 bans quest markers so that the world does
+   * the guiding, which makes a landmark that dissolves as you walk up to it
+   * actively harmful: the one thing you were aiming at stops being there.
+   * Buildings are pinned for a second reason as well — they are assemblies of
+   * thirty overlapping boxes with a lit interior behind the wall, and ghosting
+   * one shows you all of it at once, which reads as corrupted geometry rather
+   * than as transparency.
+   */
+  pinned?: boolean
   /** Current opacity, eased toward the target. 1 means fully solid. */
   opacity: number
   /** Cloned, transparent-capable materials, made only when one is first needed. */
@@ -275,13 +287,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   ): void => {
     world.add({ transform: { pos: at, ry: 0 }, mesh, label, props, blocker: { radius } })
   }
-  const occluder = (object: THREE.Object3D, radius: number, top: number): Occluder => ({
-    object,
-    radius,
-    top,
-    opacity: 1,
-    faded: null,
-  })
+  const occluder = (
+    object: THREE.Object3D,
+    radius: number,
+    top: number,
+    pinned = false,
+  ): Occluder => ({ object, radius, top, opacity: 1, faded: null, pinned })
 
   const tex = textures(rng)
 
@@ -1311,7 +1322,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.add(leaf)
     g.position.set(0, gateH, PAL_Z)
     group.add(g)
-    occluders.push(occluder(g, 1.8, 3.9))
+    occluders.push(occluder(g, 1.8, 3.9, true))
 
     world.add({
       transform: { pos: new THREE.Vector3(0, gateH + 1.3, PAL_Z), ry: 0 },
@@ -1651,7 +1662,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(x, h, z)
     g.rotation.y = turn
     group.add(g)
-    occluders.push(occluder(g, Math.max(w, dep) * 0.62, ridge + 0.9))
+    occluders.push(occluder(g, Math.max(w, dep) * 0.62, ridge + 0.9, true))
 
     world.add({
       transform: { pos: new THREE.Vector3(x, h + 0.9, z), ry: turn },
@@ -1742,7 +1753,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(x, h, z)
     g.rotation.y = turn
     group.add(g)
-    occluders.push(occluder(g, Math.max(w, dep) * 0.5, ridge + 0.3))
+    occluders.push(occluder(g, Math.max(w, dep) * 0.5, ridge + 0.3, true))
 
     world.add({
       transform: { pos: new THREE.Vector3(x, h + 0.8, z), ry: turn },
@@ -2464,7 +2475,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(sx, h, sz)
     g.rotation.y = -0.3
     group.add(g)
-    occluders.push(occluder(g, 1.2, 2.3))
+    occluders.push(occluder(g, 1.2, 2.3, true))
     solid(g, new THREE.Vector3(sx, h + 1, sz), 'The store', { WOODEN: 0.9, FLAMMABLE: 0.5, RIGID: 0.8 }, 1.05)
   }
 
@@ -2555,13 +2566,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * fading at once stays bounded, which matters now that outlines added a
    * second pass and stacked transparency is the largest GPU cost here.
    */
-  const viewTargets = [
-    new THREE.Vector3(),
-    new THREE.Vector3(),
-    new THREE.Vector3(),
-    new THREE.Vector3(),
-  ]
-  const REVEAL_RADIUS = 7
+  const viewTargets = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]
+  const REVEAL_RADIUS = 3
   /**
    * The first call snaps instead of easing. Two reasons: the player spawns
    * already standing behind whatever is behind them, so easing in from solid on
@@ -2574,7 +2580,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   function fadeOccluders(playerPos: THREE.Vector3, camera: THREE.Camera, dt: number): void {
     viewTargets[0]!.copy(playerPos).applyMatrix4(camera.matrixWorldInverse)
     // The player is about 1.7 tall. Items sit at knee height and bob.
-    const heights = [1.4 * 0.816, 0.5, 0.5, 0.5]
+    const heights = [0.72, 0.3, 0.3]
     let count = 1
 
     for (const e of queries.items) {
@@ -2588,21 +2594,29 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
 
     for (const o of occluders) {
+      if (o.pinned) continue
       o.object.getWorldPosition(viewObject).applyMatrix4(camera.matrixWorldInverse)
 
       let hiding = false
       for (let i = 0; i < count && !hiding; i++) {
         const t = viewTargets[i]!
-        // View space looks down -z, so a larger z is nearer the camera. Half
-        // the object's height is added because a world-vertical leans toward
-        // the camera under this projection: a trunk's base can be behind the
-        // target while its canopy is squarely in front of it.
-        const nearer = viewObject.z + o.top * 0.29 > t.z + 0.4
-        if (!nearer) continue
-        if (Math.abs(viewObject.x - t.x) >= o.radius + 0.45) continue
-        const headY = t.y + heights[i]!
-        if (viewObject.y >= headY + 0.3) continue
-        if (viewObject.y + o.top * 0.816 <= t.y) continue
+
+        // Which part of the occluder shares the target's row on screen.
+        //
+        // World up projects to (0, 0.816, 0.577) in view space: a point `u`
+        // metres up an object is 0.816u higher on screen AND 0.577u nearer the
+        // camera. The previous version tested "is it higher" and "is it nearer"
+        // as if they were independent, which handed every tall object a depth
+        // bonus it had not earned: the gate got a metre of slack and faded
+        // while the player stood in front of it. Solving for the one height
+        // that actually covers the target's row, and asking whether THAT point
+        // is nearer, is both exact and cheaper.
+        const u = (t.y + heights[i]! - viewObject.y) / 0.816
+        if (u < 0 || u > o.top) continue
+        if (viewObject.z + u * 0.577 <= t.z + 0.35) continue
+        // The target's centre has to be inside the silhouette, not merely
+        // touching it. Clipping someone's shoulder is not hiding them.
+        if (Math.abs(viewObject.x - t.x) >= o.radius) continue
         hiding = true
       }
 
@@ -2650,7 +2664,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
           const solid = mesh.material as THREE.Material
           const ghost = (solid as THREE.MeshToonMaterial).clone()
           ghost.transparent = true
-          ghost.depthWrite = false
+          // Depth write stays ON. With it off, every overlapping part of the
+          // same object blends against every other in draw order, which on a
+          // stack of cones is muddy and on a building is the diagonal-streak
+          // mess that read as a screen tear. Writing depth makes an object
+          // ghost as one silhouette instead of as its own parts list.
+          ghost.depthWrite = true
+          ghost.alphaHash = false
+          ghost.alphaTest = 0
           o.faded!.push({ mesh, solid, ghost })
         })
       }
@@ -2744,7 +2765,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(MILL.x, h, MILL.z - 3.0)
     g.rotation.y = -0.22
     group.add(g)
-    occluders.push(occluder(g, 2.4, ridge + 0.4))
+    occluders.push(occluder(g, 2.4, ridge + 0.4, true))
     solid(g, new THREE.Vector3(MILL.x, h + 1.5, MILL.z - 3.0), 'The mill', { WOODEN: 0.6, STONE: 0.5, FLAMMABLE: 0.35, RIGID: 0.9 }, 2.3)
 
     // The wheel, standing in the water where the brook actually runs.
@@ -2959,7 +2980,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(BARN.x, h, BARN.z)
     g.rotation.y = 0.34
     group.add(g)
-    occluders.push(occluder(g, 3.4, ridge + 0.4))
+    occluders.push(occluder(g, 3.4, ridge + 0.4, true))
     solid(g, new THREE.Vector3(BARN.x, h + 1.5, BARN.z), 'The barn', { WOODEN: 0.9, FLAMMABLE: 0.5, RIGID: 0.85 }, 3.1)
 
     // Bales stacked against the gable, and a cart shaft leaning on them.
