@@ -259,10 +259,12 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 5.3,
     prompt:
-      `${STYLE} A thatched roof seen flat on, laid in about eight horizontal courses ` +
-      'of cut straw stacked from top to bottom of the image. Each course is a band of ' +
-      'roughly parallel stalks with a dark line where the course above overlaps it and ' +
-      'paler cut ends along its lower edge. Dry pale golden brown, dusty, not yellow.',
+      `${STYLE} A thatched roof seen flat on, laid in six broad horizontal courses ` +
+      'stacked from top to bottom of the image. Each course is one bold flat band of ' +
+      'straw with a strong dark shadow line along its top edge where the course above ' +
+      'overlaps it, and a paler band of cut ends along its lower edge. Only a few ' +
+      'large clumps of stalks are picked out; the rest of each band is flat. Dry pale ' +
+      'golden brown, dusty, not yellow.',
     palette: [...RAMP.straw],
     stretch: 0.85,
     gamma: 1,
@@ -398,7 +400,7 @@ export const SPEC_BY_NAME = new Map(SPECS.map((s) => [s.name, s]))
  * shared style string. It is hashed alongside each spec, so bumping it is how a
  * pipeline change invalidates the cache without anyone editing fourteen prompts.
  */
-export const PIPELINE_VERSION = 5
+export const PIPELINE_VERSION = 7
 
 /** The fal.ai endpoint. PATINA is fal's tiling material model; see ASSET_PIPELINE. */
 export const MODEL = 'fal-ai/patina/material'

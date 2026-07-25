@@ -36,21 +36,61 @@ import { buildItemMesh } from '../render/kitbash'
 import { BAND0 } from '../render/palette'
 import { toonUnique } from '../render/toon'
 import { textures, tiled } from '../render/textures'
+import { createSmokeColumn } from '../render/flame'
 
 /** Where the player may walk. Outside this is tree line. */
-export const BOUNDS = { minX: -18, maxX: 18, minZ: -15, maxZ: 17 }
+export const BOUNDS = { minX: -28, maxX: 28, minZ: -22, maxZ: 20 }
 
-const GROUND_SIZE = 92
+const GROUND_SIZE = 132
 /** Half-unit quads. Coarser than this and the banks read as facets. */
-const GRID = 184
+const GRID = 220
 
 /** Pond centre. The radius is a function of angle; see `pondRadius`. */
 const POND = { x: -11.8, z: 5.2 }
 const POND_DEPTH = 1.6
 export const WATER_LEVEL = -0.42
 
+/**
+ * The brook. Water leaves the pond and goes somewhere, which is the cheapest
+ * way to make a landscape look like it obeys its own rules rather than like a
+ * set of props on a lawn. It also gives the region a second axis: the track
+ * runs north to the gate, the water runs east to the mill, and they cross.
+ */
+const BROOK: readonly (readonly [number, number])[] = [
+  [-9.8, 0.2],
+  [-5.0, -1.8],
+  [0.5, -1.2],
+  [6.5, 0.8],
+  [12.5, 2.2],
+  [18.5, 4.6],
+  [26.0, 7.4],
+  [34.0, 9.8],
+]
+const BROOK_W = 2.0
+const BROOK_D = 0.8
+
+/** Where the brook and the main track meet, and therefore where the plank is. */
+const FORD = { x: 0.1, z: -1.25 }
+
 /** The hearth, and the centre everything at home is laid out around. */
 const HOME = { x: 0, z: 13.4 }
+
+/** Shortest distance from a point to a polyline, on the ground plane. */
+function distToPath(x: number, z: number, pts: readonly (readonly [number, number])[]): number {
+  let best = Infinity
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i]!
+    const b = pts[i + 1]!
+    const dx = b[0] - a[0]
+    const dz = b[1] - a[1]
+    const l2 = dx * dx + dz * dz
+    let t = l2 > 0 ? ((x - a[0]) * dx + (z - a[1]) * dz) / l2 : 0
+    t = t < 0 ? 0 : t > 1 ? 1 : t
+    const d = Math.hypot(x - (a[0] + t * dx), z - (a[1] + t * dz))
+    if (d < best) best = d
+  }
+  return best
+}
 /** The palisade line. */
 const PAL_Z = -8
 
@@ -165,10 +205,19 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     h += bump(x, z, 10.6, 8.4, 4.6, 1.6)
     h -= bump(x, z, -3.0, 1.0, 5.6, 1.0)
     h += bump(x, z, -15.0, -0.5, 4.2, 0.9)
-    h += smoothstep(-5, -17, z) * 2.3
+    h += smoothstep(-5, -22, z) * 3.0
 
     const yard = 1 - smoothstep(6.4, 11.0, Math.hypot((x - HOME.x) * 0.82, z - HOME.z))
     h = h * (1 - yard) + 0.42 * yard
+
+    // The brook, cut before the pond so that where the two meet the pond wins
+    // and the channel simply runs out into it. Shallow on purpose: this is
+    // scenery and a sightline, not an obstacle, and you wade it anywhere.
+    const bd = distToPath(x, z, BROOK)
+    if (bd < BROOK_W) {
+      const t = bd / BROOK_W
+      h -= BROOK_D * (1 - t * t) ** 1.2
+    }
 
     const dx = x - POND.x
     const dz = z - POND.z
@@ -231,6 +280,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     rut: flatMat(tex.sand, 0x836444),
     ash: flatMat(tex.stone, 0x6a5949),
     parched: flatMat(tex.grass, 0xd9c67e),
+    wheat: flatMat(tex.straw, 0xc9ab63),
     tilled: flatMat(tex.sand, 0x6f5237),
     shore: flatMat(tex.sand, 0xd9bf8e),
     water: toonUnique({
@@ -264,6 +314,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     reed: toonUnique({ color: 0xa2b27a, map: tiled(tex.straw, 0.6, 0.6) }),
     tuft: toonUnique({ color: 0x8a9354, map: tiled(tex.straw, 0.7, 0.7) }),
     tuftPale: toonUnique({ color: 0xa9a271, map: tiled(tex.straw, 0.7, 0.7) }),
+    wheatStalk: toonUnique({ color: 0xd6bb70, map: tiled(tex.straw, 0.6, 0.6) }),
     cloth: toonUnique({ map: tiled(tex.cloth, 1.2, 1.2) }),
     clothBlue: toonUnique({ color: 0x8fa8c4, map: tiled(tex.cloth, 1.2, 1.2) }),
     clothRed: toonUnique({ color: 0xc48b7a, map: tiled(tex.cloth, 1.2, 1.2) }),
@@ -539,6 +590,103 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     group.add(rock)
   }
 
+  // ----------------------------------------------------------------- brook
+  /**
+   * Running water, as a ribbon that steps downhill.
+   *
+   * Both edge vertices of a cross-section take the CENTRELINE height, not their
+   * own, so each section is level across the channel while the whole thing
+   * descends along its length. Sampling per-vertex the way a track does gives a
+   * wrinkled sheet, because the bed is a trench and the edges of it are higher
+   * than the middle.
+   */
+  {
+    const curve = new THREE.CatmullRomCurve3(BROOK.map(([x, z]) => new THREE.Vector3(x, 0, z)))
+    const steps = Math.max(24, Math.round(curve.getLength() / 0.6))
+    const verts: number[] = []
+    const uvs: number[] = []
+    const idx: number[] = []
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps
+      const p = curve.getPointAt(t)
+      const tan = curve.getTangentAt(t)
+      const y = heightAt(p.x, p.z) + BROOK_D * 0.52
+      for (const side of [-1, 1]) {
+        const w = BROOK_W * 0.72 * pondRng.range(0.82, 1.1)
+        const x = p.x + -tan.z * side * w
+        const z = p.z + tan.x * side * w
+        verts.push(x, y, z)
+        uvs.push(...worldUv(x, z))
+      }
+    }
+    for (let i = 0; i < steps; i++) {
+      const a = i * 2
+      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2)
+    }
+    const brook = surface(verts, uvs, idx, M.water)
+    brook.receiveShadow = false
+    brook.renderOrder = 1
+
+    // Wet stones along the channel, thickest where it runs shallow.
+    for (let i = 0; i < 40; i++) {
+      const t = pondRng.next()
+      const p = curve.getPointAt(t)
+      const off = pondRng.range(-BROOK_W, BROOK_W)
+      const tan = curve.getTangentAt(t)
+      const x = p.x + -tan.z * off
+      const z = p.z + tan.x * off
+      const s = pondRng.range(0.14, 0.4)
+      const stone = new THREE.Mesh(pondRng.chance(0.5) ? boulderGeo : rubbleGeo, M.stoneDark)
+      stone.scale.set(s, s * 0.6, s * pondRng.range(0.8, 1.3))
+      stone.position.set(x, heightAt(x, z) + s * 0.2, z)
+      stone.rotation.set(pondRng.range(0, 3), pondRng.range(0, 3), pondRng.range(0, 3))
+      stone.castShadow = true
+      group.add(stone)
+    }
+  }
+
+  /**
+   * The plank crossing, where the track meets the water. Two things at once: a
+   * reason the track bends here, and the only place in the region where the
+   * player is told, without words, that planks span things.
+   */
+  {
+    const bed = heightAt(FORD.x, FORD.z)
+    const deck = bed + BROOK_D * 0.52 + 0.34
+    const g = new THREE.Group()
+    for (let i = 0; i < 3; i++) {
+      const plankMesh = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.11, 4.6), M.plank)
+      plankMesh.position.set(-0.75 + i * 0.75, 0, 0)
+      plankMesh.rotation.y = pondRng.range(-0.02, 0.02)
+      plankMesh.castShadow = true
+      plankMesh.receiveShadow = true
+      g.add(plankMesh)
+    }
+    for (const side of [-1, 1]) {
+      const bearer = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 2.6, 7).rotateZ(Math.PI / 2), M.log)
+      bearer.position.set(0, -0.16, side * 1.9)
+      bearer.castShadow = true
+      g.add(bearer)
+    }
+    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 4.4, 6), M.log)
+    rail.position.set(1.5, 0.55, 0)
+    rail.rotation.x = Math.PI / 2
+    g.add(rail)
+    for (const dz of [-1.7, 0, 1.7]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.09, 0.85, 6), M.log)
+      post.position.set(1.5, 0.2, dz)
+      post.castShadow = true
+      g.add(post)
+    }
+    g.position.set(FORD.x, deck, FORD.z)
+    g.rotation.y = -0.28
+    group.add(g)
+    for (let i = -2; i <= 2; i++) {
+      stand(FORD.x + Math.sin(-0.28) * i * 0.9, FORD.z + Math.cos(-0.28) * i * 0.9, 1.0, deck + 0.06)
+    }
+  }
+
   // ----------------------------------------------------------------- tracks
   const trackRng = rng.fork('tracks')
 
@@ -554,7 +702,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     [0.9, 9.2],
     [1.6, 6.2],
     [1.0, 2.6],
-    [-0.5, -1.4],
+    [0.1, -1.25],
     [0.1, -4.8],
     [0.0, -7.6],
   ] as const
@@ -757,10 +905,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const NORTH: readonly Species[] = ['pine', 'pine', 'dead', 'pine', 'oak']
 
   // Behind home the wood is held back, so the huts have air around them.
-  treeWall(-28, 28, (t, d) => [t, BOUNDS.maxZ + 4.6 + d] as const, SOUTH, treeRng)
-  treeWall(-22, 22, (t, d) => [t, BOUNDS.minZ - 1.2 - d] as const, NORTH, treeRng)
-  treeWall(-16, 20, (t, d) => [BOUNDS.minX - 1.4 - d, t] as const, FLANK, treeRng)
-  treeWall(-16, 20, (t, d) => [BOUNDS.maxX + 1.4 + d, t] as const, FLANK, treeRng)
+  treeWall(-40, 40, (t, d) => [t, BOUNDS.maxZ + 4.6 + d] as const, SOUTH, treeRng)
+  treeWall(-34, 34, (t, d) => [t, BOUNDS.minZ - 1.2 - d] as const, NORTH, treeRng)
+  treeWall(-27, 27, (t, d) => [BOUNDS.minX - 1.4 - d, t] as const, FLANK, treeRng)
+  treeWall(-27, 27, (t, d) => [BOUNDS.maxX + 1.4 + d, t] as const, FLANK, treeRng)
 
   // Trees inside the clearing. These ones are real entities: they burn and
   // they can be felled. Placed off the tracks so they decorate rather than
@@ -790,9 +938,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // Scrub scattered inside, to soften the step from lawn to wall. Kept low and
   // well off the tracks: anything tall in the middle of the clearing breaks the
   // sightline from the hearth to the gate, which is the one line that matters.
-  for (let i = 0; i < 26; i++) {
+  for (let i = 0; i < 44; i++) {
     const x = treeRng.range(BOUNDS.minX + 0.5, BOUNDS.maxX - 0.5)
     const z = treeRng.range(BOUNDS.minZ + 0.5, BOUNDS.maxZ - 0.5)
+    if (distToPath(x, z, BROOK) < 2.6) continue
     if (Math.hypot(x - HOME.x, z - HOME.z) < 11) continue
     if (Math.hypot(x - POND.x, z - POND.z) < pondRadius(Math.atan2(z - POND.z, x - POND.x)) + 0.6) continue
     if (Math.abs(z - PAL_Z) < 2.5) continue
@@ -822,16 +971,16 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const brackenMats = [0x8a7a3a, 0x9c6f34, 0x6f7a34].map((c) =>
     toonUnique({ color: c, map: tiled(tex.foliage, 1.4, 1.4) }),
   )
-  for (let c = 0; c < 34; c++) {
+  for (let c = 0; c < 52; c++) {
     const side = treeRng.int(0, 3)
     const along = treeRng.range(-1, 1)
     const inset = treeRng.range(-1.5, 2.6)
     let cx = 0
     let cz = 0
-    if (side === 0) { cx = along * 22; cz = BOUNDS.maxZ + 3.2 - inset }
-    else if (side === 1) { cx = along * 18; cz = BOUNDS.minZ - 0.4 + inset }
-    else if (side === 2) { cx = BOUNDS.minX - 0.6 + inset; cz = along * 16 }
-    else { cx = BOUNDS.maxX + 0.6 - inset; cz = along * 16 }
+    if (side === 0) { cx = along * 32; cz = BOUNDS.maxZ + 3.2 - inset }
+    else if (side === 1) { cx = along * 28; cz = BOUNDS.minZ - 0.4 + inset }
+    else if (side === 2) { cx = BOUNDS.minX - 0.6 + inset; cz = along * 24 }
+    else { cx = BOUNDS.maxX + 0.6 - inset; cz = along * 24 }
 
     for (let k = 0; k < treeRng.int(3, 7); k++) {
       const x = cx + treeRng.range(-1.5, 1.5)
@@ -852,9 +1001,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const tuftGeo = new THREE.ConeGeometry(0.26, 1, 4)
 
   /** Dry grass, in clumps. FLAMMABLE, so this is also the fire's road. */
-  for (let c = 0; c < 11; c++) {
-    const cx = grassRng.range(-16, 16)
-    const cz = grassRng.range(-13, 15)
+  for (let c = 0; c < 20; c++) {
+    const cx = grassRng.range(-26, 26)
+    const cz = grassRng.range(-20, 18)
     for (let k = 0; k < grassRng.int(2, 4); k++) {
       const x = cx + grassRng.range(-2.4, 2.4)
       const z = cz + grassRng.range(-2.4, 2.4)
@@ -901,9 +1050,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const flowerMats = [0xf0e08a, 0xe8e4ee, 0xd7a3c4, 0xf2b45c].map((c) => toonUnique({ color: c }))
   const stemMat = toonUnique({ color: 0x5f9c38 })
 
-  for (let c = 0; c < 22; c++) {
-    const cx = grassRng.range(-17, 17)
-    const cz = grassRng.range(-14, 16)
+  for (let c = 0; c < 38; c++) {
+    const cx = grassRng.range(-27, 27)
+    const cz = grassRng.range(-21, 19)
     const kind = grassRng.next()
     for (let k = 0; k < grassRng.int(3, 9); k++) {
       const x = cx + grassRng.range(-1.6, 1.6)
@@ -1162,7 +1311,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // nothing burns or cuts them.
   for (const side of [-1, 1]) {
     let x = side * 6.9
-    while (Math.abs(x) < 19.5) {
+    while (Math.abs(x) < 29.5) {
       const z = PAL_Z + palRng.range(-1.1, 1.1)
       const h = heightAt(x, z)
       const s = palRng.range(1.35, 2.15)
@@ -1474,6 +1623,13 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     crown.position.set(cx, top + 0.11, 0)
     crown.castShadow = true
     g.add(crown)
+
+    // Somebody is in. Parented to the building, so it goes wherever the
+    // building goes and needs no coordinate of its own. Drifting the same way
+    // the washing line leans. Nothing to tick: main.ts advances every column.
+    const smoke = createSmokeColumn({ scale: 0.8, seed: 17, drift: [-0.35, -0.2] })
+    smoke.object3D.position.set(cx, top + 0.3, 0)
+    g.add(smoke.object3D)
 
     g.position.set(x, h, z)
     g.rotation.y = turn
@@ -2499,6 +2655,338 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
     settled = true
   }
+
+  // ------------------------------------------------------------------ mill
+  /**
+   * The mill, downstream. The region got bigger because there were too many
+   * items in too little space, and the answer to that is more PLACES, not more
+   * lawn: somewhere at the far end of a line you can already see, with a reason
+   * to walk it. The brook is the reason, and the wheel is visible from most of
+   * the clearing.
+   */
+  const millRng = rng.fork('mill')
+  const MILL = { x: 18.9, z: 4.9 }
+  {
+    const h = heightAt(MILL.x, MILL.z + 3.0)
+    const g = new THREE.Group()
+
+    const base = new THREE.Mesh(new THREE.BoxGeometry(4.4, 1.5, 3.6), M.rubbleWall)
+    base.position.y = 0.75
+    base.castShadow = true
+    base.receiveShadow = true
+    g.add(base)
+
+    const upper = new THREE.Mesh(new THREE.BoxGeometry(4.1, 2.2, 3.3), M.plank)
+    upper.position.y = 2.6
+    upper.castShadow = true
+    upper.receiveShadow = true
+    g.add(upper)
+
+    // Exposed frame: three uprights and a rail, which is most of what says
+    // "timber" rather than "box" at this resolution.
+    for (const dx of [-1.5, 0, 1.5]) {
+      const stud = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.2, 0.12), M.plankDark)
+      stud.position.set(dx, 2.6, 1.68)
+      g.add(stud)
+    }
+    const brace = new THREE.Mesh(new THREE.BoxGeometry(4.1, 0.16, 0.12), M.plankDark)
+    brace.position.set(0, 3.6, 1.68)
+    g.add(brace)
+
+    const pitch = 0.7
+    const run = 3.3 / 2 + 0.3
+    const eave = 3.7
+    const ridge = eave + run * Math.tan(pitch)
+    for (const sz of [-1, 1]) {
+      const half = new THREE.Mesh(new THREE.BoxGeometry(4.7, 0.18, run / Math.cos(pitch)), M.thatch)
+      half.position.set(0, (eave + ridge) / 2, (sz * run) / 2)
+      half.rotation.x = sz * pitch
+      half.castShadow = true
+      g.add(half)
+    }
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.2, 0.36), M.thatchOld)
+    cap.position.y = ridge + 0.02
+    cap.castShadow = true
+    g.add(cap)
+
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.75, 0.14), M.doorway)
+    door.position.set(1.0, 0.95, 1.82)
+    g.add(door)
+    const doorFrame = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.18, 0.22), M.log)
+    doorFrame.position.set(1.0, 1.92, 1.86)
+    g.add(doorFrame)
+    const hatch = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.8, 0.1), M.doorway)
+    hatch.position.set(-1.2, 2.9, 1.7)
+    g.add(hatch)
+    // The hoist beam a mill uses to lift sacks, sticking out over the hatch.
+    const hoist = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 1.7), M.log)
+    hoist.position.set(-1.2, 3.75, 2.3)
+    hoist.castShadow = true
+    g.add(hoist)
+
+    g.position.set(MILL.x, h, MILL.z + 3.0)
+    g.rotation.y = -0.22
+    group.add(g)
+    occluders.push(occluder(g, 2.4, ridge + 0.4))
+    solid(g, new THREE.Vector3(MILL.x, h + 1.5, MILL.z + 3.0), 'The mill', { WOODEN: 0.6, STONE: 0.5, FLAMMABLE: 0.35, RIGID: 0.9 }, 2.3)
+
+    // The wheel, standing in the water where the brook actually runs.
+    const wheelY = heightAt(MILL.x, MILL.z) + BROOK_D * 0.52 + 0.65
+    const wheel = new THREE.Group()
+    for (const r of [1.5, 1.15]) {
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(r, 0.11, 5, 14), M.log)
+      rim.castShadow = true
+      wheel.add(rim)
+    }
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2
+      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1.5, 0.09), M.log)
+      spoke.position.set(Math.cos(a) * 0.75, Math.sin(a) * 0.75, 0)
+      spoke.rotation.z = a - Math.PI / 2
+      wheel.add(spoke)
+      const paddle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.42, 0.9), M.plank)
+      paddle.position.set(Math.cos(a) * 1.35, Math.sin(a) * 1.35, 0)
+      paddle.rotation.z = a
+      paddle.castShadow = true
+      wheel.add(paddle)
+    }
+    const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.6, 8).rotateX(Math.PI / 2), M.log)
+    wheel.add(axle)
+    wheel.position.set(MILL.x - 0.4, wheelY, MILL.z + 0.55)
+    wheel.rotation.y = -0.22
+    group.add(wheel)
+
+    // A millstone nobody has moved in years, and sacks against the wall.
+    const stoneWheel = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.26, 14), M.stone)
+    const sx = MILL.x + 2.9
+    const sz = MILL.z + 4.6
+    stoneWheel.position.set(sx, heightAt(sx, sz) + 0.16, sz)
+    stoneWheel.rotation.set(0.05, 0.4, 0.08)
+    stoneWheel.castShadow = true
+    stoneWheel.receiveShadow = true
+    group.add(stoneWheel)
+    stand(sx, sz, 0.95, heightAt(sx, sz) + 0.29)
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.34, 8), M.doorway)
+    hub.position.set(sx, heightAt(sx, sz) + 0.2, sz)
+    group.add(hub)
+
+    for (let i = 0; i < 4; i++) {
+      const x = MILL.x - 2.4 + millRng.range(-0.5, 0.5)
+      const z = MILL.z + 4.4 + i * 0.55 + millRng.range(-0.2, 0.2)
+      const sack = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.36, 0.72, 8), M.cloth)
+      sack.position.set(x, heightAt(x, z) + 0.36, z)
+      sack.rotation.set(millRng.range(-0.12, 0.12), millRng.range(0, 3), millRng.range(-0.12, 0.12))
+      sack.castShadow = true
+      group.add(sack)
+    }
+  }
+
+  // ------------------------------------------------------------ wheat field
+  /**
+   * Band 0 is wheat fields and oak woods, and a field is the cheapest honest
+   * way to fill new ground with something that is not lawn. Mostly a ground
+   * overlay with rows dithered into it, plus a thin scatter of standing stalks
+   * for parallax: at this camera the ground does the reading and the geometry
+   * only has to catch the light.
+   */
+  const fieldRng = rng.fork('field')
+  const FIELD = { x: -19.5, z: 9.0, rx: 7.2, rz: 7.8 }
+  {
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2
+      layPatch(
+        FIELD.x + Math.cos(a) * FIELD.rx * 0.45,
+        FIELD.z + Math.sin(a) * FIELD.rz * 0.45,
+        FIELD.rx * 0.62,
+        M.wheat,
+        fieldRng,
+        0.3,
+        16,
+        0.05,
+      )
+    }
+
+    const stalkGeo = new THREE.ConeGeometry(0.085, 1, 4)
+    // Rows, because a crop is planted and a meadow is not, and the rows are
+    // most of what tells them apart from above.
+    for (let row = -8; row <= 8; row++) {
+      const along = row * 0.92
+      for (let k = 0; k < 26; k++) {
+        const t = (k / 25 - 0.5) * 2
+        const x = FIELD.x + along * 0.94 + t * 1.2
+        const z = FIELD.z + t * FIELD.rz * 0.95 + along * 0.18
+        const inside =
+          ((x - FIELD.x) / FIELD.rx) ** 2 + ((z - FIELD.z) / FIELD.rz) ** 2 < 0.92
+        if (!inside) continue
+        if (!fieldRng.chance(0.55)) continue
+        const hgt = fieldRng.range(0.75, 1.25)
+        const stalk = new THREE.Mesh(stalkGeo, fieldRng.chance(0.7) ? M.wheatStalk : M.tuftPale)
+        stalk.scale.set(1, hgt, 1)
+        stalk.position.set(x, heightAt(x, z) + hgt * 0.46, z)
+        stalk.rotation.set(fieldRng.range(-0.14, 0.14), fieldRng.range(0, 3), fieldRng.range(-0.14, 0.14))
+        stalk.castShadow = true
+        group.add(stalk)
+      }
+    }
+
+    // A scarecrow, which is the one thing that makes a field read as tended.
+    {
+      const x = FIELD.x + 1.2
+      const z = FIELD.z - 1.4
+      const h = heightAt(x, z)
+      const g = new THREE.Group()
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.3, 6), M.log)
+      post.position.y = 1.15
+      post.castShadow = true
+      g.add(post)
+      const arms = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.11, 0.11), M.log)
+      arms.position.y = 1.65
+      arms.rotation.z = 0.09
+      arms.castShadow = true
+      g.add(arms)
+      const coat = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.8, 0.24), M.clothRed)
+      coat.position.y = 1.42
+      coat.castShadow = true
+      g.add(coat)
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 7, 6), M.straw)
+      head.position.y = 2.05
+      head.castShadow = true
+      g.add(head)
+      const hat = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.34, 8), M.thatchOld)
+      hat.position.y = 2.28
+      hat.rotation.z = 0.2
+      g.add(hat)
+      g.position.set(x, h, z)
+      g.rotation.y = 0.5
+      group.add(g)
+      solid(g, new THREE.Vector3(x, h + 1.2, z), 'Scarecrow', { WOODEN: 0.5, CLOTH: 0.5, FLAMMABLE: 0.8, RIGID: 0.4 }, 0.4)
+    }
+  }
+
+  /**
+   * The barn at the top of the field. Big, plain, and shut: a doorway you can
+   * see into from a long way off is what makes a building worth walking to.
+   */
+  const BARN = { x: -22.6, z: 16.4 }
+  {
+    const h = heightAt(BARN.x, BARN.z)
+    const g = new THREE.Group()
+    const w = 6.4
+    const dep = 4.4
+    const wallH = 3.0
+
+    const footing = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.3, dep + 0.3), M.rubbleWall)
+    footing.position.y = 0.15
+    footing.receiveShadow = true
+    g.add(footing)
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(w, wallH, dep), M.plankDark)
+    walls.position.y = 0.3 + wallH / 2
+    walls.castShadow = true
+    walls.receiveShadow = true
+    g.add(walls)
+    for (let i = 0; i < 7; i++) {
+      const stud = new THREE.Mesh(new THREE.BoxGeometry(0.16, wallH, 0.1), M.plank)
+      stud.position.set(-w / 2 + 0.5 + i * ((w - 1) / 6), 0.3 + wallH / 2, dep / 2 + 0.03)
+      g.add(stud)
+    }
+
+    const pitch = 0.68
+    const eave = 0.3 + wallH
+    const run = dep / 2 + 0.3
+    const ridge = eave + run * Math.tan(pitch)
+    for (const sx of [-1, 1]) {
+      for (let i = 0; i < 5; i++) {
+        const f = 1 - (i + 0.5) / 5
+        const step = new THREE.Mesh(new THREE.BoxGeometry(0.16, (ridge - eave) / 5 + 0.03, dep * f), M.plankDark)
+        step.position.set((sx * w) / 2, eave + ((i + 0.5) * (ridge - eave)) / 5, 0)
+        g.add(step)
+      }
+    }
+    for (const sz of [-1, 1]) {
+      const half = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, 0.18, run / Math.cos(pitch)), M.thatchOld)
+      half.position.set(0, (eave + ridge) / 2, (sz * run) / 2)
+      half.rotation.x = sz * pitch
+      half.castShadow = true
+      half.receiveShadow = true
+      g.add(half)
+    }
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.22, 0.38), M.thatch)
+    cap.position.y = ridge + 0.02
+    cap.castShadow = true
+    g.add(cap)
+
+    // Cart doors, one hanging open on a broken hinge.
+    const opening = new THREE.Mesh(new THREE.BoxGeometry(2.5, 2.5, 0.16), M.doorway)
+    opening.position.set(0.4, 1.55, dep / 2 + 0.02)
+    g.add(opening)
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.45, 0.12), M.plank)
+    leaf.position.set(-0.95, 1.55, dep / 2 + 0.42)
+    leaf.rotation.y = -0.62
+    leaf.castShadow = true
+    g.add(leaf)
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(2.9, 0.24, 0.3), M.log)
+    lintel.position.set(0.4, 2.92, dep / 2 + 0.1)
+    lintel.castShadow = true
+    g.add(lintel)
+    // Shutters, nailed over. Nobody has been inside in a while.
+    for (const dx of [-2.2, 2.4]) {
+      const shutter = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.7, 0.09), M.plank)
+      shutter.position.set(dx, 2.3, dep / 2 + 0.06)
+      g.add(shutter)
+      const nailed = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.12, 0.06), M.plankDark)
+      nailed.position.set(dx, 2.3, dep / 2 + 0.11)
+      nailed.rotation.z = 0.32
+      g.add(nailed)
+    }
+
+    g.position.set(BARN.x, h, BARN.z)
+    g.rotation.y = 0.34
+    group.add(g)
+    occluders.push(occluder(g, 3.4, ridge + 0.4))
+    solid(g, new THREE.Vector3(BARN.x, h + 1.5, BARN.z), 'The barn', { WOODEN: 0.9, FLAMMABLE: 0.5, RIGID: 0.85 }, 3.1)
+
+    // Bales stacked against the gable, and a cart shaft leaning on them.
+    for (const [dx, dz, dy] of [
+      [4.6, -1.0, 0],
+      [4.6, 0.2, 0],
+      [4.7, -0.4, 0.72],
+    ] as const) {
+      const x = BARN.x + dx
+      const z = BARN.z + dz
+      const bale = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 1.0, 10).rotateZ(Math.PI / 2), M.straw)
+      bale.position.set(x, heightAt(x, z) + 0.55 + dy, z)
+      bale.rotation.y = 0.34
+      bale.castShadow = true
+      bale.receiveShadow = true
+      group.add(bale)
+      if (dy > 0) stand(x, z, 0.6, heightAt(x, z) + 1.65)
+    }
+  }
+
+  // The track out to the field and the barn, and the one down to the mill.
+  layTrack(
+    [
+      [-8.0, 12.6],
+      [-12.5, 12.0],
+      [-16.5, 12.6],
+      [-20.0, 14.4],
+      [-22.0, 15.0],
+    ],
+    0.62,
+    M.track,
+    trackRng,
+  )
+  layTrack(
+    [
+      [10.8, 10.4],
+      [14.0, 8.6],
+      [17.0, 7.2],
+      [19.2, 6.0],
+    ],
+    0.58,
+    M.track,
+    trackRng,
+  )
 
   // ----------------------------------------------------------------- items
   // Ten items, placed by hand, every one of them somewhere a person would have

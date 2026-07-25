@@ -1,86 +1,118 @@
 {
   "bark": {
-    "hash": "aa11e2a47ebfddd4",
+    "hash": "752be40eb77dbc4f",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9043,
-    "bytes": 990,
+    "bytes": 1106,
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.553,
-      "seamY": 0.452,
-      "busyness": 0.0344,
+      "seamX": 0.23,
+      "seamY": 0.391,
+      "busyness": 0.0403,
       "used": 6,
-      "dominance": 0.303
+      "dominance": 0.371
+    }
+  },
+  "clay": {
+    "hash": "2f49301f18951dd7",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9043,
+    "bytes": 649,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.208,
+      "seamY": 1.594,
+      "busyness": 0.0257,
+      "used": 5,
+      "dominance": 0.371
     }
   },
   "cloth": {
-    "hash": "ad1a1e8677c01a97",
+    "hash": "55528ef3a9f03f37",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 1332,
+    "bytes": 1396,
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 1.204,
-      "seamY": 1.017,
-      "busyness": 0.0567,
+      "seamX": 1.145,
+      "seamY": 1.116,
+      "busyness": 0.0641,
       "used": 5,
-      "dominance": 0.411
+      "dominance": 0.401
+    }
+  },
+  "ember": {
+    "hash": "87db37a1a8fe080a",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9074,
+    "bytes": 1132,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 1.127,
+      "seamY": 1.423,
+      "busyness": 0.0983,
+      "used": 6,
+      "dominance": 0.544
     }
   },
   "foliage": {
-    "hash": "6af03ada190bdfd7",
+    "hash": "7d8cbf14d5c740b1",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9136,
-    "bytes": 1379,
+    "bytes": 1370,
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.881,
-      "seamY": 0.85,
-      "busyness": 0.0488,
+      "seamX": 0.97,
+      "seamY": 0.785,
+      "busyness": 0.0489,
       "used": 6,
-      "dominance": 0.257
+      "dominance": 0.256
     }
   },
   "glass": {
-    "hash": "0abddb91382096d6",
+    "hash": "bb93958dbc7c7d4f",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 744,
+    "bytes": 867,
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.655,
-      "seamY": 1.211,
-      "busyness": 0.0173,
+      "seamX": 0.731,
+      "seamY": 1.105,
+      "busyness": 0.0225,
       "used": 5,
-      "dominance": 0.373
+      "dominance": 0.438
     }
   },
   "gold": {
-    "hash": "62c2d0e1b6830549",
+    "hash": "dc2c75f2f5782832",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9043,
-    "bytes": 726,
+    "bytes": 734,
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.427,
-      "seamY": 1.282,
-      "busyness": 0.0263,
+      "seamX": 0.771,
+      "seamY": 1.335,
+      "busyness": 0.0293,
       "used": 6,
-      "dominance": 0.375
+      "dominance": 0.352
     }
   },
   "grass": {
-    "hash": "d09ad2370058c68f",
+    "hash": "b62adc1e87e93f4e",
     "size": 1024,
     "worldUnits": 85.3,
     "model": "fal-ai/patina/material",
@@ -96,51 +128,51 @@
     }
   },
   "sand": {
-    "hash": "35b2ab57b8d85e46",
+    "hash": "1ea962cb5195944c",
     "size": 256,
     "worldUnits": 21.3,
     "model": "fal-ai/patina/material",
     "seed": 16962,
-    "bytes": 5253,
+    "bytes": 5431,
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.556,
-      "seamY": 0.879,
-      "busyness": 0.017,
-      "used": 7,
-      "dominance": 0.297
+      "seamX": 0.488,
+      "seamY": 0.832,
+      "busyness": 0.0182,
+      "used": 8,
+      "dominance": 0.279
     }
   },
   "steel": {
-    "hash": "4a9a074c4fde824d",
+    "hash": "524e0de751cc80a6",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 553,
+    "bytes": 631,
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.195,
-      "seamY": 1.027,
-      "busyness": 0.0283,
+      "seamX": 0.419,
+      "seamY": 1.306,
+      "busyness": 0.038,
       "used": 6,
-      "dominance": 0.337
+      "dominance": 0.447
     }
   },
   "stone": {
-    "hash": "937bf46afdd5c143",
+    "hash": "b5e5b02f280b68db",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
-    "seed": 9074,
-    "bytes": 1036,
+    "seed": 24912,
+    "bytes": 1031,
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 1.203,
-      "seamY": 1.443,
-      "busyness": 0.046,
+      "seamX": 0.799,
+      "seamY": 1.017,
+      "busyness": 0.0473,
       "used": 5,
-      "dominance": 0.345
+      "dominance": 0.286
     }
   },
   "straw": {
@@ -160,19 +192,19 @@
     }
   },
   "water": {
-    "hash": "28158bfe0c16d0ea",
+    "hash": "bc7a0a0a6fc48763",
     "size": 128,
     "worldUnits": 10.7,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 1161,
+    "bytes": 1456,
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.568,
-      "seamY": 0.457,
-      "busyness": 0.0086,
+      "seamX": 0.851,
+      "seamY": 1.226,
+      "busyness": 0.0122,
       "used": 5,
-      "dominance": 0.3
+      "dominance": 0.31
     }
   }
 }

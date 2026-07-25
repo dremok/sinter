@@ -1052,6 +1052,7 @@ if (HEADLESS_TICKS > 0) {
   }
   syncMeshes(TICK_DT)
   updateFocus()
+  syncHeld()
   updateHud(0)
   iso.update()
   grade.render(renderer, scene, iso.camera)
@@ -1071,6 +1072,10 @@ if (HEADLESS_TICKS > 0) {
 
     updateFocus()
     handleInput()
+    // Drives the held-item strip. This was defined and never called, so the
+    // strip never rendered and Q, E and R had no on-screen affordance at all:
+    // three of the seven verbs were invisible unless you already knew them.
+    syncHeld()
     syncMeshes(dt)
 
     framesSinceSample++

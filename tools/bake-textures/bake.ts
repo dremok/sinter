@@ -255,15 +255,25 @@ function judge(spec: TextureSpec, a: Omit<Attempt, 'seed' | 'failures'>): string
   return out
 }
 
-/** Turn the specific fault into a specific instruction for the next attempt. */
+/**
+ * Turn the specific fault into a specific instruction for the next attempt.
+ *
+ * Deliberately silent about seams, which is the opposite of what this function
+ * did at first. Telling the model "the left edge must continue into the right
+ * edge" made things worse every single time: plank went 3.0, then 3.6, then 5.2
+ * over three attempts, each one further from tiling than the last. That makes
+ * sense in hindsight. PATINA enforces tiling structurally, in the sampler, not
+ * by understanding a request; the sentence lands as ordinary composition
+ * guidance and pushes the image toward having edges worth talking about.
+ *
+ * And it is not a prompt problem in the first place. Measuring the wrap
+ * discontinuity across five cached plank generations gave ratios from 0.18 to
+ * 5.2 for the same prompt, so whether a tile wraps is a property of the draw.
+ * The right response to a seam is therefore a different seed and not a different
+ * word, which is what `judge`'s caller now does.
+ */
 function corrective(failures: string[]): string {
   const add: string[] = []
-  if (failures.some((f) => f.startsWith('seam'))) {
-    add.push(
-      'The image must tile perfectly seamlessly: the left edge has to continue into ' +
-        'the right edge and the top into the bottom, with no border, frame or vignette.',
-    )
-  }
   if (failures.some((f) => f.startsWith('busyness'))) {
     add.push(
       'Far fewer and much larger shapes. Almost no fine detail. Large flat areas of ' +
@@ -310,7 +320,7 @@ function parseArgs(argv: string[]): Args {
     force: list('force'),
     review: argv.includes('--review'),
     plan: argv.includes('--plan'),
-    attempts: num('attempts', 3),
+    attempts: num('attempts', 4),
   }
 }
 
@@ -364,8 +374,10 @@ async function main(): Promise<void> {
     let lastFailures: string[] = []
 
     for (let attempt = 1; attempt <= args.attempts && !committed; attempt++) {
-      const extra = attempt === 1 ? '' : ` ${corrective(lastFailures)}`
-      const prompt = spec.prompt + extra
+      // A seam earns a fresh seed and nothing else; everything else earns a
+      // sentence naming the fault.
+      const extra = attempt === 1 ? '' : corrective(lastFailures)
+      const prompt = extra ? `${spec.prompt} ${extra}` : spec.prompt
       const seed = 1000 + attempt * 7919 + spec.name.length * 31
 
       mkdirSync(RAW_DIR, { recursive: true })
