@@ -181,6 +181,67 @@ export interface Region {
 }
 
 /**
+ * How world-up projects under this rig: a point `u` metres above something is
+ * `0.816u` higher on screen AND `0.577u` nearer the camera. Both at once, which
+ * is precisely what the first version of the occlusion test got wrong.
+ */
+const VIEW_UP = 0.8165
+const VIEW_TOWARD = 0.5774
+
+/** An occluder reduced to what the geometry needs, in view space. */
+export interface OccluderInView {
+  /** Base of the object, through the camera's inverse world matrix. */
+  x: number
+  y: number
+  z: number
+  /** Horizontal half-extent, and height above the base, in world units. */
+  radius: number
+  top: number
+  /** Landmarks and buildings never fade, whatever they cover. */
+  pinned?: boolean
+}
+
+/** Something that must stay visible, in view space, and where to test it. */
+export interface TargetInView {
+  x: number
+  y: number
+  z: number
+  /** Row to test: mid-body for a person, near the ground for an item. */
+  row: number
+}
+
+/**
+ * Does this occluder actually hide any of these targets?
+ *
+ * Exported so it can be tested, and worth testing: it is the only geometry in
+ * this file that has been deleted and restored, it is easy to break, and when
+ * it breaks nothing crashes. Things simply fade at the wrong moments, which is
+ * noticed only by whoever happens to be standing in the wrong place.
+ *
+ * The middle test is the one that matters. Solve for the height on the occluder
+ * that shares the target's row on screen, then ask whether THAT point is nearer
+ * the camera. Treating "higher up" and "nearer" as independent conditions hands
+ * every tall object a depth bonus proportional to its height, which is why a
+ * 3.9m gate faded while the player stood in front of it.
+ */
+export function occluderHides(o: OccluderInView, targets: readonly TargetInView[]): boolean {
+  if (o.pinned) return false
+
+  for (const t of targets) {
+    const u = (t.y + t.row - o.y) / VIEW_UP
+    // The target's row is below this object's base, or above its top.
+    if (u < 0 || u > o.top) continue
+    // That part of the object is behind the target, so it cannot cover it.
+    if (o.z + u * VIEW_TOWARD <= t.z + 0.35) continue
+    // The target's centre must be inside the silhouette, not merely touching
+    // it. Clipping someone's shoulder is not hiding them.
+    if (Math.abs(o.x - t.x) >= o.radius) continue
+    return true
+  }
+  return false
+}
+
+/**
  * How see-through a tree gets when it is in the way.
  *
  * Not zero, on purpose: an invisible tree reads as a bug, a faint one reads as
@@ -2760,6 +2821,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * second pass and stacked transparency is the largest GPU cost here.
    */
   const viewTargets = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]
+  // Same three, in the plain shape `occluderHides` takes. Reused every frame so
+  // the per-frame path allocates nothing.
+  const rows: TargetInView[] = [
+    { x: 0, y: 0, z: 0, row: 0.72 },
+    { x: 0, y: 0, z: 0, row: 0.3 },
+    { x: 0, y: 0, z: 0, row: 0.3 },
+  ]
+  const inView: OccluderInView = { x: 0, y: 0, z: 0, radius: 0, top: 0 }
   const REVEAL_RADIUS = 3
   /**
    * The first call snaps instead of easing. Two reasons: the player spawns
@@ -2773,8 +2842,11 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   function fadeOccluders(playerPos: THREE.Vector3, camera: THREE.Camera, dt: number): void {
     viewTargets[0]!.copy(playerPos).applyMatrix4(camera.matrixWorldInverse)
     // The player is about 1.7 tall. Items sit at knee height and bob.
-    const heights = [0.72, 0.3, 0.3]
     let count = 1
+
+    rows[0]!.x = viewTargets[0]!.x
+    rows[0]!.y = viewTargets[0]!.y
+    rows[0]!.z = viewTargets[0]!.z
 
     for (const e of queries.items) {
       if (count >= viewTargets.length) break
@@ -2783,6 +2855,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       const dz = at.z - playerPos.z
       if (dx * dx + dz * dz > REVEAL_RADIUS * REVEAL_RADIUS) continue
       viewTargets[count]!.copy(at).applyMatrix4(camera.matrixWorldInverse)
+      rows[count]!.x = viewTargets[count]!.x
+      rows[count]!.y = viewTargets[count]!.y
+      rows[count]!.z = viewTargets[count]!.z
       count++
     }
 
@@ -2790,28 +2865,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       if (o.pinned) continue
       o.object.getWorldPosition(viewObject).applyMatrix4(camera.matrixWorldInverse)
 
-      let hiding = false
-      for (let i = 0; i < count && !hiding; i++) {
-        const t = viewTargets[i]!
-
-        // Which part of the occluder shares the target's row on screen.
-        //
-        // World up projects to (0, 0.816, 0.577) in view space: a point `u`
-        // metres up an object is 0.816u higher on screen AND 0.577u nearer the
-        // camera. The previous version tested "is it higher" and "is it nearer"
-        // as if they were independent, which handed every tall object a depth
-        // bonus it had not earned: the gate got a metre of slack and faded
-        // while the player stood in front of it. Solving for the one height
-        // that actually covers the target's row, and asking whether THAT point
-        // is nearer, is both exact and cheaper.
-        const u = (t.y + heights[i]! - viewObject.y) / 0.816
-        if (u < 0 || u > o.top) continue
-        if (viewObject.z + u * 0.577 <= t.z + 0.35) continue
-        // The target's centre has to be inside the silhouette, not merely
-        // touching it. Clipping someone's shoulder is not hiding them.
-        if (Math.abs(viewObject.x - t.x) >= o.radius) continue
-        hiding = true
-      }
+      // The geometry itself lives in `occluderHides`, which is pure and tested.
+      // Everything here is bookkeeping: transforms, easing and materials.
+      inView.x = viewObject.x
+      inView.y = viewObject.y
+      inView.z = viewObject.z
+      inView.radius = o.radius
+      inView.top = o.top
+      const hiding = occluderHides(inView, rows.slice(0, count))
 
       const target = hiding ? FADE_TO : 1
       if (o.opacity === target) continue

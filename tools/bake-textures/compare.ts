@@ -285,18 +285,35 @@ async function main(): Promise<void> {
   // "Is the bake noisier than the code?" is the question that decides whether a
   // set ships, so answer it with numbers rather than with adjectives, and give
   // both metrics so nobody has to trust the choice of one.
-  console.log('                 oklab busyness          luma busyness')
-  console.log('name        drawn   baked  ratio    drawn   baked  ratio')
+  console.log('                 oklab busyness          luma busyness      saturation      hue')
+  console.log('name        drawn   baked  ratio    drawn   baked  ratio  drawn baked  drawn baked')
   for (const r of rows) {
     const dO = inspectTiling(r.drawn).busyness
     const bO = inspectTiling(r.baked).busyness
     const dL = lumaBusyness(r.drawn)
     const bL = lumaBusyness(r.baked)
+    const dS = meanSaturation(r.drawn)
+    const bS = meanSaturation(r.baked)
     const ratio = (a: number, b: number) => (a === 0 ? '  n/a' : `${(b / a).toFixed(1)}x`.padStart(5))
     console.log(
       `${r.name.padEnd(10)} ${dO.toFixed(4)}  ${bO.toFixed(4)}  ${ratio(dO, bO)}   ` +
-        `${dL.toFixed(4)}  ${bL.toFixed(4)}  ${ratio(dL, bL)}`,
+        `${dL.toFixed(4)}  ${bL.toFixed(4)}  ${ratio(dL, bL)}  ` +
+        `${(dS.sat * 100).toFixed(0).padStart(4)}% ${(bS.sat * 100).toFixed(0).padStart(4)}%  ` +
+        `${dS.hue.toFixed(0).padStart(5)} ${bS.hue.toFixed(0).padStart(5)}`,
     )
+  }
+
+  // The ground decides the frame, so show exactly how it spends its palette.
+  const ground = rows.find((r) => r.name === 'grass')
+  const groundSpec = SPECS.find((s) => s.name === 'grass')
+  if (ground && groundSpec) {
+    const hist = paletteHistogram(ground.baked, groundSpec.palette)
+    console.log('\nbaked grass, share of tile per palette entry:')
+    for (let i = 0; i < groundSpec.palette.length; i++) {
+      const ramp = i < 6 ? `RAMP.grass[${i}]` : `RAMP.dirt[${i - 6}]`
+      console.log(`  ${groundSpec.palette[i]}  ${ramp.padEnd(14)} ${(hist[i]! * 100).toFixed(1)}%`)
+    }
+    console.log(`  dirt total: ${(hist.slice(6).reduce((a, b) => a + b, 0) * 100).toFixed(1)}%`)
   }
 }
 

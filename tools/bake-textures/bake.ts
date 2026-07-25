@@ -126,9 +126,13 @@ const LIMIT_OVERRIDES: Record<string, Partial<Limits>> = {
   // flatter and quieter than any other. Holding it to the general noise ceiling
   // would pass a pond that shimmers.
   water: { maxDominance: 0.72, maxBusyness: 0.035 },
-  // One tile spans the whole region and carries variation at three scales, so
-  // it has more edges in it than a prop tile does, and that is the point.
-  grass: { maxBusyness: 0.1 },
+  // The tightest ceiling in the set, and the only one set from outside this
+  // tool. The ground is most of every frame and the only large surface with no
+  // outline holding it together, and it has been called "green static" once
+  // already. The number is what the code-drawn ground actually scores, measured
+  // the same way (0.0055 Oklab), so the gate is "no busier than what we have"
+  // rather than a figure someone liked the look of.
+  grass: { maxBusyness: 0.007 },
   // A crust of dark plates with fire in the cracks is mostly crust.
   ember: { maxDominance: 0.7, maxBusyness: 0.12 },
   // The weave is two texels a thread, which is deliberately at the noise ceiling.

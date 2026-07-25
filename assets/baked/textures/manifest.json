@@ -1,22 +1,22 @@
 {
   "bark": {
-    "hash": "3d00508bfc75eb7c",
+    "hash": "70ef9b8e06a90f48",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9043,
-    "bytes": 1085,
+    "bytes": 1111,
     "phase": [
-      0,
-      10
+      2,
+      5
     ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.664,
+      "seamX": 0.556,
       "seamY": 0.593,
-      "busyness": 0.035,
+      "busyness": 0.0335,
       "used": 6,
-      "dominance": 0.383
+      "dominance": 0.444
     }
   },
   "clay": {
@@ -160,23 +160,23 @@
     }
   },
   "grass": {
-    "hash": "0ce06746de4ba0be",
+    "hash": "8d2a2d1e54ff6042",
     "size": 1024,
     "worldUnits": 85.3,
     "model": "fal-ai/patina/material",
-    "seed": 9074,
-    "bytes": 94916,
+    "seed": 24912,
+    "bytes": 59662,
     "phase": [
       1,
-      1
+      0
     ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 1.05,
-      "seamY": 0.804,
-      "busyness": 0.0128,
+      "seamX": 0.623,
+      "seamY": 0.479,
+      "busyness": 0.0066,
       "used": 8,
-      "dominance": 0.356
+      "dominance": 0.301
     }
   },
   "grassDry": {

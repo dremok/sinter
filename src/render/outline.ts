@@ -154,35 +154,24 @@ export function setOutlineViewport(bufferHeight: number): void {
   material.uniforms.uHalfHeight!.value = bufferHeight / 2
 }
 
-interface Hull {
-  hull: THREE.Mesh
-  host: THREE.Mesh
-  /** World-space height of the host, which is what sets the outline's weight. */
-  height: number
-}
-
-const hulls: Hull[] = []
-
 function hostMaterial(mesh: THREE.Mesh): THREE.Material | undefined {
   return Array.isArray(mesh.material) ? mesh.material[0] : mesh.material
 }
 
 /**
- * Hide the outline of anything that is being faded out.
+ * Hull visibility during a ghost is owned by `world/region.ts`, not here.
  *
- * A hull is opaque and knows nothing about its host's material, so a building
- * ghosted to let the player see behind it kept a hard black line floating in
- * the middle of the transparency. Rather than have every system that fades
- * something remember to hide its outline too, the outline checks for itself:
- * there is exactly one place that can get this wrong, and it is here.
+ * There was briefly a `syncOutlines()` in this file that also drove
+ * `hull.visible`, from the host material's opacity. It was the second outline
+ * path that left hard black lines inside ghosted buildings, and it was this
+ * one: `fadeOccluders` hides hulls at `opacity >= 0.999`, then this ran later
+ * in the same frame and turned them back on with a different threshold.
+ *
+ * Deleted rather than reconciled. Two systems writing one flag is a race
+ * whatever the thresholds are, and the fade owns the state that decides it.
+ * `region.ts` finds hulls by `userData.outlineHull`, which is set below and is
+ * the only contract between the two files.
  */
-export function syncOutlines(): void {
-  for (const h of hulls) {
-    const m = hostMaterial(h.host)
-    const ghosted = m !== undefined && m.transparent && m.opacity < 0.98
-    h.hull.visible = h.host.visible && !ghosted
-  }
-}
 
 /**
  * Self-lit surfaces take no outline.
@@ -255,6 +244,5 @@ export function applyOutlines(root: THREE.Object3D, skip?: (mesh: THREE.Mesh) =>
       material.uniforms.uHeight!.value = height
     }
     mesh.add(hull)
-    hulls.push({ hull, host: mesh, height })
   }
 }

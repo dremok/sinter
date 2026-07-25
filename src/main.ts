@@ -5,7 +5,7 @@ import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
 import { Grade, groundBlob, sizeToDisplay, toonUnique } from './render/toon'
 import { advanceSmoke, Flame, setFlameViewport } from './render/flame'
-import { applyOutlines, setOutlineViewport, syncOutlines } from './render/outline'
+import { applyOutlines, setOutlineViewport } from './render/outline'
 import { loadParts } from './render/parts'
 import { Character } from './render/character'
 import { BOUNDS, buildRegion } from './world/region'
@@ -1014,8 +1014,6 @@ function syncMeshes(dt: number): void {
   syncBufferSize()
   // Every smoke column in the world, wherever region.ts put them.
   advanceSmoke(dt)
-  // Outlines follow their host's ghosting, so a faded building loses its line.
-  syncOutlines()
 }
 
 // ---------------------------------------------------------------- hud
@@ -1051,6 +1049,7 @@ declare global {
       pos: () => { x: number; y: number; z: number }
       project: (x: number, y: number, z: number) => { x: number; y: number }
       speed: () => number
+      blockers: () => { label: string; x: number; z: number; r: number }[]
     }
   }
 }
@@ -1070,6 +1069,22 @@ window.__sinter = {
     return { x: v.x, y: v.y }
   },
   speed: () => player.speed01,
+  /**
+   * Every blocker in the region, for `tools/verify-collision.mjs`.
+   *
+   * Exposed rather than recomputed because collision leaks are a property of
+   * what was actually GENERATED, not of what the generator meant. The rock
+   * spur beside the palisade had a 2.81m gap against a 2.16m radii sum, which
+   * defeated the obstacle entirely, and nothing but the real numbers would
+   * have shown it.
+   */
+  blockers: () =>
+    [...queries.blockers].map((e) => ({
+      label: e.label ?? 'unlabelled',
+      x: e.transform.pos.x,
+      z: e.transform.pos.z,
+      r: e.blocker.radius,
+    })),
 }
 
 if (PACK) {

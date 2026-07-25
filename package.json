@@ -16,7 +16,8 @@
     "bake:verify": "tsx tools/bake-textures/verify.ts",
     "verify:deploy": "node tools/verify-deploy.mjs",
     "start": "node tools/serve.mjs",
-    "verify:movement": "node tools/verify-movement.mjs"
+    "verify:movement": "node tools/verify-movement.mjs",
+    "verify:collision": "node tools/verify-collision.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",

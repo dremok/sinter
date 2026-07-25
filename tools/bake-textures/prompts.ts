@@ -165,12 +165,13 @@ export const SPECS: readonly TextureSpec[] = [
       `${STYLE} Short stylised meadow grass seen from directly above. Broad soft ` +
       'drifts of lusher and drier grass about a sixth of the image across, and three ' +
       'or four ragged patches of bare brown earth worn through the turf, each about a ' +
-      'tenth of the image wide. Densely covered in small individual tufts of grass ' +
-      'blades a few pixels across, so it reads as separate plants rather than as a ' +
-      'uniform carpet. Olive and sage green, never emerald, never bright.',
+      'tenth of the image wide. Mostly large flat areas of one tone, with only an ' +
+      'occasional small tuft of grass picked out, well separated, so the surface reads ' +
+      'as calm and open. No fine detail, no speckle, no dense stippling of blades. ' +
+      'Deep olive and sage green, never emerald, never bright, and not pale.',
     palette: [...RAMP.grass, ...steps(RAMP.dirt, 0, 3)],
     stretch: 0.85,
-    gamma: 1,
+    gamma: 0.78,
     sharpen: 0.4,
     flatten: 0,
     notes:
@@ -279,8 +280,10 @@ export const SPECS: readonly TextureSpec[] = [
       'around three or four dark round knots. Each ridge is one solid shape with a ' +
       'clearly lighter edge down its left side and a clearly darker edge down its ' +
       'right, so it reads as raised and rounded; each knot has a light rim on one side ' +
-      'and a dark rim on the other. Broad flat areas between the marks, no fine ' +
-      'striation, no small scratches, no speckle. Warm dark brown.',
+      'and a dark rim on the other. Each knot is a hole, not a dot: a dark core with ' +
+      'a distinctly lighter rim around its far side, so it reads as sunk into the ' +
+      'surface. Broad flat areas between the marks, no fine striation, no small ' +
+      'scratches, no speckle. Warm dark brown.',
     palette: [...RAMP.bark],
     stretch: 0.9,
     gamma: 1,
