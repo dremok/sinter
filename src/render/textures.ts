@@ -351,18 +351,18 @@ export const grass = (rng: Rng) =>
       const v = y / n
       for (let x = 0; x < n; x++) {
         const u = x / n
-        // Soil surfaces where `patch` peaks. The steep multiplier keeps the
-        // stipple a few texels wide: a wide dithered ramp between mid green and
-        // tan is not a soft edge, it is a field of red pixels, because a 50/50
-        // stipple of two saturated complementary hues resolves to neither.
-        const soil = (patch(u, v) - 0.8) * 16
-        if (soil > dither(x, y)) {
-          ditherStep(put, x, y, RAMP.dirt, 0.4 + clamp(soil, 0, 1) * 2.6)
-        } else {
-          // The whole value range of the ramp, spent on one slow gradient.
-          const dim = clamp(soil + 0.6, 0, 1) * 1.4
-          ditherStep(put, x, y, RAMP.grass, clamp(1.0 + drift(u, v) * 3.0 - dim, 0, 4.9))
-        }
+        // The whole value range of the ramp, spent on one slow gradient. Value
+        // is decided here and only here, so the patches below cannot show up as
+        // shapes in a greyscale check.
+        const idx = clamp(1.0 + drift(u, v) * 3.0, 0, 4.9)
+        // Thin, parched turf where `patch` runs high. Dithered against the
+        // green ramp at the *same* index over a wide, gradual band, so the
+        // transition is a hue drift rather than a stamped edge. The offset on
+        // the hash keeps this decision independent of the one inside
+        // ditherStep, which would otherwise correlate the two stipples.
+        const dry = clamp((patch(u, v) - 0.55) * 2.2, 0, 1)
+        const ramp = dry > hashDither(x + 977, y) ? RAMP.dryGrass : RAMP.grass
+        ditherStep(put, x, y, ramp, idx)
       }
     }
 
@@ -375,8 +375,9 @@ export const grass = (rng: Rng) =>
       const y = r.int(0, n - 1)
       const u = x / n
       const v = y / n
-      if (patch(u, v) > 0.76) continue
-      if (!r.chance(0.35 + drift(u, v) * 0.6)) continue
+      // Thinner on the parched ground, but not absent: it is dry turf, not
+      // bare earth, so something still grows there.
+      if (!r.chance((0.35 + drift(u, v) * 0.6) * (patch(u, v) > 0.72 ? 0.4 : 1))) continue
 
       const aim = r.range(0, Math.PI * 2)
       const blades = r.int(3, 5)
@@ -390,12 +391,13 @@ export const grass = (rng: Rng) =>
       }
     }
 
-    // Stones and fallen sticks, on the soil only, so a bare patch reads as
-    // ground something wore through rather than as a paint spill.
+    // Stones and fallen sticks, in the thin turf only, where a stone would
+    // actually show through. Sparse: this is the last texel-scale layer left on
+    // the ground and it is one mark short of being speckle again.
     for (let i = 0; i < Math.round((n * n) / 5200); i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      if (patch(x / n, y / n) < 0.82) continue
+      if (patch(x / n, y / n) < 0.84) continue
       if (r.chance(0.55)) {
         const rx = r.range(1.6, 3)
         blob(put, x, y, rx, rx * 0.8, tone(RAMP.stone, 2))

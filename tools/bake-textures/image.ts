@@ -137,14 +137,19 @@ export function reduce(src: Bitmap, size: number): Bitmap {
 }
 
 /**
- * A mild high-pass, applied before reduction.
+ * A one-texel unsharp mask, applied *after* reduction and before snapping.
  *
- * A box filter is a low-pass, so a 16:1 reduction throws away exactly the
- * mid-frequency shape that the art direction is asking the model for. Sharpening
- * first puts some of it back as a widened value gap across each boundary, which
- * the palette snap then resolves into a hard edge. Applied in linear light and
- * clamped, because an unsharp mask that overshoots produces halos, and a halo
- * survives posterisation as a bright outline around every shape.
+ * The order is the whole point and the first version had it backwards. A
+ * 3x3 unsharp at 1024px sharpens exactly the detail that a 16:1 box filter is
+ * about to average out of existence, which costs a pass and changes nothing.
+ * Run at 64px it widens the value gap across each boundary that survived, and
+ * the palette snap then resolves that gap into a hard edge. That is what turns
+ * a soft reduction back into something that reads as pixel art rather than as a
+ * photograph someone shrank.
+ *
+ * Applied in linear light and clamped, because an unsharp that overshoots
+ * produces halos, and a halo survives posterisation as a bright outline drawn
+ * around every shape.
  */
 export function sharpen(src: Bitmap, amount: number): Bitmap {
   if (amount <= 0) return src
@@ -262,10 +267,20 @@ export function snapToPalette(src: Bitmap, opt: SnapOptions): SnapResult {
 
 export interface TileReport {
   /**
-   * Difference across the wrap seam, over the average difference between two
-   * neighbouring columns inside the tile. A genuinely seamless texture sits near
-   * 1, because its edge is no more of an event than anywhere else. A tile that
-   * does not wrap runs 3 to 10.
+   * Difference across the wrap seam, over the tile's mean neighbour-to-neighbour
+   * difference. A seamless texture sits near or below 1, because its edge is no
+   * more of an event than anywhere else in it; a tile that does not wrap runs 3
+   * to 10.
+   *
+   * The denominator is deliberately isotropic, averaged over both axes rather
+   * than measured along the seam's own. The first version of this check
+   * normalised each seam by the interior difference on the same axis, and it
+   * failed every anisotropic texture in the set: bark's grain runs vertically,
+   * so its row-to-row difference is almost nothing, so a horizontal seam of
+   * almost nothing came out as a ratio of 2.3 and a visually perfect tile was
+   * rejected three times in a row. What makes a seam visible is how it compares
+   * to the texture's contrast in general, not to its contrast in the one
+   * direction that happens to be flat.
    */
   seamX: number
   seamY: number
@@ -310,11 +325,12 @@ export function inspectTiling(bmp: Bitmap): TileReport {
   interiorX /= h * (w - 1)
   interiorY /= (h - 1) * w
 
-  return {
-    seamX: seamX / (interiorX || 1e-6),
-    seamY: seamY / (interiorY || 1e-6),
-    busyness: (interiorX + interiorY) / 2,
-  }
+  // A floor, so a nearly uniform tile cannot divide a tiny seam by a tinier
+  // denominator and report a discontinuity nobody could see.
+  const busyness = (interiorX + interiorY) / 2
+  const denom = Math.max(busyness, 0.004)
+
+  return { seamX: seamX / denom, seamY: seamY / denom, busyness }
 }
 
 /** Mean Oklab of an image, for checking a texture came back the right colour. */
@@ -331,9 +347,17 @@ export function meanLab(bmp: Bitmap): Oklab {
   return { L: L / lab.length, a: a / lab.length, b: b / lab.length }
 }
 
-/** Distance between two mean colours, in the same units the snapper uses. */
-export function labDistance(p: Oklab, q: Oklab): number {
-  return Math.sqrt(distance(p, q))
+/**
+ * Distance between two colours ignoring lightness.
+ *
+ * Used for the "did the model paint the right material" check, and deliberately
+ * blind to value: `snapToPalette` renormalises the source's value range onto the
+ * palette's on purpose, so a bark tile that came back two stops too bright is
+ * not a fault, it is the input the stretch exists to handle. A bark tile that
+ * came back grey, or green, is a fault, and only chroma sees the difference.
+ */
+export function chromaDistance(p: Oklab, q: Oklab): number {
+  return Math.hypot(p.a - q.a, p.b - q.b)
 }
 
 /** Lay a tile out 2x2 so a seam has somewhere to show itself. */

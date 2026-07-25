@@ -18,7 +18,7 @@
  *     ?debug=1 or F3; see `mountDebug` below.
  */
 
-import { useOf, type ItemDef, type Use } from '../items/catalog'
+import { useOf, useSummary as useSummaryProbe, type ItemDef, type Use } from '../items/catalog'
 import { landingOf } from '../items/interactions'
 import { canMerge, isDiscovered, mergeId, refusal, tryMerge } from '../items/merge'
 import { itemIcon } from '../render/icons'
@@ -392,6 +392,10 @@ export class Ui {
     this.markHeld()
     this.syncFade()
     this.renderBench()
+
+    // TEMPORARY PROBE, remove before reporting.
+    const probe = this.pack[0]
+    if (probe) this.held(itemIcon(probe), probe.name, useSummaryProbe(probe), 0, this.pack.length)
   }
 
   /**
@@ -461,7 +465,7 @@ export class Ui {
       actions.append(glyph)
     }
     if (picked) actions.append(el('div', 'card-slot', String(picked)))
-    if (this.hooks.onHold) {
+    if (this.hooks.onHold || true) {
       const hold = el('button', 'card-hold', 'Hold')
       hold.type = 'button'
       hold.title = `Take the ${def.name} in hand`
@@ -758,11 +762,13 @@ export class Ui {
     node.append(img)
 
     const text = el('div', 'held-text')
-    text.append(el('div', 'held-name', name), el('div', 'held-use', summary))
+    text.append(el('div', 'held-name', name))
 
-    // Everything a throw decision needs, in one row: how far, how wide, and
-    // what lands there.
     if (def && use.mode === 'projected') {
+      // Everything a throw decision needs, in one row: how far, how wide, and
+      // what lands there. This replaces the generic sentence rather than
+      // sitting under it, because "Throw it, up to 8 paces" says less than the
+      // row does and says the range twice.
       const land = landingOf(def.id)
       const aim = el('div', 'held-aim')
       const across = land ? Math.max(1, Math.round(land.radius * 2)) : 1
@@ -772,26 +778,26 @@ export class Ui {
         el('span', 'held-reach', `${across} across`),
       )
       if (land) {
-        for (const { id, value } of ranked(land.applies).slice(0, 2)) {
-          aim.append(this.buildTrait(id, value))
-        }
+        for (const { id, value } of ranked(land.applies).slice(0, 2)) aim.append(this.buildTrait(id, value))
       }
       text.append(aim)
+    } else {
+      text.append(el('div', 'held-use', summary))
     }
     node.append(text)
 
-    const badge = this.modeGlyph(use.mode)
-    badge.classList.add('held-mode')
-    badge.append(el('span', undefined, mode.label))
-    node.append(badge)
-
     // A keycap only where that key is genuinely the verb. Anything else would
-    // invite the player to press a key and watch nothing happen.
+    // invite the player to press a key and watch nothing happen, which is the
+    // silent nothing A11 forbids. Where there is a key, the glyph rides with it
+    // and the mode needs no second label: "R Throw" has already said "thrown".
+    const act = el('div', mode.key ? 'held-act' : 'held-mode inert')
+    act.append(this.modeGlyph(use.mode))
     if (mode.key && mode.verb) {
-      const act = el('div', 'held-act')
       act.append(el('span', 'key', mode.key), el('span', undefined, mode.verb))
-      node.append(act)
+    } else {
+      act.append(el('span', undefined, mode.label))
     }
+    node.append(act)
   }
 
   prompt(html: string | null): void {

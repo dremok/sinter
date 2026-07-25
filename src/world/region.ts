@@ -1253,7 +1253,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   function longhouse(x: number, z: number, turn: number, w: number, dep: number): void {
     const h = heightAt(x, z)
     const g = new THREE.Group()
-    const wallH = 2.35
+    const wallH = 2.55
 
     const footing = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.3, dep + 0.3), M.rubbleWall)
     footing.position.y = 0.15
@@ -1289,9 +1289,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // The ridge runs along X, so the roof slopes in Z and the triangular gable
     // ends are the walls at x = +-w/2. Stepped rather than triangular: a real
     // triangle needs its own UVs, and five boxes read the same at this size.
-    const pitch = 0.76
+    const pitch = 0.72
     const eave = 0.3 + wallH
-    const run = dep / 2 + 0.5
+    // Small overhang on purpose. The camera looks down at 35 degrees, so every
+    // centimetre of eave hides 1.4 of the wall below it; at the half metre this
+    // started with, the door and both windows were invisible from every angle.
+    const run = dep / 2 + 0.22
     const ridge = eave + run * Math.tan(pitch)
     const steps = 5
     for (const sx of [-1, 1]) {
@@ -1308,7 +1311,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
     const slope = run / Math.cos(pitch)
     for (const sz of [-1, 1]) {
-      const half = new THREE.Mesh(new THREE.BoxGeometry(w + 0.7, 0.18, slope), M.thatch)
+      const half = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, 0.18, slope), M.thatch)
       half.position.set(0, (eave + ridge) / 2, (sz * run) / 2)
       half.rotation.x = sz * pitch
       half.castShadow = true
@@ -1319,7 +1322,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       // are what tell you the strands run down-slope.
       for (let i = 1; i <= 3; i++) {
         const t = i / 4
-        const batten = new THREE.Mesh(new THREE.BoxGeometry(w + 0.74, 0.07, 0.09), M.plankDark)
+        const batten = new THREE.Mesh(new THREE.BoxGeometry(w + 0.54, 0.07, 0.09), M.plankDark)
         batten.position.set(
           0,
           eave + (ridge - eave) * t + 0.11 * Math.cos(pitch),
@@ -1329,7 +1332,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       }
 
       // A ragged, darker eave edge, and the shadow it should be throwing.
-      const edge = new THREE.Mesh(new THREE.BoxGeometry(w + 0.72, 0.2, 0.14), M.thatchOld)
+      const edge = new THREE.Mesh(new THREE.BoxGeometry(w + 0.52, 0.2, 0.14), M.thatchOld)
       edge.position.set(0, eave - 0.02, sz * run)
       edge.rotation.x = sz * pitch
       g.add(edge)
@@ -1339,29 +1342,29 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       g.add(band)
     }
 
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, 0.24, 0.4), M.thatchOld)
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.32, 0.24, 0.4), M.thatchOld)
     cap.position.y = ridge + 0.02
     cap.castShadow = true
     g.add(cap)
 
     // The doorway. Near black, with one warm plane behind it: somebody is in.
     const doorX = -w * 0.24
-    const opening = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.55, 0.16), M.doorway)
-    opening.position.set(doorX, 1.05, dep / 2 + 0.02)
+    const opening = new THREE.Mesh(new THREE.BoxGeometry(1.06, 1.9, 0.16), M.doorway)
+    opening.position.set(doorX, 1.25, dep / 2 + 0.02)
     g.add(opening)
     const inside = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.66, 1.2),
+      new THREE.PlaneGeometry(0.8, 1.5),
       toonUnique({ color: 0xff9a48, emissive: new THREE.Color(0xff7a2a), emissiveIntensity: 0.55 }),
     )
-    inside.position.set(doorX, 0.92, dep / 2 + 0.045)
+    inside.position.set(doorX, 1.06, dep / 2 + 0.045)
     g.add(inside)
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.18, 0.26), M.log)
-    lintel.position.set(doorX, 1.92, dep / 2 + 0.06)
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.2, 0.26), M.log)
+    lintel.position.set(doorX, 2.28, dep / 2 + 0.06)
     lintel.castShadow = true
     g.add(lintel)
     // The leaf, standing open against the wall beside it.
-    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.5, 0.1), M.plankDark)
-    leaf.position.set(doorX + 0.82, 1.05, dep / 2 + 0.32)
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.86, 1.84, 0.1), M.plankDark)
+    leaf.position.set(doorX + 0.94, 1.22, dep / 2 + 0.36)
     leaf.rotation.y = -0.75
     leaf.castShadow = true
     g.add(leaf)
@@ -1372,14 +1375,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
     for (const wx of [w * 0.24, -w * 0.42]) {
       const win = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.46, 0.08), M.doorway)
-      win.position.set(wx, 1.6, dep / 2 + 0.05)
+      win.position.set(wx, 1.72, dep / 2 + 0.05)
       g.add(win)
       const sill = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.08, 0.16), M.log)
-      sill.position.set(wx, 1.34, dep / 2 + 0.08)
+      sill.position.set(wx, 1.46, dep / 2 + 0.08)
       g.add(sill)
       for (const s of [-1, 1]) {
         const shutter = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.52, 0.07), M.plankDark)
-        shutter.position.set(wx + s * 0.4, 1.6, dep / 2 + 0.08)
+        shutter.position.set(wx + s * 0.4, 1.72, dep / 2 + 0.08)
         shutter.rotation.y = s * 0.4
         g.add(shutter)
       }
@@ -1419,14 +1422,13 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   function shed(x: number, z: number, turn: number, w: number, dep: number): void {
     const h = heightAt(x, z)
     const g = new THREE.Group()
-    const front = 1.75
-    const back = 2.5
+    const front = 2.0
+    const back = 2.0
 
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const tall = sz < 0 ? back : front
-        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, tall, 7), M.log)
-        post.position.set((sx * w) / 2, tall / 2, (sz * dep) / 2)
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, back, 7), M.log)
+        post.position.set((sx * w) / 2, back / 2, (sz * dep) / 2)
         post.castShadow = true
         g.add(post)
       }
@@ -1444,20 +1446,43 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       g.add(board)
     }
 
-    const rise = back - front
-    const slopeLen = Math.hypot(dep + 0.6, rise)
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.7, 0.16, slopeLen), M.thatchOld)
-    roof.position.set(0, (front + back) / 2 + 0.12, 0)
-    roof.rotation.x = -Math.atan2(rise, dep + 0.6)
-    roof.castShadow = true
-    roof.receiveShadow = true
-    g.add(roof)
-    for (let i = 1; i <= 2; i++) {
-      const batten = new THREE.Mesh(new THREE.BoxGeometry(w + 0.74, 0.06, 0.08), M.plankDark)
-      batten.position.set(0, (front + back) / 2 + 0.2 + (i - 1.5) * rise * 0.5, (i - 1.5) * dep * 0.7)
-      batten.rotation.x = -Math.atan2(rise, dep + 0.6)
+    // Gabled, not mono-pitch. A single sloping plane seen from 35 degrees above
+    // is a rectangle, and a rectangle on legs reads as a table however it is
+    // textured. Two planes meeting at a ridge read as a roof from any angle,
+    // which is the whole reason the longhouse reads and the first shed did not.
+    const pitch = 0.66
+    const eave = back
+    const run = dep / 2 + 0.24
+    const ridge = eave + run * Math.tan(pitch)
+    const slopeLen = run / Math.cos(pitch)
+
+    for (const sz of [-1, 1]) {
+      const half = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, 0.15, slopeLen), M.thatch)
+      half.position.set(0, (eave + ridge) / 2, (sz * run) / 2)
+      half.rotation.x = sz * pitch
+      half.castShadow = true
+      half.receiveShadow = true
+      g.add(half)
+
+      const batten = new THREE.Mesh(new THREE.BoxGeometry(w + 0.44, 0.06, 0.08), M.plankDark)
+      batten.position.set(0, eave + (ridge - eave) * 0.45, sz * run * 0.55)
       g.add(batten)
     }
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.26, 0.18, 0.3), M.thatchOld)
+    cap.position.y = ridge + 0.02
+    cap.castShadow = true
+    g.add(cap)
+
+    // Rafters, visible because there is no ceiling.
+    for (const dx of [-0.7, 0, 0.7]) {
+      const rafter = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, dep + 0.3), M.log)
+      rafter.position.set(dx * (w / 2), eave - 0.12, 0)
+      g.add(rafter)
+    }
+    const tie = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, 0.1, 0.1), M.log)
+    tie.position.set(0, eave - 0.12, dep / 2)
+    tie.castShadow = true
+    g.add(tie)
 
     // A shelf along the back wall, which is where a jar of something ends up.
     const shelf = new THREE.Mesh(new THREE.BoxGeometry(w - 0.3, 0.08, 0.42), M.plank)
@@ -1468,7 +1493,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(x, h, z)
     g.rotation.y = turn
     group.add(g)
-    occluders.push(occluder(g, Math.max(w, dep) * 0.5, back + 0.4))
+    occluders.push(occluder(g, Math.max(w, dep) * 0.5, ridge + 0.3))
 
     world.add({
       transform: { pos: new THREE.Vector3(x, h + 0.8, z), ry: turn },
@@ -1479,8 +1504,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     })
   }
 
-  longhouse(-4.9, 15.5, 0.22, 5.4, 3.3)
-  shed(6.0, 15.6, -0.38, 3.4, 2.6)
+  longhouse(-4.9, 15.5, 0.22, 5.0, 3.2)
+  shed(6.2, 15.5, -0.34, 3.2, 2.4)
 
   /** The hearth. Always lit, never consumed. */
   {
@@ -1648,8 +1673,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Woodpile, stacked against the east hut. Renewable fuel, and a silhouette. */
   {
-    const bx = 6.9
-    const bz = 13.6
+    const bx = 6.2
+    const bz = 15.2
     for (let row = 0; row < 4; row++) {
       for (let i = 0; i < 5 - Math.floor(row / 2); i++) {
         const lz = bz - 0.9 + i * 0.36 + (row % 2) * 0.16
@@ -1937,9 +1962,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   {
     const crateGeo = new THREE.BoxGeometry(0.62, 0.56, 0.6)
     for (const [x, z, y, ry] of [
-      [5.6, 15.9, 0, 0.3],
-      [6.2, 15.6, 0.56, -0.4],
-      [6.7, 16.2, 0, 0.9],
+      [8.5, 14.3, 0, 0.3],
+      [9.05, 14.05, 0.56, -0.4],
+      [9.5, 14.6, 0, 0.9],
     ] as const) {
       const crate = new THREE.Mesh(crateGeo, M.plank)
       crate.position.set(x, heightAt(x, z) + 0.28 + y, z)

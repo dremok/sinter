@@ -11,3 +11,7 @@ coverage/
 # Blender working files. Only exported glTF parts belong in assets/parts/.
 *.blend
 *.blend1
+
+# fal.ai raw generations, cached so re-running the bake does not re-bill.
+# Only the processed PNGs in assets/baked/ are committed.
+tools/bake-textures/.cache/

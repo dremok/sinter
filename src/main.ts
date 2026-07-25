@@ -4,7 +4,7 @@ import { Clock, TICK_DT } from './core/clock'
 import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
 import { Grade, groundBlob, sizeToDisplay, toonUnique } from './render/toon'
-import { Flame, setFlameViewport } from './render/flame'
+import { advanceSmoke, createSmokeColumn, Flame, setFlameViewport } from './render/flame'
 import { applyOutlines } from './render/outline'
 import { loadParts } from './render/parts'
 import { Character } from './render/character'
@@ -64,8 +64,11 @@ const grade = new Grade()
 // Ember and smoke sizes are authored in metres; the particle shaders need the
 // buffer height to turn that into points. Set here and on every resize.
 const bufferSize = new THREE.Vector2()
+let lastBufferHeight = 0
 function syncBufferSize(): void {
   renderer.getDrawingBufferSize(bufferSize)
+  if (bufferSize.y === lastBufferHeight) return
+  lastBufferHeight = bufferSize.y
   setFlameViewport(bufferSize.y)
 }
 syncBufferSize()
@@ -567,6 +570,13 @@ function groundEverything(): void {
   const key = new THREE.PointLight(0xfff0dc, 0.72, 2.7, 1.5)
   key.position.set(0, 1.1, 0)
   character.group.add(key)
+
+  // TEMP SMOKE COLUMN PROBE
+  for (const [cx, cz, sc] of [[2.4, 8.6, 1.0], [-3.2, 9.4, 0.7]] as const) {
+    const col = createSmokeColumn({ scale: sc * 2.5, density: 1, puffs: 10, seed: cx * 13, drift: [0.3, 0.2] })
+    col.object3D.position.set(cx, region.heightAt(cx, cz) + 2.2, cz)
+    scene.add(col.object3D)
+  }
 }
 
 // ---------------------------------------------------------------- interaction
@@ -917,6 +927,8 @@ function syncMeshes(dt: number): void {
   syncFireVisuals()
   placeLights()
   syncBufferSize()
+  // Every smoke column in the world, wherever region.ts put them.
+  advanceSmoke(dt)
 }
 
 // ---------------------------------------------------------------- hud

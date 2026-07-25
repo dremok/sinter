@@ -204,10 +204,14 @@
         font: 500 9px/1 var(--ui); letter-spacing: 0.14em; text-transform: uppercase;
         color: var(--ink-2);
       }
+      /* A mode with no key of its own is a fact about the item, not a control.
+         It loses the plate so it never reads as a button you failed to find. */
+      .held-mode.inert { background: none; box-shadow: none; color: var(--dim); padding-left: 0; }
       .held-act {
-        display: flex; align-items: center; gap: 7px; flex: none;
-        padding-left: 13px; box-shadow: inset 1px 0 0 rgba(240, 220, 190, 0.13);
-        font: 500 11.5px/1 var(--ui); letter-spacing: 0.05em; color: #e2dac9;
+        display: flex; align-items: center; gap: 8px; flex: none;
+        padding: 6px 11px 6px 10px; border-radius: 3px;
+        background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(240, 220, 190, 0.14);
+        font: 500 11.5px/1 var(--ui); letter-spacing: 0.05em; color: #efe6d3;
       }
       .glyph { display: flex; }
 
@@ -399,15 +403,21 @@
       /* Right of the name: use mode, bench slot, and the control that takes the
          thing in hand. All small, all optional, none of them reflow the row. */
       .card-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 7px; }
-      .card-mode { color: var(--dim); }
-      .card:hover .card-mode { color: var(--ink-2); }
+      .card-mode { color: var(--ink-2); }
+      .card:hover .card-mode { color: var(--ink); }
       .card-slot { font: 700 9px/1 var(--mono); letter-spacing: 0.1em; color: var(--warm); }
 
+      /*
+       * Revealed on hover. Ten of these reading "Hold" down the list turned the
+       * pack into a form and drowned the item names, which are the thing you
+       * are actually scanning. The one that matters, the item in hand, stays
+       * visible at all times.
+       */
       .card-hold {
         padding: 4px 8px; border-radius: 2px; cursor: pointer;
         border: 1px solid rgba(255, 255, 255, 0.13); background: rgba(255, 255, 255, 0.05);
         font: 500 9.5px/1 var(--ui); letter-spacing: 0.06em; color: var(--ink-2);
-        opacity: 0.55; transition: opacity 120ms ease;
+        opacity: 0; transition: opacity 120ms ease;
       }
       .card:hover .card-hold { opacity: 1; }
       .card-hold:hover { color: #1d1409; background: var(--warm); border-color: var(--warm); }

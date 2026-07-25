@@ -32,21 +32,30 @@ import { RAMP } from '../../src/render/palette'
 /**
  * Prepended to every prompt.
  *
- * "Top-down" and "orthographic" are doing real work: without them the model
- * frames a material as a photograph with a vanishing point and a light source,
- * and a tile with perspective in it repeats as a visibly wrong grid. The
- * negations are in the prompt rather than in a negative prompt because the
- * PATINA endpoint does not accept one.
+ * Two sentences of this earn their place by having been wrong first.
+ *
+ * "A flat surface of the material itself, filling the entire frame edge to edge,
+ * with no background and no objects" is the fix for the single worst failure of
+ * the first pass. Asked for "the bark of a standing tree trunk", the model
+ * returned a painting of five tree trunks standing against a cream wall, which
+ * is a perfectly good illustration and a completely useless texture. A material
+ * model still wants to compose a picture unless it is told the frame *is* the
+ * surface.
+ *
+ * The negations are kept short and at the end. They are in the prompt at all
+ * only because the PATINA endpoint takes no negative prompt, and a long tail of
+ * "no X" is worse than useless: it dilutes the positive direction and these
+ * models half honour it anyway. The positive form ("completely flat even
+ * ambient light") does most of the work that "no cast shadows" was failing to.
  */
 const STYLE =
-  'Hand-painted stylised game texture, top-down orthographic flat view. ' +
+  'Hand-painted stylised game texture. ' +
+  'A flat surface of the material itself, filling the entire frame edge to edge, ' +
+  'seen straight on, with no background and no separate objects. ' +
   'Muted desaturated earthy colours, low saturation. ' +
-  'Bold simple deliberate shapes with clear silhouettes, painterly brushwork, ' +
-  'the look of Don\'t Starve or a hand-painted stylised RPG. ' +
-  'Completely flat even ambient lighting. ' +
-  'No photorealism, no photographic detail, no fine speckled noise, ' +
-  'no cast shadows, no directional lighting, no baked highlights, no gloss, ' +
-  'no vignette, no perspective, no visible seams, no text, no border.'
+  'Bold simple deliberate shapes, painterly, in the style of Don\'t Starve. ' +
+  'Completely flat even ambient light, matte. ' +
+  'Not photographic, no shadows, no highlights, no border.'
 
 export interface TextureSpec {
   /** Must match a key of `TextureSet` in `src/render/textures.ts`. */
@@ -72,6 +81,24 @@ export interface TextureSpec {
 
 /** Ramp steps `from`..`to` inclusive. */
 const steps = (ramp: readonly string[], from: number, to: number) => ramp.slice(from, to + 1)
+
+/**
+ * Every prompt below counts its features out loud, and the counts are arithmetic
+ * rather than taste.
+ *
+ * A prop tile is 64 texels covering 5.3 world units, and the things it lands on
+ * are small: a trunk 1.5 units wide shows eighteen texels of it. For grain to
+ * read as grain on that trunk it needs three or four ridges inside those
+ * eighteen texels, which is a pitch of four or five texels, which is fourteen
+ * ridges across the whole tile. The first pass asked for "four or five broad
+ * ridges", got exactly that, and produced a picket fence: at a sixteen-texel
+ * pitch a tree trunk shows one ridge.
+ *
+ * So each count here is the code-drawn version's own pitch, restated as a number
+ * the model can act on. That file spent a pass discovering these (four texels to
+ * a board, eight to a thatch course, two to a woven thread) and there is no
+ * reason to rediscover them.
+ */
 
 export const SPECS: readonly TextureSpec[] = [
   {

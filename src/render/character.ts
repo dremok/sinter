@@ -67,20 +67,46 @@ import { toon, toonUnique } from './toon'
 
 const TAU = Math.PI * 2
 
+/**
+ * Values first, hue second.
+ *
+ * The frame is about to be desaturated and already carries near-black outlines
+ * on everything, so hue does none of the work of finding the player. Measured
+ * against the hedge line at the hearth, the old red-on-red character was 57%
+ * dark pixels sitting on a background that was 50% dark: in greyscale it was
+ * gone, which is the defect. Red simply cannot be a light value, so the biggest
+ * mass on the character had to stop being red.
+ *
+ * The garment is now sun-bleached canvas and the red survives as the lining,
+ * the sleeves and the trailing cloak. That gives three separated bands top to
+ * bottom, and the character carries its own light AND its own dark, so it
+ * separates from a pale sand background and a black hedge alike rather than
+ * relying on the ground behind it being green.
+ */
 const HUE = {
-  cloak: BAND0.tunic,
-  cloakDeep: 0x8e3129,
-  under: 0x39406b,
-  trouser: BAND0.trouser,
+  /**
+   * The hood. Warm tan rather than bone: the light mass belongs on the mantle,
+   * where the shape is widest, not on the point. A near-white pointed hood over
+   * a dark body is also a silhouette nobody wants on their player character.
+   */
+  cloak: 0xc2ab84,
+  /** The mantle. The light mass, at the widest part of the shape. */
+  mantle: 0xdfd3b4,
+  /** The red, kept as lining, sleeves and the trailing cloak panel. */
+  cloakDeep: 0xb03a30,
+  under: 0x2e3555,
+  trouser: 0x2e3555,
   /** Lighter than the thigh: the shin is the only leg the hem leaves showing. */
-  shin: 0x5b6a9e,
-  leather: 0x6b4526,
-  boot: 0x835733,
-  leatherDark: BAND0.hair,
-  canvas: 0xc4894a,
-  cloth: 0xdcc9a4,
+  shin: 0x4a5680,
+  leather: 0x7a5432,
+  leatherDark: 0x2c1f14,
+  /** Deliberately near-black. This is the dark end of the character's range. */
+  boot: 0x33261a,
+  /** Mid, so the pack reads as a separate object against the pale mantle. */
+  canvas: 0x8a6238,
+  cloth: 0xc9b48a,
   wrap: 0xf2e7cc,
-  shadow: 0x241c26,
+  shadow: 0x1a1418,
   brass: 0xe8a34c,
 } as const
 
@@ -301,7 +327,7 @@ export class Character {
     // that run across the shape rather than along it, and that are a different
     // value from what they lie on. The mid body was otherwise a single flat
     // slab of dark red between the collar and the hem.
-    const strap = bevel(0.06, 0.44, 0.06, HUE.cloth)
+    const strap = bevel(0.06, 0.44, 0.06, HUE.leatherDark)
     strap.position.set(0, 0.19, 0.115)
     strap.rotation.z = 0.62
     this.chest.add(strap)
@@ -373,7 +399,7 @@ export class Character {
     const tipGeo = new THREE.CylinderGeometry(0.02, 0.125, 0.24, 4)
     tipGeo.rotateY(Math.PI / 4)
     tipGeo.translate(0, 0.12, 0)
-    const tip = mesh(faceted(tipGeo), HUE.cloak)
+    const tip = mesh(faceted(tipGeo), HUE.cloakDeep)
     tip.position.set(0, 0.25, -0.12)
     tip.rotation.x = -0.7
     this.head.add(tip)
@@ -394,7 +420,7 @@ export class Character {
     mantleGeo.translate(0, -0.13, 0)
     const mantleMesh = new THREE.Mesh(
       faceted(mantleGeo),
-      toonUnique({ color: HUE.cloakDeep, side: THREE.DoubleSide }),
+      toonUnique({ color: HUE.mantle, side: THREE.DoubleSide }),
     )
     mantleMesh.castShadow = true
     this.mantle.add(mantleMesh)

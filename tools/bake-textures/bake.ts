@@ -39,8 +39,8 @@ import { fileURLToPath } from 'node:url'
 
 import { decodePng, encodeIndexedPng, type Bitmap } from './png'
 import {
+  chromaDistance,
   inspectTiling,
-  labDistance,
   magnify,
   meanLab,
   oklabOfHex,
@@ -56,6 +56,25 @@ import { MODEL, PIPELINE_VERSION, SPECS, type TextureSpec } from './prompts'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const OUT_DIR = resolve(ROOT, 'assets/baked/textures')
 const MANIFEST = resolve(OUT_DIR, 'manifest.json')
+
+/**
+ * Untouched model output, kept on disk and gitignored.
+ *
+ * This is the cache that actually saves money. The committed PNG is invalidated
+ * by anything that changes how it looks, including the reducer and the palette
+ * snap, and tuning those is most of the work: without a raw cache, every
+ * adjustment to a gamma re-runs fourteen generations. Keyed on what the model
+ * was actually asked for, so it survives every change downstream of the request
+ * and correctly misses when the prompt or the seed moves.
+ */
+const RAW_DIR = resolve(ROOT, 'tools/bake-textures/.cache')
+
+function rawKey(prompt: string, source: number, seed: number): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ model: MODEL, prompt, source, seed }))
+    .digest('hex')
+    .slice(0, 16)
+}
 
 // --------------------------------------------------------------- thresholds
 
@@ -176,8 +195,7 @@ interface Attempt {
 }
 
 function pipeline(spec: TextureSpec, source: Bitmap): Omit<Attempt, 'seed' | 'failures'> {
-  const sharpened = sharpen(source, spec.sharpen)
-  const small = reduce(sharpened, spec.size)
+  const small = sharpen(reduce(source, spec.size), spec.sharpen)
   const snapped = snapToPalette(small, {
     palette: spec.palette,
     stretch: spec.stretch,
@@ -199,7 +217,7 @@ function pipeline(spec: TextureSpec, source: Bitmap): Omit<Attempt, 'seed' | 'fa
     // Measured before snapping. After snapping the answer is trivially small,
     // which would make the check a tautology rather than a test of whether the
     // model painted the right material.
-    drift: labDistance(meanLab(small), paletteMean),
+    drift: chromaDistance(meanLab(small), paletteMean),
   }
 }
 
@@ -329,31 +347,41 @@ async function main(): Promise<void> {
 
     for (let attempt = 1; attempt <= args.attempts && !committed; attempt++) {
       const extra = attempt === 1 ? '' : ` ${corrective(lastFailures)}`
+      const prompt = spec.prompt + extra
       const seed = 1000 + attempt * 7919 + spec.name.length * 31
-      const result = await run(
-        key,
-        MODEL,
-        {
-          prompt: spec.prompt + extra,
-          image_size: { width: spec.source, height: spec.source },
-          maps: ['basecolor'],
-          tiling_mode: 'both',
-          // The endpoint rewrites a prompt by default. These prompts are the art
-          // direction; an expansion that adds "dramatic lighting" undoes it.
-          enable_prompt_expansion: false,
-          output_format: 'png',
-          num_images: 1,
-          seed,
-        },
-        { onWait: (s) => s % 20 === 0 && s > 0 && console.log(`    waiting ${s}s`) },
-      )
-      spent += estimateCost(spec)
 
-      const image =
-        result.images?.find((i) => i.map_type === 'basecolor') ?? result.images?.[0]
-      if (!image) throw new Error(`${spec.name}: fal returned no image`)
+      mkdirSync(RAW_DIR, { recursive: true })
+      const rawPath = resolve(RAW_DIR, `${spec.name}-${rawKey(prompt, spec.source, seed)}.png`)
+      let bytes: Uint8Array
+      if (existsSync(rawPath)) {
+        bytes = new Uint8Array(readFileSync(rawPath))
+        console.log('    reusing cached generation, nothing spent')
+      } else {
+        const result = await run(
+          key,
+          MODEL,
+          {
+            prompt,
+            image_size: { width: spec.source, height: spec.source },
+            maps: ['basecolor'],
+            tiling_mode: 'both',
+            // The endpoint rewrites a prompt by default. These prompts are the
+            // art direction; an expansion that adds "dramatic lighting" undoes it.
+            enable_prompt_expansion: false,
+            output_format: 'png',
+            num_images: 1,
+            seed,
+          },
+          { onWait: (s) => s % 20 === 0 && s > 0 && console.log(`    waiting ${s}s`) },
+        )
+        spent += estimateCost(spec)
+        const image = result.images?.find((i) => i.map_type === 'basecolor') ?? result.images?.[0]
+        if (!image) throw new Error(`${spec.name}: fal returned no image`)
+        bytes = await download(image.url)
+        writeFileSync(rawPath, bytes)
+      }
 
-      const source = decodePng(await download(image.url))
+      const source = decodePng(bytes)
       if (source.width !== spec.source || source.height !== spec.source) {
         console.log(
           `    warning: asked for ${spec.source}px, got ${source.width}x${source.height}`,
@@ -367,6 +395,19 @@ async function main(): Promise<void> {
 
       const done = pipeline(spec, source)
       const failures = judge(spec, done)
+
+      // Written before the verdict, and on every attempt, because the reason a
+      // texture failed is usually only legible by looking at it.
+      if (args.review) {
+        const dir = process.env.REVIEW_DIR ?? resolve(ROOT, '.shots/texture-review')
+        mkdirSync(dir, { recursive: true })
+        const scale = Math.max(1, Math.round(512 / done.bitmap.width))
+        writeFileSync(
+          resolve(dir, `${spec.name}-${attempt}-tiled.png`),
+          encodeIndexedPng(magnify(tile2x2(done.bitmap), scale)),
+        )
+        writeFileSync(resolve(dir, `${spec.name}-${attempt}-raw.png`), bytes)
+      }
       console.log(
         `    seam ${done.report.seamX.toFixed(2)}/${done.report.seamY.toFixed(2)}` +
           `  busy ${done.report.busyness.toFixed(3)}` +
@@ -407,16 +448,6 @@ async function main(): Promise<void> {
       writeFileSync(MANIFEST, JSON.stringify(sortKeys(manifest), null, 2) + '\n')
       console.log(`    committed ${(png.length / 1024).toFixed(1)} kB`)
       committed = true
-
-      if (args.review) {
-        const dir = process.env.REVIEW_DIR ?? resolve(ROOT, '.shots/texture-review')
-        mkdirSync(dir, { recursive: true })
-        const scale = Math.max(1, Math.round(512 / done.bitmap.width))
-        writeFileSync(
-          resolve(dir, `${spec.name}-2x2.png`),
-          encodeIndexedPng(magnify(tile2x2(done.bitmap), scale)),
-        )
-      }
     }
   }
 

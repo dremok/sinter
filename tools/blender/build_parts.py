@@ -1405,18 +1405,23 @@ def make_stem_calyx():
     vertical accent rather than a green splat sitting on top.
 
     Base anchored at the cap's underside, which is where it meets the fruit.
+
+    Sized to CAP the fruit rather than perch on it. The first cut was 84mm
+    across against a pod 130mm at the shoulder, which at play size is a four
+    pixel dot on a seven pixel shoulder and reads as a pin stuck in the top.
+    A calyx has to be at least as wide as what it is sitting on.
     """
     bm = bmesh.new()
     bm_lathe(bm, [
-        (0.0, 0.008),
-        (0.022, 0.0, 0.006),
-        (0.042, 0.006, 0.014),       # star rim, five points
-        (0.032, 0.022, 0.008),
-        (0.015, 0.030),
-        (0.012, 0.038),              # stem
-        (0.011, 0.078),
-        (0.009, 0.094),
-        (0.0, 0.100),
+        (0.0, 0.010),
+        (0.030, 0.0, 0.008),
+        (0.062, 0.008, 0.020),       # star rim, five points, wide
+        (0.046, 0.026, 0.012),
+        (0.018, 0.036),
+        (0.013, 0.044),              # stem
+        (0.012, 0.086),
+        (0.009, 0.102),
+        (0.0, 0.108),
     ], segments=10, lobes=5)
     o = emit(bm, "stem_calyx", "base", bevel_width=0.002, bevel_segments=1)
     socket(o, "socket_tip", (0, 0, 0.100))
@@ -1485,6 +1490,188 @@ def make_phial_ribbed():
     socket(o, "socket_mid", (0, 0, 0.10))
 
 
+# ------------------------------------------------------------------- ahead of
+#
+# Nothing below is referenced by a recipe yet. They are here because the object
+# list has more coming and a part that does not exist is the reason an item ends
+# up made of barrel hoops. Each was checked in a plausible assembly at play size
+# the same way the rest were, so they are ready rather than merely present.
+
+
+def make_stock_crossbow():
+    """
+    A crossbow tiller: nose, a straight run for the bolt, and a butt that drops
+    away for the shoulder.
+
+    Authored along X with the origin at the PROD MOUNT rather than at the butt,
+    because the prod is the part that has to line up and everything else on a
+    crossbow hangs off where those two meet. The drop at the back is the whole
+    silhouette: a straight bar of wood is a plank.
+    """
+    bm = bmesh.new()
+    stations = [
+        (0.042, 0.026, -0.022, 0.024, 0.55),    # nose
+        (0.000, 0.036, -0.032, 0.032, 0.35),    # prod mount, swollen
+        (-0.055, 0.030, -0.028, 0.034, 0.30),
+        (-0.190, 0.026, -0.026, 0.036, 0.30),   # tiller
+        (-0.300, 0.028, -0.030, 0.038, 0.30),
+        (-0.360, 0.030, -0.046, 0.036, 0.32),   # butt begins to drop
+        (-0.450, 0.031, -0.072, 0.030, 0.38),
+        (-0.520, 0.028, -0.082, 0.020, 0.55),
+    ]
+    bm_loft(bm, [box_section(*s) for s in stations])
+    o = emit(bm, "stock_crossbow", "none", bevel_width=0.004)
+    socket(o, "socket_tip", (0, 0, 0))
+    socket(o, "socket_base", (-0.52, 0, -0.03))
+
+
+def make_prod_bow():
+    """A bow limb: a lath spanning across Y, curving back in X, thick at the
+    centre and drawn down to nothing at the tips. Serves a crossbow prod and a
+    hand bow equally; the difference between them is scale and a recipe."""
+    bm = bmesh.new()
+    steps = 11
+    frames = []
+    for i in range(steps):
+        t = i / (steps - 1)
+        u = t * 2.0 - 1.0
+        frames.append((Vector((-0.108 * u * u, 0.265 * u, 0.0)),
+                       Vector((1.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0)), t))
+
+    def sec(i, t):
+        u = abs(t * 2.0 - 1.0)
+        hx = 0.019 * (1.0 - 0.68 * u * u)        # thickness, front to back
+        hz = 0.017 * (1.0 - 0.55 * u * u)        # height of the limb
+        return [(hx, hz * 0.45), (hx * 0.5, hz), (-hx * 0.5, hz),
+                (-hx, hz * 0.45), (-hx, -hz * 0.45), (-hx * 0.5, -hz),
+                (hx * 0.5, -hz), (hx, -hz * 0.45)]
+
+    bm_sweep(bm, frames, sec)
+    o = emit(bm, "prod_bow", "none", bevel_width=0.003, bevel_segments=1)
+    socket(o, "socket_mid", (0, 0, 0))
+
+
+def make_fork_sling():
+    """A cut sapling fork: a handle and two prongs splaying up and apart. The
+    band is a recipe's job; this is the Y, and the Y is the whole read."""
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, 0.0),
+        (0.024, 0.002),
+        (0.026, 0.030),
+        (0.022, 0.110),
+        (0.026, 0.170),              # swells where it splits
+        (0.030, 0.196),
+        (0.020, 0.212),
+    ], segments=9)
+
+    for sx in (-1.0, 1.0):
+        steps = 6
+        frames = []
+        for i in range(steps):
+            t = i / (steps - 1)
+            frames.append((Vector((sx * (0.012 + 0.086 * t * t), 0.0, 0.186 + 0.150 * t)),
+                           Vector((0.0, 1.0, 0.0)), Vector((0.0, 0.0, 1.0)), t))
+
+        def sec(i, t):
+            r = 0.020 * (1.0 - 0.42 * t)
+            return [(r * math.cos(2.0 * math.pi * k / 7),
+                     r * math.sin(2.0 * math.pi * k / 7)) for k in range(7)]
+
+        bm_sweep(bm, frames, sec)
+
+    o = emit(bm, "fork_sling", "base", bevel_width=0.004, bevel_segments=1)
+    socket(o, "socket_tip", (0, 0, 0.336))
+
+
+def make_scabbard_long():
+    """
+    A sword sheath: a flat tapering case with a collar at the throat and a chape
+    at the tip.
+
+    Anchored at the MOUTH, which is the attachment point, so a recipe can hang
+    it off a belt or stand a sword in it without arithmetic. Slightly wider than
+    `blade_sword` at every station, which is what a sheath is.
+    """
+    bm = bmesh.new()
+    stations = [
+        (0.000, 0.024, -0.058, 0.058, 0.30),    # mouth
+        (-0.028, 0.027, -0.062, 0.062, 0.28),   # throat collar
+        (-0.062, 0.022, -0.055, 0.055, 0.30),
+        (-0.380, 0.019, -0.048, 0.048, 0.30),
+        (-0.580, 0.017, -0.040, 0.040, 0.32),
+        (-0.628, 0.021, -0.040, 0.040, 0.34),   # chape
+        (-0.672, 0.016, -0.028, 0.028, 0.55),
+    ]
+    bm_loft(bm, [box_section(*s) for s in stations])
+    bm_rot_x_up(bm)
+    o = emit(bm, "scabbard_long", "top", bevel_width=0.004, bevel_segments=1)
+    socket(o, "socket_base", (0, 0, -0.672))
+
+
+def make_bottle_body():
+    """
+    A bottle, and deliberately not the flask.
+
+    Three vessels now share a shelf and they have to be tellable apart at twenty
+    pixels, so each gets one job. The flask is a wide flattened bulb. The phial
+    is a short ribbed hexagon. This is the tall one: straight cylindrical sides,
+    a high shoulder, and a long neck, with a punt pushed up into the base.
+    """
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, 0.016),                # punt, pushed up into the base
+        (0.032, 0.006),
+        (0.062, 0.0),
+        (0.071, 0.012),
+        (0.073, 0.150),              # straight sided body
+        (0.070, 0.178),
+        (0.052, 0.214),              # shoulder
+        (0.033, 0.242),
+        (0.026, 0.270),              # long neck
+        (0.025, 0.332),
+        (0.034, 0.346),              # lip
+        (0.032, 0.358),
+        (0.020, 0.360),
+        (0.0, 0.354),
+    ], segments=14)
+    o = emit(bm, "bottle_body", "base", smooth=False, bevel_width=0.003)
+    socket(o, "socket_tip", (0, 0, 0.336))
+    socket(o, "socket_mid", (0, 0, 0.11))
+
+
+def make_book_closed():
+    """
+    A closed book: two boards, a page block inset behind them, a rounded spine.
+
+    The inset is the part that matters. Covers flush with the pages give a
+    featureless slab; setting the page block back by eight millimetres on the
+    three open sides puts a shadow line all the way round and makes the object
+    read as something that opens.
+
+    A tome rather than a paperback, deliberately. Lying on the ground a book is
+    seen almost edge on, so its thickness IS its silhouette: at 64mm it was four
+    pixels of nothing, and at 92mm it is eleven and reads as an object.
+    """
+    bm = bmesh.new()
+
+    # Boards, top and bottom.
+    for z0 in (0.0, 0.076):
+        bm_box(bm, (-0.100, -0.072, z0), (0.106, 0.072, z0 + 0.016))
+
+    # Page block, inset on the three edges that are not the spine.
+    bm_box(bm, (-0.096, -0.064, 0.016), (0.098, 0.064, 0.076))
+
+    # Spine, rounded over the back edge.
+    bm_sweep(bm, [(Vector((-0.100, y, 0.046)), Vector((1.0, 0.0, 0.0)),
+                   Vector((0.0, 0.0, 1.0)), 0.0) for y in (-0.072, 0.072)],
+             lambda i, t: [(0.004, 0.046), (-0.012, 0.038), (-0.019, 0.014),
+                           (-0.019, -0.014), (-0.012, -0.038), (0.004, -0.046)])
+
+    o = emit(bm, "book_closed", "base", bevel_width=0.003, bevel_segments=1)
+    socket(o, "socket_tip", (0, 0, 0.064))
+
+
 BUILDERS = [
     make_haft_short, make_haft_long,
     make_blade_axe, make_blade_knife, make_head_hammer,
@@ -1497,6 +1684,8 @@ BUILDERS = [
     make_blade_sword, make_guard_cross, make_grip_wrapped, make_pommel_round,
     make_spectacles_frame, make_lens_round, make_key_body,
     make_chili_pod, make_stem_calyx, make_stone_lump, make_phial_ribbed,
+    make_stock_crossbow, make_prod_bow, make_fork_sling,
+    make_scabbard_long, make_bottle_body, make_book_closed,
 ]
 
 

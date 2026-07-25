@@ -213,7 +213,7 @@ varying vec4 vTint;
 void main() {
   float mask = 1.0;
   if ( uRound > 0.5 ) {
-    mask = smoothstep( 0.5, 0.16, length( gl_PointCoord - 0.5 ) );
+    mask = 1.0 - smoothstep( 0.16, 0.5, length( gl_PointCoord - 0.5 ) );
   }
   if ( vTint.a * mask < 0.01 ) discard;
   gl_FragColor = vec4( vTint.rgb, vTint.a * mask );
@@ -282,10 +282,178 @@ class Particles {
   }
 }
 
-// ---------------------------------------------------------------------- fire
+// --------------------------------------------------------------------- smoke
 
 const SMOKE_COLOR = new THREE.Color(0x6b6058)
 const scratchColor = new THREE.Color()
+
+/**
+ * What a plume looks like. Everything is in units of `scale`, so one set of
+ * numbers describes a campfire's wisp and a chimney's column.
+ */
+interface PlumeShape {
+  /** Metres. Sets the height of the column and the size of a puff together. */
+  scale: number
+  /** Opacity of the thickest puff, 0..1. Also the on/off switch: 0 is invisible. */
+  density: number
+  /** Where the first puff appears above the origin. */
+  base: number
+  /** How far a puff climbs over its life. */
+  rise: number
+  /** Lives per second. Lower is a lazier, heavier smoke. */
+  speed: number
+  /** Wind, in units of `scale` over a puff's whole life. */
+  driftX: number
+  driftZ: number
+  tint: THREE.Color
+}
+
+/**
+ * A rising, drifting, expanding, fading column of puffs.
+ *
+ * Written once and used by both the fire and the standalone smoke columns.
+ * Splitting it would mean two smokes that look slightly different and drift
+ * further apart every time either is touched, and the game is going to want
+ * smoke off hearths, chimneys, things burning out, doused fires and Band 2
+ * wreckage before long.
+ */
+class Plume {
+  readonly points: THREE.Points
+  private readonly particles: Particles
+  private readonly count: number
+  private readonly seed: number
+
+  constructor(count: number, seed: number) {
+    this.count = count
+    this.seed = seed
+    this.particles = new Particles(count, smokeMaterial)
+    this.points = this.particles.points
+  }
+
+  write(t: number, s: PlumeShape): void {
+    for (let i = 0; i < this.count; i++) {
+      const a = hash01(i * 5.13 + this.seed + 41.7)
+      const b = hash01(i * 9.71 + this.seed + 7.9)
+      const life = 2.4 + a * 1.4
+      // Each puff runs its own loop, offset by `b`, so the column is already
+      // full at t = 0 rather than coughing its first puff after three seconds.
+      // That also means a single headless frame shows a real column.
+      const k = ((t * s.speed + b * life) % life) / life
+
+      const spread = s.scale * k * (0.35 + b * 0.6)
+      const ang = b * Math.PI * 2
+
+      // Fades in off the source and out again, so it never pops at either end.
+      const alpha = Math.min(k * 4, 1) * (1 - k) * s.density
+
+      this.particles.set(
+        i,
+        Math.cos(ang) * spread + s.driftX * s.scale * k,
+        // Puffs climb different distances, or the column has a flat top edge.
+        s.scale * (s.base + k * s.rise * (1 + a * 0.7)),
+        Math.sin(ang) * spread + s.driftZ * s.scale * k,
+        s.scale * (0.28 + k * 0.85),
+        s.tint,
+        alpha,
+      )
+    }
+    this.particles.commit()
+  }
+
+  dispose(): void {
+    this.particles.dispose()
+  }
+}
+
+/** Live columns, ticked together by `advanceSmoke`. */
+const columns = new Set<SmokeColumn>()
+
+export interface SmokeColumnOptions {
+  /** Height of the column in metres, and the size of its puffs with it. */
+  scale?: number
+  /** Opacity of the thickest puff. Kept low by default: smoke is transparent,
+   *  and stacked transparency is the most expensive thing in a frame like this. */
+  density?: number
+  /** Lives per second. A cooking fire is lazy; a forge is not. */
+  rate?: number
+  /** Wind, as [x, z] in units of `scale` over a puff's life. */
+  drift?: readonly [number, number]
+  tint?: THREE.ColorRepresentation
+  /**
+   * Puffs. Six is deliberately few. Every one of them is a full-screen-blend
+   * quad the size of the column, so the cost is overdraw rather than vertices
+   * and doubling this costs far more than it looks like it should.
+   */
+  puffs?: number
+  /** Anything, as long as two chimneys side by side get different numbers. */
+  seed?: number
+  /** Leave true and `advanceSmoke` drives it. Set false only if the caller has
+   *  its own clock and will call `update` itself; do not do both. */
+  managed?: boolean
+}
+
+export interface SmokeColumn {
+  /** Add this wherever the smoke should come from. It carries no offset of its
+   *  own, so put it at the chimney mouth, not at the base of the building. */
+  readonly object3D: THREE.Object3D
+  /** Called for you unless `managed: false`. */
+  update(dt: number): void
+  dispose(): void
+}
+
+/**
+ * A standalone column of smoke.
+ *
+ * Exists because the chimney was five stacked boxes. Same plume the hearth
+ * uses, so they cannot diverge.
+ *
+ * Do not put one of these on something that already has a `Flame`: the fire
+ * brings its own smoke, and two overlapping columns is pure overdraw for no
+ * extra read.
+ */
+export function createSmokeColumn(opts: SmokeColumnOptions = {}): SmokeColumn {
+  const shape: PlumeShape = {
+    scale: opts.scale ?? 0.9,
+    density: opts.density ?? 0.34,
+    base: 0.1,
+    rise: 3.4,
+    speed: opts.rate ?? 0.42,
+    driftX: opts.drift?.[0] ?? 0.25,
+    driftZ: opts.drift?.[1] ?? 0.15,
+    tint: new THREE.Color(opts.tint ?? SMOKE_COLOR),
+  }
+
+  const plume = new Plume(opts.puffs ?? 6, opts.seed ?? 0)
+  plume.points.userData.noShadow = true
+  plume.points.userData.noOutline = true
+
+  let t = 0
+  const column: SmokeColumn = {
+    object3D: plume.points,
+    update(dt: number): void {
+      t += dt
+      plume.write(t, shape)
+    },
+    dispose(): void {
+      columns.delete(column)
+      plume.points.removeFromParent()
+      plume.dispose()
+    },
+  }
+
+  // Draw something immediately, so a column is never a blank frame if the first
+  // tick has not happened yet. The headless path renders exactly one frame.
+  column.update(0)
+  if (opts.managed !== false) columns.add(column)
+  return column
+}
+
+/** Advance every managed smoke column. One call per frame, from the render loop. */
+export function advanceSmoke(dt: number): void {
+  for (const c of columns) c.update(dt)
+}
+
+// ---------------------------------------------------------------------- fire
 
 export class Flame {
   readonly group = new THREE.Group()
@@ -293,7 +461,10 @@ export class Flame {
 
   private readonly tongues: THREE.Mesh[] = []
   private readonly embers = new Particles(EMBERS, emberMaterial)
-  private readonly smoke = new Particles(SMOKE, smokeMaterial)
+  private readonly smoke: Plume
+  /** Mutated in place each frame rather than reallocated, since only two of its
+   *  fields ever change and this runs for every fire on screen. */
+  private readonly shape: PlumeShape
 
   /** Per-fire phase offset, so two posts alight side by side do not flicker in
    *  lockstep. Derived from where the fire is, so it is stable across a replay. */
@@ -304,6 +475,17 @@ export class Flame {
 
   constructor(at: THREE.Vector3) {
     this.seed = hash01(at.x * 12.9898 + at.z * 78.233) * 97
+    this.smoke = new Plume(SMOKE, this.seed)
+    this.shape = {
+      scale: 1,
+      density: 0,
+      base: 0.9,
+      rise: 2.6,
+      speed: 0.55,
+      driftX: 0,
+      driftZ: 0,
+      tint: SMOKE_COLOR,
+    }
 
     for (let i = 0; i < TONGUES.length; i++) {
       const spec = TONGUES[i]!
@@ -417,31 +599,11 @@ export class Flame {
   }
 
   private updateSmoke(heat: number, size: number, t: number): void {
-    for (let i = 0; i < SMOKE; i++) {
-      const a = hash01(i * 5.13 + this.seed + 41.7)
-      const b = hash01(i * 9.71 + this.seed + 7.9)
-      const life = 2.4 + a * 1.4
-      const age = (t * 0.55 + b * life) % life
-      const k = age / life
-
-      const rise = size * (0.9 + k * (2.6 + a * 1.8))
-      const drift = size * k * (0.35 + b * 0.6)
-      const ang = b * Math.PI * 2
-
-      // Fades in from the flame tip and out again, so it never pops.
-      const alpha = Math.min(k * 4, 1) * (1 - k) * 0.46 * heat
-
-      this.smoke.set(
-        i,
-        Math.cos(ang) * drift,
-        rise,
-        Math.sin(ang) * drift,
-        size * (0.28 + k * 0.85),
-        SMOKE_COLOR,
-        alpha,
-      )
-    }
-    this.smoke.commit()
+    // Starts above the flame tip rather than at the base, and does not lean:
+    // a fire in a clearing has no chimney to be drawn up.
+    this.shape.scale = size
+    this.shape.density = 0.46 * heat
+    this.smoke.write(t, this.shape)
   }
 
   dispose(): void {
