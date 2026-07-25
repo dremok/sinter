@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "shot": "tsx tools/shot.ts",
+    "verify:deploy": "node tools/verify-deploy.mjs",
     "start": "node tools/serve.mjs"
   },
   "dependencies": {

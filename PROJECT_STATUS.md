@@ -33,7 +33,7 @@ Verified: `npm run typecheck` clean, `npm run test` 30/30 passing, screenshots c
 
 What does not exist: agents and disposition (so no bribery, distraction or disguise), gateways between regions, death and persistence, the codex UI, any item generation beyond the hand-authored 24, Blender kitbash parts (meshes are code primitives for now), and all audio.
 
-Not yet done: the deploy has never actually been run. `railway.json` is written and correct per current Railway docs, but nobody has executed `railway up`, so treat the first deploy as unverified.
+Deployed and verified: **https://sinter-production.up.railway.app**. Checked with `npm run verify:deploy`, which loads the live site in a real browser, confirms a canvas exists and the tick counter is advancing, and fails on any console or request error.
 
 ---
 

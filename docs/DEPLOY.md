@@ -46,11 +46,17 @@ After the first deploy, connect the GitHub repo in the Railway dashboard so push
 Do not assume a green build means a working game. WebGL and WASM both fail in ways a successful build will not catch.
 
 ```bash
+npm run verify:deploy     # loads the live site in a real browser, exits non-zero on any error
+npm run verify:deploy -- https://some-preview.up.railway.app/
 railway logs              # build and runtime output
 railway open              # open the deployed site
 ```
 
-Then actually load it and confirm the canvas renders and the capsule moves. The seeded screenshot harness only proves things work locally.
+`tools/verify-deploy.mjs` drives the live animation loop rather than the headless single-frame path, waits three seconds, and then checks that a canvas exists and that the tick counter has actually advanced. A single frame would pass even if the simulation threw on its second tick. It fails on any page error, console error, or failed request, and writes `.shots/deployed.png` so you can look at what the server is really serving.
+
+Expect a low fps number from it. It runs headless on SwiftShader software rendering, so 10 fps there is normal and says nothing about a real machine.
+
+**Live at https://sinter-production.up.railway.app** (project `sinter`, first deployed 2026-07-25).
 
 ## Environment variables
 
