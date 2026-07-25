@@ -487,7 +487,36 @@ function updateHud(fps: number): void {
 // ---------------------------------------------------------------- run
 
 declare global {
-  interface Window { __sinterReady?: boolean }
+  interface Window {
+    __sinterReady?: boolean
+    /**
+     * Debug hook for `tools/verify-movement.mjs`. Screen-space position is what
+     * the player actually judges controls by: "D goes right" is a claim about
+     * pixels, not about world axes, so the test has to be able to see pixels.
+     */
+    __sinter?: {
+      pos: () => { x: number; y: number; z: number }
+      project: (x: number, y: number, z: number) => { x: number; y: number }
+      speed: () => number
+    }
+  }
+}
+
+window.__sinter = {
+  pos: () => ({ x: player.pos.x, y: player.pos.y, z: player.pos.z }),
+  /**
+   * Project an arbitrary world point with the camera as it stands right now.
+   *
+   * Deliberately not "where is the player on screen": the camera follows the
+   * player, so that answer is always roughly the middle and says nothing about
+   * which way the controls go. Projecting the before and after positions
+   * through one camera pose isolates the movement itself.
+   */
+  project: (x: number, y: number, z: number) => {
+    const v = new THREE.Vector3(x, y, z).project(iso.camera)
+    return { x: v.x, y: v.y }
+  },
+  speed: () => player.speed01,
 }
 
 if (PACK) {

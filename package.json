@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "shot": "tsx tools/shot.ts",
     "verify:deploy": "node tools/verify-deploy.mjs",
-    "start": "node tools/serve.mjs"
+    "start": "node tools/serve.mjs",
+    "verify:movement": "node tools/verify-movement.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",
