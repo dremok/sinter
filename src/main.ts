@@ -744,6 +744,21 @@ function throwCarried(def: ItemDef): boolean {
  * contextual affordances on whatever you are facing, which are a different
  * question: those are about the world, this is about your hands.
  */
+/**
+ * What is worn, by slot.
+ *
+ * A11's fourth use mode is "equipped, always on, changes what other things do".
+ * That only works if there is somewhere for the state to live. Without this,
+ * pressing use on glasses produced a message and no change, which is the
+ * definition of a dead interaction.
+ */
+const equipped = new Map<string, string>()
+
+function isEquipped(def: ItemDef): boolean {
+  const use = useOf(def)
+  return use.mode === 'worn' && equipped.get(use.slot) === def.id
+}
+
 let held = 0
 
 function heldItem(): ItemDef | undefined {
@@ -777,9 +792,25 @@ function useHeld(): void {
     case 'panel':
       ui.toast(def.name, 'It opens, but its panel is not built yet.')
       break
-    case 'worn':
-      ui.toast(def.name, `Worn on the ${use.slot}. It works on its own.`)
+    case 'worn': {
+      // Wearing is a STATE, not an event. The old branch fired a notice on
+      // every press, and because notices coalesce by group the repeat counter
+      // ticked up, so holding glasses and pressing use read as though something
+      // was happening each time. Nothing was.
+      const already = equipped.get(use.slot) === def.id
+      if (already) {
+        ui.toast(def.name, 'Already worn.', { group: `worn:${def.id}` })
+      } else {
+        const previous = equipped.get(use.slot)
+        equipped.set(use.slot, def.id)
+        ui.toast(
+          def.name,
+          previous ? `Worn on the ${use.slot}, in place of what was there.` : `Worn on the ${use.slot}.`,
+          { group: `worn:${def.id}` },
+        )
+      }
       break
+    }
   }
 }
 
@@ -789,7 +820,13 @@ function syncHeld(): void {
     ui.held(null, '', '', 0, 0)
     return
   }
-  ui.held(itemIcon(def), def.name, useSummary(def), held, ui.count)
+  ui.held(
+    itemIcon(def),
+    def.name,
+    isEquipped(def) ? 'Worn. It works on its own.' : useSummary(def),
+    held,
+    ui.count,
+  )
 }
 
 function handleInput(): void {

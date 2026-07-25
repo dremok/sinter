@@ -479,6 +479,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // Warm grey. The lighting ramp turns anything neutral bright blue on its
     // shadow side, and a blue plinth under a cottage reads as painted plastic.
     rubbleWall: toonUnique({ color: 0xb2a08a, map: tiled(tex.stone, 1.4, 1.4) }),
+    lashing: toonUnique({ color: 0xd8c08a, map: tiled(tex.cloth, 0.4, 0.4) }),
     // Openings have to be nearly black or they read as a panel of paint. The
     // eave band is the shadow the overhang ought to be throwing on the wall and
     // does not, because at this pitch the real one lands on the ground.
@@ -832,36 +833,104 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   {
     const bed = heightAt(FORD.x, FORD.z)
     const deck = bed + BROOK_D * 0.52 + 0.34
+    const turn = -0.28
+    const SPAN = 4.6
     const g = new THREE.Group()
-    for (let i = 0; i < 3; i++) {
-      const plankMesh = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.11, 4.6), M.plank)
-      plankMesh.position.set(-0.75 + i * 0.75, 0, 0)
+
+    // Deck. Five narrower boards rather than three wide ones, because the joins
+    // are what say "laid by hand" at this size, and one of them is newer than
+    // the rest: something got replaced and nobody matched the timber.
+    for (let i = 0; i < 5; i++) {
+      const plankMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.44, 0.11, SPAN),
+        i === 3 ? M.plank : M.plankDark,
+      )
+      plankMesh.position.set(-0.96 + i * 0.48, 0, pondRng.range(-0.05, 0.05))
       plankMesh.rotation.y = pondRng.range(-0.02, 0.02)
       plankMesh.castShadow = true
       plankMesh.receiveShadow = true
       g.add(plankMesh)
     }
+
+    // The strip down the middle where everyone actually walks.
+    const worn = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.03, SPAN - 0.5), M.track)
+    worn.position.set(-0.05, 0.07, 0)
+    g.add(worn)
+
+    // Bearers under the deck, and the abutments they land on. The deck used to
+    // simply stop at each end, which is most of why it read as a plank lying in
+    // a stream rather than as a bridge: a crossing is the thing at its ends.
     for (const side of [-1, 1]) {
-      const bearer = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 2.6, 7).rotateZ(Math.PI / 2), M.log)
-      bearer.position.set(0, -0.16, side * 1.9)
+      const bearer = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.16, 0.18, 2.7, 7).rotateZ(Math.PI / 2),
+        M.log,
+      )
+      bearer.position.set(0, -0.17, side * 1.75)
       bearer.castShadow = true
       g.add(bearer)
+
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(2.9, 0.34, 0.7), M.rubbleWall)
+      sill.position.set(0, -0.42, side * (SPAN / 2 - 0.1))
+      sill.castShadow = true
+      sill.receiveShadow = true
+      g.add(sill)
+
+      // Packed stone at the foot of each abutment, so the bank does not just
+      // stop being grass at a straight line.
+      for (let i = 0; i < 5; i++) {
+        const st = new THREE.Mesh(pondRng.chance(0.5) ? boulderGeo : rubbleGeo, M.stoneDark)
+        const sc = pondRng.range(0.2, 0.42)
+        st.scale.set(sc, sc * 0.7, sc)
+        st.position.set(pondRng.range(-1.5, 1.5), -0.55, side * (SPAN / 2 + pondRng.range(-0.2, 0.5)))
+        st.rotation.set(pondRng.range(0, 3), pondRng.range(0, 3), pondRng.range(0, 3))
+        st.castShadow = true
+        g.add(st)
+      }
     }
-    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 4.4, 6), M.log)
-    rail.position.set(1.5, 0.55, 0)
+
+    // A handrail on the downstream side only. One rail is enough to turn a
+    // board into a structure, and it gives the eye something vertical to read
+    // against a horizontal deck.
+    const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, SPAN - 0.3, 6), M.log)
+    rail.position.set(1.42, 0.72, 0)
     rail.rotation.x = Math.PI / 2
+    rail.rotation.z = pondRng.range(-0.02, 0.02)
+    rail.castShadow = true
     g.add(rail)
-    for (const dz of [-1.7, 0, 1.7]) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.09, 0.85, 6), M.log)
-      post.position.set(1.5, 0.2, dz)
+    for (const dz of [-1.75, -0.6, 0.6, 1.75]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.2, 6), M.log)
+      post.position.set(1.42, 0.22, dz)
+      post.rotation.set(pondRng.range(-0.05, 0.05), 0, pondRng.range(-0.06, 0.06))
       post.castShadow = true
       g.add(post)
+      // Lashed, like the palisade. Same hands built both.
+      const lash = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.1, 7), M.lashing)
+      lash.position.set(1.42, 0.72, dz)
+      lash.rotation.x = Math.PI / 2
+      g.add(lash)
     }
+
+    // Damp and moss at the ends, where it meets the ground and stays wet.
+    for (const side of [-1, 1]) {
+      const damp = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.04, 0.6), M.moss)
+      damp.position.set(0, 0.08, side * (SPAN / 2 - 0.45))
+      g.add(damp)
+    }
+
     g.position.set(FORD.x, deck, FORD.z)
-    g.rotation.y = -0.28
+    g.rotation.y = turn
     group.add(g)
+
     for (let i = -2; i <= 2; i++) {
-      stand(FORD.x + Math.sin(-0.28) * i * 0.9, FORD.z + Math.cos(-0.28) * i * 0.9, 1.0, deck + 0.06)
+      stand(FORD.x + Math.sin(turn) * i * 0.9, FORD.z + Math.cos(turn) * i * 0.9, 1.0, deck + 0.06)
+    }
+
+    // Worn dirt running onto the deck from both banks, so the track arrives at
+    // the bridge instead of stopping a stride short of it.
+    for (const side of [-1, 1]) {
+      const ax = FORD.x + Math.sin(turn) * side * (SPAN / 2 + 0.5)
+      const az = FORD.z + Math.cos(turn) * side * (SPAN / 2 + 0.5)
+      layPatch(ax, az, 1.15, M.track, pondRng, 0.28, 14, 0.075)
     }
   }
 
@@ -1374,19 +1443,30 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const palA = toonUnique({ map: tiled(tex.bark, 1.4, 3.4) })
   const palB = toonUnique({ color: 0xc9a075, map: tiled(tex.bark, 1.4, 3.4) })
   const palC = toonUnique({ color: 0x8f6a48, map: tiled(tex.bark, 1.4, 3.4) })
-  const lashMat = toonUnique({ color: 0xd8c08a, map: tiled(tex.cloth, 0.4, 0.4) })
 
-  /** Posts run outward from the gate on both sides. */
+  /**
+   * Posts run outward from the gate on both sides, starting where the gate
+   * ends rather than where the gate begins.
+   *
+   * The two used to be laid down independently and hoped to miss: the run
+   * started at +-1.5 and the gate pillars stand at +-1.35 with a 0.45 radius,
+   * so the first post on each side was buried entirely inside a pillar. It was
+   * invisible, it was destructible, and the pillar's collision was coming from
+   * it, so felling a post nobody could see opened a hole through a pillar that
+   * was still standing. Authored together now: GATE_HALF is the one number
+   * both the gate and the run are measured from.
+   */
+  const GATE_HALF = 1.9
   const postX: number[] = []
   for (let side = -1; side <= 1; side += 2) {
-    for (let i = 0; i < 7; i++) postX.push(side * (1.5 + i * 0.76))
+    for (let i = 0; i < 6; i++) postX.push(side * (GATE_HALF + 0.38 + i * 0.76))
   }
 
   for (const x of postX) {
     const z = PAL_Z + palRng.range(-0.16, 0.16)
     const h = heightAt(x, z)
     // The patched section is the three posts west of the gate: shorter, newer.
-    const patched = x < -2.2 && x > -4.6
+    const patched = x < -2.9 && x > -4.9
     const height = patched ? palRng.range(2.1, 2.5) : palRng.range(2.9, 3.5)
 
     const post = new THREE.Group()
@@ -1422,7 +1502,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const lashGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.14, 8)
   for (const side of [-1, 1]) {
     for (const y of [1.15, 2.05]) {
-      const x0 = side * 1.4
+      const x0 = side * (GATE_HALF + 0.1)
       const x1 = side * 6.3
       const mid = (x0 + x1) / 2
       const rail = new THREE.Mesh(railGeo, M.log)
@@ -1432,10 +1512,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       rail.castShadow = true
       group.add(rail)
     }
-    for (let i = 0; i < 7; i += 2) {
-      const x = side * (1.5 + i * 0.76)
+    for (let i = 0; i < 6; i += 2) {
+      const x = side * (GATE_HALF + 0.38 + i * 0.76)
       for (const y of [1.15, 2.05]) {
-        const lash = new THREE.Mesh(lashGeo, lashMat)
+        const lash = new THREE.Mesh(lashGeo, M.lashing)
         lash.position.set(x, heightAt(x, PAL_Z) + y, PAL_Z + 0.12)
         lash.rotation.x = Math.PI / 2
         group.add(lash)
@@ -1515,7 +1595,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       label: 'The gate',
       props: { WOODEN: 0.95, FLAMMABLE: 0.7, RIGID: 0.85, HEAVY: 0.6 },
       structure: { hp: 70, maxHp: 70, height: 2.6, label: 'The gate' },
-      blocker: { radius: 0.98 },
+      // Wide enough to cover both pillars and the leaf between them, so
+      // nothing else is load-bearing for it. It overlaps the first post on
+      // each side, and when the gate falls this goes with it.
+      blocker: { radius: GATE_HALF },
     })
   }
 
@@ -2181,7 +2264,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     const winch = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1.1, 7).rotateZ(Math.PI / 2), M.log)
     winch.position.y = 1.6
     g.add(winch)
-    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.8, 4), lashMat)
+    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.8, 4), M.lashing)
     rope.position.set(0.2, 1.2, 0)
     g.add(rope)
     const pail = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.13, 0.24, 8), M.plankDark)
@@ -2375,7 +2458,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       const sag = (t: number) => 1.95 - Math.sin(t * Math.PI) * 0.28
       const p0 = new THREE.Vector3(a.x + (b.x - a.x) * t0, a.y + (b.y - a.y) * t0 + sag(t0), a.z + (b.z - a.z) * t0)
       const p1 = new THREE.Vector3(a.x + (b.x - a.x) * t1, a.y + (b.y - a.y) * t1 + sag(t1), a.z + (b.z - a.z) * t1)
-      const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, p0.distanceTo(p1), 4), lashMat)
+      const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, p0.distanceTo(p1), 4), M.lashing)
       seg.position.copy(p0).lerp(p1, 0.5)
       seg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p1.clone().sub(p0).normalize())
       group.add(seg)

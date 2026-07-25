@@ -160,23 +160,23 @@
     }
   },
   "grass": {
-    "hash": "8d2a2d1e54ff6042",
+    "hash": "a6dc66b0f592dd9d",
     "size": 1024,
     "worldUnits": 85.3,
     "model": "fal-ai/patina/material",
-    "seed": 24912,
-    "bytes": 59662,
+    "seed": 9074,
+    "bytes": 75900,
     "phase": [
-      1,
+      0,
       0
     ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.623,
-      "seamY": 0.479,
-      "busyness": 0.0066,
-      "used": 8,
-      "dominance": 0.301
+      "seamX": 1.398,
+      "seamY": 0.66,
+      "busyness": 0.0089,
+      "used": 5,
+      "dominance": 0.355
     }
   },
   "grassDry": {

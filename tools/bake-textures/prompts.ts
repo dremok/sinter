@@ -171,7 +171,7 @@ export const SPECS: readonly TextureSpec[] = [
       'meadow of distinct plants rather than as soft mottled blobs. No fine speckle, ' +
       'no dense stippling of individual blades. Deep olive and sage green, never ' +
       'emerald, never bright.',
-    palette: [...RAMP.grass, ...steps(RAMP.dirt, 0, 3)],
+    palette: [...RAMP.grass],
     stretch: 0.85,
     gamma: 0.85,
     sharpen: 0.4,
@@ -179,12 +179,15 @@ export const SPECS: readonly TextureSpec[] = [
     notes:
       'The most important texture in the game: it is most of what is on screen. ' +
       'One tile spans the whole 92-unit region, so nothing in it may repeat, and it ' +
-      'is the one texture that wants variation at three separate scales. The dirt ' +
-      'ramp is in the palette because worn soil belongs inside the grass tile, ' +
-      'exactly as in the code-drawn version, but it is taken from the dark end: ' +
-      'steps 1 to 4 put a mid red-brown patch against sage green and it read as raw ' +
-      'meat, which is precisely the kind of thing Max meant by too saturated. Value ' +
-      'separates the soil from the turf here, not chroma.',
+      'is the one texture that wants variation at three separate scales. ' +
+      'It carries no soil at all, and that took three tries to accept. The dirt ramp ' +
+      'is a warm red-brown, and any step of it large enough to read as a patch reads ' +
+      'as raw meat against sage green, which is the exact complaint that retuned the ' +
+      'whole palette. Taking it from the dark end only made the patches too small to ' +
+      'be anything but red specks. The right answer is that worn ground is not this ' +
+      'tile\'s job: region.ts lays tracks, yards and tilled ground as authored ' +
+      'overlays, and `grassWorn` is a whole variant that is soil first and blends in ' +
+      'by noise. A ground tile inventing its own clearings competes with both.',
   },
   {
     name: 'grassDry',

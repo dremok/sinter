@@ -41,7 +41,7 @@ Four things about it are worth knowing before touching it.
 
 **Albedo only.** This file used to ask for roughness and normal maps as well. Nothing can load them: every surface is a `MeshToonMaterial`, which has no roughness input at all, and cel shading quantises light into three hard bands, so a normal map moves a band boundary around rather than shading anything. They would be a third more per texture and megabytes of files nothing reads. Reinstate them when there is a lit path that wants them, not before.
 
-**Structure from the model, colour from `palette.ts`.** Every texel is snapped to the nearest step of a small palette taken from the ramps the renderer already reads. On-palette therefore cannot fail, and the whole set restyles by editing `palette.ts` and re-running. It is also what keeps the files tiny: 175 kB for all seventeen, and 157 kB of that is the three ground tiles, because a 64px tile of six colours is mostly PNG header.
+**Structure from the model, colour from `palette.ts`.** Every texel is snapped to the nearest step of a small palette taken from the ramps the renderer already reads. On-palette therefore cannot fail, and the whole set restyles by editing `palette.ts` and re-running. It is also what keeps the files tiny: 157 kB for all seventeen, and 138 kB of that is the three ground tiles, because a 64px tile of six colours is mostly PNG header.
 
 **Resolution is world footprint, not quality.** `TEXELS_PER_UNIT = 12` and `tiled()` derive every repeat from the bitmap's own size, so a 64px tile *is* a claim that one tile covers 5.3 metres. The baked sizes match the constants already in `textures.ts` exactly. Raising one without raising `TEXELS_PER_UNIT` zooms a texture out, it does not sharpen it.
 
@@ -86,6 +86,6 @@ Band 3 audio design deserves specific thought: silence where sound is expected i
 | Asset | Where | Status |
 |---|---|---|
 | Parts library | `assets/parts/parts.glb` | built, `tools/blender/build_parts.py` |
-| Band 0 textures | `assets/baked/textures/` | baked, 17 files, 175 kB, awaiting the loader swap in `src/render/textures.ts` |
+| Band 0 textures | `assets/baked/textures/` | baked, 17 files, 157 kB, awaiting the loader swap in `src/render/textures.ts` |
 | Inventory icons | rendered at runtime | done differently, see D15 |
 | Audio | `assets/baked/audio/` | not started |

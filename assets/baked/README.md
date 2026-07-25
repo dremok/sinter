@@ -17,11 +17,11 @@ See `tools/bake-textures/`.
 
 Seventeen tiling albedo maps, one per entry of `TextureSet` in
 `src/render/textures.ts`. Indexed (8-bit palette) PNG, sRGB, no alpha.
-**175 kB for the set**, of which the three ground tiles are 157 kB.
+**157 kB for the set**, of which the three ground tiles are 138 kB.
 
 | File | Size | Covers | On disk | What uses it |
 |---|---|---|---|---|
-| `grass.png` | 1024 | 85.3 units | 92.7 kB | the ground plane, one tile across the whole region |
+| `grass.png` | 1024 | 85.3 units | 74.1 kB | the ground plane, one tile across the whole region |
 | `grassWorn.png` | 512 | 42.7 units | 39.0 kB | ground variant, blended by noise in region.ts |
 | `grassDry.png` | 512 | 42.7 units | 25.3 kB | ground variant, blended by noise in region.ts |
 | `sand.png` | 256 | 21.3 units | 5.7 kB | the shore ring, and tinted for tracks, yards and tilled ground |
@@ -41,7 +41,7 @@ Seventeen tiling albedo maps, one per entry of `TextureSet` in
 
 Every prop tile is under 1.5 kB, which is not a typo. Each is at most ten
 colours, all of them steps of a ramp in `src/render/palette.ts`, so an indexed
-PNG of a 64px tile is mostly header. The whole set costs less than half the
+PNG of a 64px tile is mostly header. The whole set costs well under half the
 400 kB the parts library is budgeted in `docs/PERFORMANCE.md`, and it removes the
 largest boot cost that file lists: the ground tiles are no longer drawn texel by
 texel at startup.
