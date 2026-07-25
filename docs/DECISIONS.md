@@ -108,3 +108,34 @@ The skeleton initially placed the directional light at nearly the same azimuth a
 Keep the sun roughly perpendicular in azimuth to the camera. Since the camera rotates in 90 degree steps, revisit this when camera rotation is wired up properly: either the sun rotates with it, or it is placed so that all four camera angles stay readable.
 
 Fog has a related trap, also fixed: with an orthographic rig every object sits roughly `camera.distance` deep, so hardcoded fog near/far values drown the entire scene instead of just the far edge. Fog must be derived from `IsoCamera.distance`.
+
+---
+
+## D10: simplex-noise for terrain
+**Date:** 2026-07-25
+
+Recorded late. The dependency was already in `package.json` before anything used it, which breaks the working agreement in `CLAUDE.md` about noting why a dependency exists. It is now used by `world/region.ts` for the Band 0 heightfield.
+
+Chosen because it is small, has no transitive dependencies, and takes an injected PRNG, which matters here: it is seeded from `rng.fork('terrain')` rather than from `Math.random`, so a seed reproduces a region exactly. A noise library that owned its own randomness would have broken determinism and been unusable.
+
+---
+
+## D11: obstacles block in code, not with physics colliders
+**Date:** 2026-07-25
+
+The palisade could have been a row of Rapier colliders. It is instead a row of entities with a `blocker` component, and the player's movement is pushed out of them in `stepSimulation`.
+
+The reason is destruction. An obstacle stops blocking the moment its `blocker` component is removed, which is one line in `sim/fire.ts` and needs no knowledge of physics. With colliders, every way of destroying something would also have to tear down and rebuild collider state, and every new destruction path would have to remember to do it.
+
+This follows the existing split in `docs/ARCHITECTURE.md`: Rapier is for contact and constraint, gameplay questions live in `sim/`. Terrain is still a real Rapier trimesh, because walking on ground genuinely is a physics problem.
+
+---
+
+## D12: fire can be made from scratch, and no item is a firestarter
+**Date:** 2026-07-25
+
+`props/derive.ts` has a rule that hard metal merged with hard stone yields `HOT`. That is the only reason striking a nail on a flint lights anything, and it works for any metal and any stone, including ones the generator has not invented yet.
+
+The alternative, an authored `firestarter` item with `HOT` baked in, was rejected because it makes fire a key rather than a consequence, which is rule 1 inverted.
+
+A "hot things with no fuel cool down" reaction was deleted while doing this rather than retuned. Fuel depletion is already modelled properly in `sim/fire.ts`, and the second cruder copy in the merge rules pushed both the sparker and the live ember (each `HOT` with no `FLAMMABLE` of its own) below the ignition threshold. The items whose whole purpose is starting fires could not start one. Two models of the same thing, and the worse one was winning.

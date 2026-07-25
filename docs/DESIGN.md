@@ -2,6 +2,8 @@
 
 Source of truth for what the game is. If code and this document disagree, one of them is wrong; decide which and fix it.
 
+`docs/IDEAS.md` is the opposite of this document: an unfiltered stockpile of properties, interactions, items, merges, obstacles, situations, and creatures that could be built. Nothing in it is committed to and nothing in it has authority. Go there when a milestone needs content, rather than inventing three options under time pressure.
+
 ## One paragraph
 
 You begin at home, in a small pastoral fantasy region. You wander outward. You pick up everything, because everything can be picked up. Any two items can be fused into a third, permanently destroying both, so every merge is a bet. The world is full of obstacles that were never designed with a specific solution, and the further you get from home the less the world resembles the one you started in: first recognizably modern, then ruined, then wrong. You will die out there. You keep what you learned.
@@ -77,6 +79,8 @@ Solutions the simulation should permit without anyone having written them down:
 | Tunnel under | Anything `TOOL_DIGGING` |
 | Poison the guard | `TOXIC` plus `EDIBLE` delivered plausibly |
 
+Around thirty more obstacles written in this format, covering terrain, structures, environmental hazards, social situations, biology, and mechanisms, are in `docs/IDEAS.md`.
+
 Fifteen approaches, zero of them special-cased for this obstacle. That is the bar. Every obstacle in the game should have a comparable fan of solutions, and the interesting ones should come from combinations nobody predicted.
 
 **Implementation consequence:** obstacles do not contain solution logic. They contain state. Systems act on state. An obstacle is "solved" when its facts no longer block passage, and the game does not care how they changed.
@@ -98,6 +102,8 @@ The vocabulary the entire game is written in. Mostly scalars in `[0,1]`, not boo
 **Functional:** `CONTAINER` `ROPE_LIKE` `LADDER_LIKE` `WHEELED` `PLATFORM` `TOOL_CUTTING` `TOOL_DIGGING` `TOOL_PRYING` `TOOL_STRIKING` `PROJECTILE` `LAUNCHER` `WEARABLE` `WRITTEN`
 
 This list will grow. Adding a property is cheap and correct. Adding a special case is neither.
+
+Several hundred further candidates are listed in `docs/IDEAS.md`, each with a note on which system would read it. A property nothing reads is dead weight in every merge derivation forever, so take from that list only when something is about to query it.
 
 ## Merging
 

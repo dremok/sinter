@@ -23,6 +23,14 @@ interface Args {
   out: string
   width: number
   height: number
+  /** "x,z" — lights the nearest flammable thing on boot, for before/after shots. */
+  ignite: string
+  /** "x,z" — where the player starts, so a shot can frame a specific place. */
+  at: string
+  /** Comma-separated item ids to put in the pack, which also opens the panel. */
+  pack: string
+  /** Two pack indices to load into the merge bench, e.g. "0,1". Needs --pack. */
+  slots: string
 }
 
 function parseArgs(argv: string[]): Args {
@@ -37,6 +45,10 @@ function parseArgs(argv: string[]): Args {
     out: get('out', `.shots/${seed}.png`),
     width: Number(get('width', '1600')),
     height: Number(get('height', '900')),
+    ignite: get('ignite', ''),
+    at: get('at', ''),
+    pack: get('pack', ''),
+    slots: get('slots', ''),
   }
 }
 
@@ -81,7 +93,12 @@ try {
     if (m.type() === 'error') errors.push(m.text())
   })
 
-  const target = `${url}/?seed=${encodeURIComponent(args.seed)}&ticks=${args.ticks}`
+  const extra =
+    (args.ignite ? `&ignite=${encodeURIComponent(args.ignite)}` : '') +
+    (args.at ? `&at=${encodeURIComponent(args.at)}` : '') +
+    (args.pack ? `&pack=${encodeURIComponent(args.pack)}` : '') +
+    (args.slots ? `&slots=${encodeURIComponent(args.slots)}` : '')
+  const target = `${url}/?seed=${encodeURIComponent(args.seed)}&ticks=${args.ticks}${extra}`
   await page.goto(target, { waitUntil: 'load' })
   await page.waitForFunction(() => window.__sinterReady === true, undefined, { timeout: 30_000 })
 
