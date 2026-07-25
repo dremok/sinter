@@ -97,8 +97,18 @@ interface Limits {
   maxDominance: number
   /** Mean neighbour-to-neighbour Oklab distance. The noise ceiling. */
   maxBusyness: number
-  /** How far the mean colour may sit from the palette's mean. */
-  maxDrift: number
+  /**
+   * How far the model's mean hue may sit from the palette's, as a multiple of
+   * the palette's own chroma, plus a small absolute allowance.
+   *
+   * Relative rather than absolute, because an absolute bound is systematically
+   * unfair to chromatic materials and it showed: stone and steel are nearly
+   * neutral, so their mean chroma and the model's are both near zero and any
+   * bound passes, while terracotta failed three times at 0.07 for being a
+   * slightly different orange from `RAMP.clay`. The check exists to catch a
+   * material painted the wrong colour entirely, not to referee a hue.
+   */
+  driftFactor: number
 }
 
 const DEFAULT_LIMITS: Limits = {
@@ -106,7 +116,7 @@ const DEFAULT_LIMITS: Limits = {
   minUsed: 5,
   maxDominance: 0.62,
   maxBusyness: 0.075,
-  maxDrift: 0.06,
+  driftFactor: 0.7,
 }
 
 /** Per-texture departures, each with a reason. */
@@ -192,6 +202,8 @@ interface Attempt {
   used: number
   dominance: number
   drift: number
+  /** The palette's own mean chroma, which scales the drift bound. */
+  paletteChroma: number
   seed: number
   failures: string[]
 }
@@ -220,6 +232,7 @@ function pipeline(spec: TextureSpec, source: Bitmap): Omit<Attempt, 'seed' | 'fa
     // which would make the check a tautology rather than a test of whether the
     // model painted the right material.
     drift: chromaDistance(meanLab(small), paletteMean),
+    paletteChroma: Math.hypot(paletteMean.a, paletteMean.b),
   }
 }
 
@@ -235,7 +248,10 @@ function judge(spec: TextureSpec, a: Omit<Attempt, 'seed' | 'failures'>): string
   if (a.report.busyness > lim.maxBusyness) {
     out.push(`busyness ${a.report.busyness.toFixed(3)} > ${lim.maxBusyness}`)
   }
-  if (a.drift > lim.maxDrift) out.push(`colour drift ${a.drift.toFixed(3)} > ${lim.maxDrift}`)
+  const allowed = 0.04 + lim.driftFactor * a.paletteChroma
+  if (a.drift > allowed) {
+    out.push(`colour drift ${a.drift.toFixed(3)} > ${allowed.toFixed(3)}`)
+  }
   return out
 }
 

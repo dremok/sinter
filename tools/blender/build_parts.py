@@ -630,7 +630,7 @@ def make_bucket():
         (0.104, 0.044),
         (0.092, 0.034),
         (0.0, 0.032),                # inner floor
-    ], segments=14)
+    ], segments=12)
 
     # Ears for the bail. Two small lugs at the rim, on the axis the recipe
     # swings the handle around.
@@ -675,7 +675,7 @@ def make_flask():
         (0.042, 0.324),
         (0.030, 0.326),
         (0.0, 0.318),
-    ], segments=16)
+    ], segments=13)
     for v in bm.verts:
         v.co.y *= 0.66
     o = emit(bm, "flask_body", "base", smooth=True, bevel_width=0.003)
@@ -703,7 +703,7 @@ def make_jar():
         (0.090, 0.120),
         (0.070, 0.030),
         (0.0, 0.028),
-    ], segments=14)
+    ], segments=12)
     o = emit(bm, "jar_body", "base", bevel_width=0.005)
     socket(o, "socket_tip", (0, 0, 0.22))
     socket(o, "socket_mid", (0, 0, 0.10))
@@ -824,7 +824,7 @@ def make_rope_coil():
     these, so the coil ends up with two ends, which is what a coil has.
     """
     bm = bmesh.new()
-    lobes, twists, sides = 3, 9, 7
+    lobes, twists, sides = 3, 9, 6
 
     def sec(i, t):
         pts = []
@@ -834,7 +834,7 @@ def make_rope_coil():
             pts.append((rr * math.cos(a), rr * math.sin(a)))
         return pts
 
-    bm_sweep(bm, arc_frames(0.148, 0.0, 2.0 * math.pi, 24, closed=True), sec, closed=True)
+    bm_sweep(bm, arc_frames(0.148, 0.0, 2.0 * math.pi, 18, closed=True), sec, closed=True)
 
     # The loose end: spirals out of the coil, drops off its side, and frays.
     tail = []
@@ -880,7 +880,7 @@ def make_stone_shard():
         taper = 0.62 + 0.38 * (0.5 - 0.5 * u)
         bm.verts.new((u * 0.118, v * 0.100 * taper, w * 0.098 * taper))
     bmesh.ops.convex_hull(bm, input=bm.verts)
-    emit(bm, "stone_shard", "base", bevel_width=0.003)
+    emit(bm, "stone_shard", "base", bevel_width=0.0)
 
 
 def make_apple():
@@ -1012,10 +1012,9 @@ def make_torch_head():
         (0.0, 0.244),                # dished, as if burnt down
     ], segments=12, lobes=3)
 
-    for z, rad in ((0.017, 0.035), (0.039, 0.041)):
-        bm_sweep(bm, arc_frames(rad, 0.0, 2.0 * math.pi, 10, z=z, closed=True),
-                 lambda i, t: [(0.006, 0.0), (0.0, 0.008), (-0.006, 0.0), (0.0, -0.008)],
-                 closed=True)
+    # The cords used to be two swept rings here. They were 160 triangles for
+    # something under a pixel wide, and the lathe profile above already dips
+    # twice at the same heights, so the grooves read without them.
 
     o = emit(bm, "torch_head", "base", bevel_width=0.004)
     jitter(o, 0.010, 41)
@@ -1039,7 +1038,7 @@ def make_leaf_cluster():
     """
     bm = bmesh.new()
     rng = _Lcg(53)
-    blades = 7
+    blades = 6
     for k in range(blades):
         yaw = 2.0 * math.pi * k / blades + 0.55 * (rng.next() - 0.5)
         pitch = 0.42 + 0.62 * rng.next()
@@ -1283,11 +1282,11 @@ def make_spectacles_frame():
     RIM_X, RIM_R, WIRE = 0.115, 0.085, 0.016
 
     def wire_sec(i, t):
-        return [(WIRE * math.cos(2.0 * math.pi * k / 6),
-                 WIRE * math.sin(2.0 * math.pi * k / 6)) for k in range(6)]
+        return [(WIRE * math.cos(2.0 * math.pi * k / 5),
+                 WIRE * math.sin(2.0 * math.pi * k / 5)) for k in range(5)]
 
     for sx in (-1.0, 1.0):
-        bm_sweep(bm, arc_frames_xz(RIM_R, 0.0, 2.0 * math.pi, 12,
+        bm_sweep(bm, arc_frames_xz(RIM_R, 0.0, 2.0 * math.pi, 10,
                                    centre=(sx * RIM_X, 0.0, 0.0), closed=True),
                  wire_sec, closed=True)
 
@@ -1310,8 +1309,8 @@ def make_spectacles_frame():
                                    0.010 - 0.078 * t * t)),
                            Vector((1.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0)), t))
         bm_sweep(bm, frames, lambda i, t: [
-            (0.011 * math.cos(2.0 * math.pi * k / 6),
-             0.011 * math.sin(2.0 * math.pi * k / 6)) for k in range(6)])
+            (0.011 * math.cos(2.0 * math.pi * k / 5),
+             0.011 * math.sin(2.0 * math.pi * k / 5)) for k in range(5)])
 
     emit(bm, "spectacles_frame", "none", bevel_width=0.002)
 
@@ -1369,10 +1368,10 @@ def make_key_body():
     bm_box(bm, (0.042, -0.013, 0.058), (0.092, 0.013, 0.094))
 
     # Bow: a ring standing in the XZ plane, so it reads as a loop face on.
-    bm_sweep(bm, arc_frames_xz(0.058, 0.0, 2.0 * math.pi, 14,
+    bm_sweep(bm, arc_frames_xz(0.058, 0.0, 2.0 * math.pi, 11,
                                centre=(0.0, 0.0, 0.372), closed=True),
-             lambda i, t: [(0.018 * math.cos(2.0 * math.pi * k / 6),
-                            0.018 * math.sin(2.0 * math.pi * k / 6)) for k in range(6)],
+             lambda i, t: [(0.018 * math.cos(2.0 * math.pi * k / 5),
+                            0.018 * math.sin(2.0 * math.pi * k / 5)) for k in range(5)],
              closed=True)
 
     o = emit(bm, "key_body", "base", bevel_width=0.003)
@@ -1473,7 +1472,7 @@ def make_stone_lump():
         k = (0.72 + 0.28 * rng.next()) / n
         bm.verts.new((u * k * 0.152, v * k * 0.136, max(w * k * 0.118, -0.060)))
     bmesh.ops.convex_hull(bm, input=bm.verts)
-    emit(bm, "stone_lump", "base", bevel_width=0.004)
+    emit(bm, "stone_lump", "base", bevel_width=0.0)
 
 
 def make_phial_ribbed():
@@ -1658,7 +1657,7 @@ def make_bottle_body():
         (0.032, 0.358),
         (0.020, 0.360),
         (0.0, 0.354),
-    ], segments=14)
+    ], segments=12)
     o = emit(bm, "bottle_body", "base", smooth=False, bevel_width=0.003)
     socket(o, "socket_tip", (0, 0, 0.336))
     socket(o, "socket_mid", (0, 0, 0.11))

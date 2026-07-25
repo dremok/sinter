@@ -30,7 +30,7 @@
 import * as THREE from 'three'
 import { createNoise2D } from 'simplex-noise'
 import type { Rng } from '../core/rng'
-import { world, type Entity } from '../ecs/world'
+import { queries, world, type Entity } from '../ecs/world'
 import { CATALOG, STARTING_ITEMS } from '../items/catalog'
 import { buildItemMesh } from '../render/kitbash'
 import { BAND0 } from '../render/palette'
@@ -990,6 +990,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     stump.castShadow = true
     stump.receiveShadow = true
     group.add(stump)
+    stand(x, z, 0.46, h + 0.53)
   }
 
   // -------------------------------------------------------------- palisade
@@ -1207,6 +1208,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     stoneMesh.rotation.set(beyondRng.range(-0.08, 0.08), beyondRng.range(0, 3), tilt)
     stoneMesh.castShadow = true
     group.add(stoneMesh)
+    solid(stoneMesh, new THREE.Vector3(x, h + 1.1, z), 'Waystone', { STONE: 1, HEAVY: 1, RIGID: 1 }, 0.46)
   }
 
   {
@@ -1221,12 +1223,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     tall.rotation.y = 0.12
     tall.castShadow = true
     group.add(tall)
+    solid(tall, new THREE.Vector3(ax - 1.9, h + 2.1, az), 'Broken arch', { STONE: 1, HEAVY: 1, RIGID: 1 }, 0.62)
 
     const stub = new THREE.Mesh(new THREE.BoxGeometry(0.95, 2.3, 0.95), M.stone)
     stub.position.set(ax + 1.9, h + 1.15, az + 0.2)
     stub.rotation.set(0.06, -0.2, 0.05)
     stub.castShadow = true
     group.add(stub)
+    solid(stub, new THREE.Vector3(ax + 1.9, h + 1.15, az + 0.2), 'Broken arch', { STONE: 1, HEAVY: 1, RIGID: 1 }, 0.62)
 
     const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.8, 0.9), M.stone)
     lintel.position.set(ax + 1.1, h + 2.6, az - 0.1)
@@ -1281,6 +1285,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
     t.position.set(x, h, z)
     group.add(t)
+    solid(t, new THREE.Vector3(x, h + 2, z), 'The tower', { STONE: 1, HEAVY: 1, RIGID: 1 }, 2.1)
   }
 
   // Dead trunks either side of the road out. The wood on the far side is older.
@@ -1709,6 +1714,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       seat.castShadow = true
       seat.receiveShadow = true
       group.add(seat)
+      for (let k = -1; k <= 1; k++) {
+        stand(sx + Math.cos(ry) * k * len * 0.32, sz - Math.sin(ry) * k * len * 0.32, rad * 1.4, heightAt(sx, sz) + rad * 1.5)
+      }
     }
 
     // HOT but not FLAMMABLE, so the fire sim treats it as a permanent ignition
@@ -1789,11 +1797,16 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       }
     }
     // Two uprights holding the stack in.
+    let last: THREE.Mesh | null = null
     for (const s of [-1, 1]) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.13, 1.7, 0.13), M.log)
       post.position.set(bx, heightAt(bx, bz + s * 1.1) + 0.85, bz + s * 1.1)
       post.castShadow = true
       group.add(post)
+      last = post
+    }
+    if (last) {
+      solid(last, new THREE.Vector3(bx, heightAt(bx, bz) + 0.7, bz), 'Woodpile', { WOODEN: 1, FLAMMABLE: 0.75, RIGID: 0.6, HEAVY: 0.6 }, 0.9)
     }
   }
 
@@ -1994,6 +2007,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(rx, h, rz)
     g.rotation.y = 0.4
     group.add(g)
+    solid(g, new THREE.Vector3(rx, h + 0.8, rz), 'Drying rack', { WOODEN: 0.9, FLAMMABLE: 0.6, RIGID: 0.5 }, 0.72)
   }
 
   /** Chicken coop, a run, and three birds. Living things sell habitation. */
@@ -2027,6 +2041,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(cx, h, cz)
     g.rotation.y = -0.5
     group.add(g)
+    solid(g, new THREE.Vector3(cx, h + 0.5, cz), 'The coop', { WOODEN: 0.9, FLAMMABLE: 0.6, RIGID: 0.7 }, 0.72)
 
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * Math.PI * 2
@@ -2073,6 +2088,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       crate.castShadow = true
       crate.receiveShadow = true
       group.add(crate)
+      if (y === 0) {
+        solid(crate, new THREE.Vector3(x, heightAt(x, z) + 0.28, z), 'Crate', { WOODEN: 0.85, FLAMMABLE: 0.55, CONTAINER: 0.6, RIGID: 0.7 }, 0.42)
+      }
     }
 
     for (const [x, z] of [
@@ -2083,6 +2101,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       barrel.position.set(x, heightAt(x, z) + 0.43, z)
       barrel.castShadow = true
       group.add(barrel)
+      solid(barrel, new THREE.Vector3(x, heightAt(x, z) + 0.43, z), 'Barrel', { WOODEN: 0.9, FLAMMABLE: 0.4, CONTAINER: 0.7, RIGID: 0.7 }, 0.42)
       for (const y of [0.2, 0.66]) {
         const hoop = new THREE.Mesh(new THREE.CylinderGeometry(0.37, 0.37, 0.07, 10), M.steel)
         hoop.position.set(x, heightAt(x, z) + y, z)
@@ -2155,6 +2174,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       g.position.set(x, h, z)
       g.rotation.y = 0.9
       group.add(g)
+      solid(g, new THREE.Vector3(x, h + 0.5, z), 'Handcart', { WOODEN: 0.9, FLAMMABLE: 0.5, PLATFORM: 0.5, RIGID: 0.7 }, 0.85)
     }
   }
 
@@ -2170,6 +2190,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     block.castShadow = true
     block.receiveShadow = true
     group.add(block)
+    stand(bx, bz, 0.48, h + 0.8)
 
     for (let i = 0; i < 9; i++) {
       const x = bx + homeRng.range(-1.5, 1.5)
@@ -2204,6 +2225,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(bx, heightAt(bx, bz), bz)
     g.rotation.y = -0.55
     group.add(g)
+    for (let k = -1; k <= 1; k++) {
+      stand(bx + Math.cos(-0.55) * k * 0.6, bz - Math.sin(-0.55) * k * 0.6, 0.36, heightAt(bx, bz) + 0.55)
+    }
   }
 
   /** A second bed outside the fence, where the things that need sun go. */
@@ -2259,6 +2283,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.rotation.y = -0.3
     group.add(g)
     occluders.push(occluder(g, 1.2, 2.3))
+    solid(g, new THREE.Vector3(sx, h + 1, sz), 'The store', { WOODEN: 0.9, FLAMMABLE: 0.5, RIGID: 0.8 }, 1.05)
   }
 
   /**
@@ -2291,11 +2316,16 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
   }
 
-  /** A dipping platform where the pond path meets the water. */
+  /**
+   * A dipping platform where the pond path meets the water. A deck: you stand
+   * on it. This is the prop the lakeside bug was really about, since a plank
+   * floor you sink through is the least convincing thing in a region.
+   */
   {
     const px = -8.5
     const pz = 5.2
     const h = heightAt(px, pz)
+    const deckY = Math.max(h, WATER_LEVEL) + 0.33
     for (const s of [-1, 1]) {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 1.2, 6), M.log)
       post.position.set(px - 0.7, WATER_LEVEL - 0.1, pz + s * 0.5)
@@ -2304,10 +2334,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
     for (let i = 0; i < 3; i++) {
       const plankMesh = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.09, 0.34), M.plank)
-      plankMesh.position.set(px - 0.55, Math.max(h, WATER_LEVEL) + 0.28, pz - 0.36 + i * 0.36)
+      plankMesh.position.set(px - 0.55, deckY - 0.05, pz - 0.36 + i * 0.36)
       plankMesh.rotation.y = 0.06
       plankMesh.castShadow = true
+      plankMesh.receiveShadow = true
       group.add(plankMesh)
+    }
+    for (let i = -1; i <= 1; i++) {
+      stand(px - 0.55 + i * 0.6, pz, 0.5, deckY)
     }
   }
 
@@ -2328,8 +2362,24 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * own clones, made the first time it actually needs to fade and kept
    * afterwards. Most never fade, so this stays close to free.
    */
-  const viewPlayer = new THREE.Vector3()
   const viewObject = new THREE.Vector3()
+  /**
+   * What must not be hidden: the player, plus the few items nearest him.
+   *
+   * The player alone is not enough, and the reason is structural rather than a
+   * tuning miss. An item never moves, and the player may simply never stand
+   * behind the one tree covering it, so a player-only test can leave a thing
+   * invisible for an entire run. Capped at three items so the number of things
+   * fading at once stays bounded, which matters now that outlines added a
+   * second pass and stacked transparency is the largest GPU cost here.
+   */
+  const viewTargets = [
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+  ]
+  const REVEAL_RADIUS = 7
   /**
    * The first call snaps instead of easing. Two reasons: the player spawns
    * already standing behind whatever is behind them, so easing in from solid on
@@ -2340,21 +2390,39 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   let settled = false
 
   function fadeOccluders(playerPos: THREE.Vector3, camera: THREE.Camera, dt: number): void {
-    viewPlayer.copy(playerPos).applyMatrix4(camera.matrixWorldInverse)
-    // The player is about 1.7 tall; test against his middle and his head.
-    const headY = viewPlayer.y + 1.4 * 0.816
+    viewTargets[0]!.copy(playerPos).applyMatrix4(camera.matrixWorldInverse)
+    // The player is about 1.7 tall. Items sit at knee height and bob.
+    const heights = [1.4 * 0.816, 0.5, 0.5, 0.5]
+    let count = 1
+
+    for (const e of queries.items) {
+      if (count >= viewTargets.length) break
+      const at = e.transform.pos
+      const dx = at.x - playerPos.x
+      const dz = at.z - playerPos.z
+      if (dx * dx + dz * dz > REVEAL_RADIUS * REVEAL_RADIUS) continue
+      viewTargets[count]!.copy(at).applyMatrix4(camera.matrixWorldInverse)
+      count++
+    }
 
     for (const o of occluders) {
       o.object.getWorldPosition(viewObject).applyMatrix4(camera.matrixWorldInverse)
 
-      // View space looks down -z, so a larger z is nearer the camera. Half the
-      // object's height is added because a world-vertical leans toward the
-      // camera under this projection: a trunk's base can be behind the player
-      // while its canopy is squarely in front of him.
-      const nearer = viewObject.z + o.top * 0.29 > viewPlayer.z + 0.4
-      const across = Math.abs(viewObject.x - viewPlayer.x) < o.radius + 0.45
-      const spans = viewObject.y < headY + 0.3 && viewObject.y + o.top * 0.816 > viewPlayer.y
-      const hiding = nearer && across && spans
+      let hiding = false
+      for (let i = 0; i < count && !hiding; i++) {
+        const t = viewTargets[i]!
+        // View space looks down -z, so a larger z is nearer the camera. Half
+        // the object's height is added because a world-vertical leans toward
+        // the camera under this projection: a trunk's base can be behind the
+        // target while its canopy is squarely in front of it.
+        const nearer = viewObject.z + o.top * 0.29 > t.z + 0.4
+        if (!nearer) continue
+        if (Math.abs(viewObject.x - t.x) >= o.radius + 0.45) continue
+        const headY = t.y + heights[i]!
+        if (viewObject.y >= headY + 0.3) continue
+        if (viewObject.y + o.top * 0.816 <= t.y) continue
+        hiding = true
+      }
 
       const target = hiding ? FADE_TO : 1
       if (o.opacity === target) continue
@@ -2446,9 +2514,64 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     return [id, 1.9 + spare * 0.55, 4.6 - spare * 0.35]
   })
 
-  for (const [id, x, z] of layout) {
+  /**
+   * Is this spot hidden from the camera by something solid?
+   *
+   * The camera azimuth is fixed, so this is decidable here rather than
+   * mitigated at runtime, and an item nobody can ever see is a level design
+   * bug rather than a rendering one. Same three projection components as the
+   * runtime test, written against the fixed basis instead of a camera matrix.
+   */
+  function hiddenFromCamera(x: number, y: number, z: number): boolean {
+    const sx = (x - z) * ISO_SX
+    const sy = -(x + z) * ISO_SY_GROUND + y * ISO_SY_UP
+    const depth = x + y + z
+
+    for (const o of occluders) {
+      const p = o.object.position
+      // Only things standing between this point and the camera can hide it.
+      if (p.x + p.y + o.top * 0.5 + p.z <= depth) continue
+      if (Math.abs((p.x - p.z) * ISO_SX - sx) > o.radius + 0.3) continue
+      const base = -(p.x + p.z) * ISO_SY_GROUND + p.y * ISO_SY_UP
+      if (base > sy + 0.3) continue
+      if (base + o.top * ISO_SY_UP < sy) continue
+      return true
+    }
+    return false
+  }
+
+  /**
+   * Push a hidden item out until the camera can see it. The offsets walk
+   * outward along the screen-horizontal axis first, because sliding sideways
+   * clears a trunk in the fewest metres and keeps the item near where it was
+   * authored to be.
+   */
+  function findVisible(x: number, z: number): [number, number] {
+    if (!hiddenFromCamera(x, heightAt(x, z) + 0.45, z)) return [x, z]
+    for (let step = 1; step <= 7; step++) {
+      const d = step * 0.55
+      for (const [ax, az] of [
+        [1, 1],
+        [-1, -1],
+        [1, -1],
+        [-1, 1],
+        [1.4, 0],
+        [0, 1.4],
+      ] as const) {
+        const nx = x + ax * d
+        const nz = z + az * d
+        if (nx < BOUNDS.minX + 1 || nx > BOUNDS.maxX - 1) continue
+        if (nz < BOUNDS.minZ + 1 || nz > BOUNDS.maxZ - 1) continue
+        if (!hiddenFromCamera(nx, heightAt(nx, nz) + 0.45, nz)) return [nx, nz]
+      }
+    }
+    return [x, z]
+  }
+
+  for (const [id, ax, az] of layout) {
     const def = CATALOG[id]
     if (!def) continue
+    const [x, z] = findVisible(ax, az)
 
     const y = heightAt(x, z) + 0.45
     const mesh = buildItemMesh(def)
@@ -2472,5 +2595,6 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     playerStart: new THREE.Vector3(0.8, heightAt(0.8, 10.8), 10.8),
     gate: new THREE.Vector3(0, gateH, PAL_Z),
     fadeOccluders,
+    standables,
   }
 }

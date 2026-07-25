@@ -350,7 +350,9 @@ void main() {
   // Vignette, cool rather than black, so the corners read as air between the
   // camera and the far trees rather than as a lens.
   vec2 d = vUv - 0.5;
-  float v = smoothstep( 0.55, 0.11, dot( d, d ) );
+  // Ascending, then inverted: GLSL leaves smoothstep undefined when the first
+  // edge is the larger one, however reliably a given driver happens to handle it.
+  float v = 1.0 - smoothstep( 0.11, 0.55, dot( d, d ) );
   c = mix( c * vec3( 0.83, 0.88, 0.99 ), c, mix( 1.0, v, uVignette ) );
 
   gl_FragColor = vec4( c, 1.0 );

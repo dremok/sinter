@@ -15,6 +15,70 @@
       "dominance": 0.303
     }
   },
+  "cloth": {
+    "hash": "ad1a1e8677c01a97",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9074,
+    "bytes": 1332,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 1.204,
+      "seamY": 1.017,
+      "busyness": 0.0567,
+      "used": 5,
+      "dominance": 0.411
+    }
+  },
+  "foliage": {
+    "hash": "6af03ada190bdfd7",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9136,
+    "bytes": 1379,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.881,
+      "seamY": 0.85,
+      "busyness": 0.0488,
+      "used": 6,
+      "dominance": 0.257
+    }
+  },
+  "glass": {
+    "hash": "0abddb91382096d6",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9074,
+    "bytes": 744,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.655,
+      "seamY": 1.211,
+      "busyness": 0.0173,
+      "used": 5,
+      "dominance": 0.373
+    }
+  },
+  "gold": {
+    "hash": "62c2d0e1b6830549",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9043,
+    "bytes": 726,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.427,
+      "seamY": 1.282,
+      "busyness": 0.0263,
+      "used": 6,
+      "dominance": 0.375
+    }
+  },
   "grass": {
     "hash": "d09ad2370058c68f",
     "size": 1024,
@@ -47,6 +111,22 @@
       "dominance": 0.297
     }
   },
+  "steel": {
+    "hash": "4a9a074c4fde824d",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9074,
+    "bytes": 553,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.195,
+      "seamY": 1.027,
+      "busyness": 0.0283,
+      "used": 6,
+      "dominance": 0.337
+    }
+  },
   "stone": {
     "hash": "937bf46afdd5c143",
     "size": 64,
@@ -61,6 +141,22 @@
       "busyness": 0.046,
       "used": 5,
       "dominance": 0.345
+    }
+  },
+  "straw": {
+    "hash": "da98b8261e8b9027",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9074,
+    "bytes": 1195,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.846,
+      "seamY": 0.782,
+      "busyness": 0.0742,
+      "used": 5,
+      "dominance": 0.459
     }
   },
   "water": {

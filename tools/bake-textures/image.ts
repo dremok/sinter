@@ -199,10 +199,16 @@ export function sharpen(src: Bitmap, amount: number): Bitmap {
  * thing that decides where the light falls, and it does not wrap, so the tile
  * failed the seam check with a visible band where one copy met the next.
  *
- * Both faults have the same cause and this removes it. The kernel is a quarter
- * of the tile wide, so anything smaller than that survives untouched: stone
- * blocks at five texels and plank boards at four are unaffected, and only the
- * gradient spanning the whole image goes.
+ * Both faults have the same cause and this removes it.
+ *
+ * The radius wants care. The first version used a quarter of the tile, which is
+ * useless and took a while to notice: two box passes of radius w/4 have a
+ * combined support of 4 * (w/4) = w, so on a wrapping image every output pixel
+ * is the mean of the whole tile, the blurred field comes out constant, and
+ * subtracting it does nothing at all. An eighth gives a support of half the
+ * image, which removes anything spanning the tile and leaves everything smaller
+ * than about eight texels alone: stone blocks at five and plank boards at four
+ * pass through untouched, which is the point.
  *
  * Not for every texture. The ground wants regional drift at a sixth of its own
  * width and that is the art rather than a fault, so `grass` opts out.
@@ -211,7 +217,7 @@ export function flattenLighting(src: Bitmap, amount: number): Bitmap {
   if (amount <= 0) return src
   const { width: w, height: h, data } = src
   const n = w * h
-  const radius = Math.max(1, Math.round(w / 4))
+  const radius = Math.max(2, Math.round(w / 8))
 
   const lab = labField(src)
   const L = Float64Array.from(lab, (p) => p.L)

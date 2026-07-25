@@ -51,8 +51,19 @@
  * was right, and then kept the density of a noise field, which was wrong. An
  * art review of the rendered frame called the ground "green static" and it was
  * correct: twenty-six thousand three-texel grass clumps on one tile is a noise
- * function wearing a costume. At 720 lines, and heading toward native, fine
- * variation stops reading as texture and starts reading as grain on the lens.
+ * function wearing a costume.
+ *
+ * Density then had to come down twice, because the render path moved. At 720
+ * lines through a pixel buffer, fine marks merged into texture. At native
+ * resolution they stopped merging and became discrete specks, so the tuft layer
+ * lost another two thirds and the ground stopped dithering entirely. If the
+ * render path changes again, look at a frame before trusting any of these
+ * densities: they are tuned to a resolution, not derived from one.
+ *
+ * Outlines changed the other half of the budget. Props no longer need internal
+ * contrast to separate from each other, because a dark inverted hull does that
+ * now; the ground has no outline and has to hold the frame alone. So contrast
+ * moved off the props and onto the ground's macro value drift.
  *
  * So the rule is Don't Starve's rather than a 16-bit tileset's. A surface is
  * mostly one flat tone carrying a few deliberate marks: a couple of grain
@@ -304,13 +315,20 @@ function stroke(
 }
 
 /**
- * Pick a ramp step from a continuous position, dithering between the two
- * neighbouring steps rather than snapping to one.
+ * Pick a ramp step from a continuous position, stippling between the two
+ * neighbouring steps near the boundary rather than snapping hard.
  *
- * This is what lets the ground carry a wide, slow value drift without banding
- * into four visible contour rings, while still only ever putting six colours on
- * the tile. Large soft gradients and a strictly limited palette are usually in
- * tension; an ordered dither is how the era resolved it.
+ * Only `sand` uses this now, and the reason the ground does not is worth
+ * keeping. Dithering trades banding for grain, and how much grain depends on
+ * how slow the gradient is: the boundary between two steps is a *band in
+ * space*, so the slower the gradient the wider that band, however tightly the
+ * threshold is confined. Across the ground's 85 world units that band covered
+ * a large visible region of stipple. Sand's gradient runs four times faster
+ * over 21 units, so the same code costs a few texels there and buys a smooth
+ * track.
+ *
+ * The general lesson, if a third caller ever appears: dither fast gradients,
+ * snap slow ones.
  */
 function ditherStep(put: Put, x: number, y: number, ramp: readonly string[], f: number): void {
   const lo = Math.floor(f)
@@ -351,21 +369,24 @@ export const grass = (rng: Rng) =>
       const v = y / n
       for (let x = 0; x < n; x++) {
         const u = x / n
-        // The whole value range of the ramp, spent on one slow gradient. Value
-        // is decided here and only here, so the patches below cannot show up as
-        // shapes in a greyscale check.
+        // The whole value range of the ramp, spent on one slow gradient, and
+        // snapped rather than dithered.
+        //
+        // Snapping a gradient this slow ought to band into contour rings, and
+        // it does not: at 85 world units to the tile each step covers ten to
+        // twenty metres, so the boundaries land as large organic patches that
+        // read as sun on a rise. Dithering them instead put a wide field of
+        // stipple on the one surface in the frame with no outline to hold it
+        // together, which at native resolution is simply grain. Value is
+        // decided here and only here, so the hue change below cannot show up as
+        // a shape in a greyscale check.
         const idx = clamp(0.85 + drift(u, v) * 3.3, 0, 4.9)
-        // Thin, parched turf where `patch` runs high. Dithered against the
-        // green ramp at the *same* index over a wide, gradual band, so the
-        // transition is a hue drift rather than a stamped edge. The offset on
-        // the hash keeps this decision independent of the one inside
-        // ditherStep, which would otherwise correlate the two stipples.
+        // Thin, parched turf where `patch` runs high, chosen at the *same*
+        // ramp index so the change is hue only. Confined to a narrow band for
+        // the same reason the value steps are snapped: a 50/50 stipple of two
+        // hues across a whole region is invisible in greyscale, which is what
+        // the matched luminances bought, but in colour it is still grain.
         const dry = clamp((patch(u, v) - 0.55) * 2.2, 0, 1)
-        // Confined to a narrow band, for the same reason ditherStep is. A
-        // stipple of two hues held at 50/50 across a whole region is invisible
-        // in greyscale, which is what the matched luminances were for, but in
-        // colour at native resolution it is simply grain. Most of the parched
-        // ground is now solidly parched and most of the green is solidly green.
         const dryT = dry < 0.35 ? 0 : dry > 0.65 ? 1 : (dry - 0.35) / 0.3
         const ramp = dryT > hashDither(x + 977, y) ? RAMP.dryGrass : RAMP.grass
         put(x, y, tone(ramp, idx))

@@ -207,13 +207,37 @@ void main() {
 }
 `
 
+/**
+ * `?debugParticles=1` writes per-particle alpha into red and the point mask
+ * into green instead of shading, and makes every particle opaque so it cannot
+ * hide.
+ *
+ * This exists because the smoke was invisible for a long time and no amount of
+ * reading the code found it: the plume was numerically correct the whole way
+ * through and simply too faint to see against a warm background. Reading those
+ * two numbers back out of the framebuffer settled it in one frame.
+ *
+ * It is a URL parameter and not an edit to this shader for a blunt reason: an
+ * inline debug override compiles, draws, passes typecheck and passes all 65
+ * tests, so nothing in the pipeline can tell it from correct code, and the tree
+ * gets deployed from within minutes of a file changing. Off by default cannot
+ * escape. Same reasoning as `ticks`, `at` and `ignite` in `main.ts`.
+ */
+const DEBUG_PARTICLES =
+  typeof location !== 'undefined' && new URLSearchParams(location.search).has('debugParticles')
+
 const PARTICLE_FRAG = /* glsl */ `
 uniform float uRound;
+uniform float uDebug;
 varying vec4 vTint;
 void main() {
   float mask = 1.0;
   if ( uRound > 0.5 ) {
     mask = 1.0 - smoothstep( 0.16, 0.5, length( gl_PointCoord - 0.5 ) );
+  }
+  if ( uDebug > 0.5 ) {
+    gl_FragColor = vec4( vTint.a, mask, 0.0, 1.0 );
+    return;
   }
   if ( vTint.a * mask < 0.01 ) discard;
   gl_FragColor = vec4( vTint.rgb, vTint.a * mask );
@@ -222,7 +246,11 @@ void main() {
 
 function particleMaterial(round: boolean, blending: THREE.Blending): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
-    uniforms: { uRound: { value: round ? 1 : 0 }, uHalfHeight: { value: 360 } },
+    uniforms: {
+      uRound: { value: round ? 1 : 0 },
+      uHalfHeight: { value: 360 },
+      uDebug: { value: DEBUG_PARTICLES ? 1 : 0 },
+    },
     vertexShader: PARTICLE_VERT,
     fragmentShader: PARTICLE_FRAG,
     transparent: true,
