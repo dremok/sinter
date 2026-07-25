@@ -1234,3 +1234,90 @@ authored quickly and styled like real devices.
 The phone is the right first one to build. It is the most recognisable, it makes
 signal and elevation matter, and a number written on a wall somewhere is exactly
 the kind of discovery this game is about.
+
+
+## A10. Vehicles
+
+Max's, and eventual rather than soon. Worth writing down carefully because
+vehicles touch more of the existing design than they appear to.
+
+**One per band, which is the point.** The genre gradient is the spine of the
+game, and the way you travel is one of the loudest signals of where you are.
+
+| Band | Vehicle | What it says about the world |
+|---|---|---|
+| 0, Hearth | Horse | Alive, wilful, has to be won over |
+| 1, The Turn | Bicycle | Nobody comments on it, which is the joke |
+| 2, Rust | Car | Fast, loud, drinks fuel, and everything hears you coming |
+| 3, The Static | Something that should not carry you | Deliberately unresolved |
+
+### Why this is already half-designed
+
+- `docs/DESIGN.md` already lists `WHEELED` as a property and already offers
+  "ram it with a car" as a palisade solution. Vehicles are promised by the
+  existing affordance table, not new to it.
+- Band 1 already has "a parked sedan with the keys in it" and "a petrol station
+  serving a village that still uses oxen" in its description.
+- Band 2 already has dead elevator shafts and flooded metro tunnels, which is a
+  world built for something with wheels to be useless in, on purpose.
+- The `apple + horseshoe` merge is already called Horse Treat. That was a joke
+  when it was written and becomes a mechanic here.
+
+### A horse is an agent, not a vehicle
+
+The most interesting one, and the reason to build it first despite being the
+earliest band. A horse is `LIVING`, so it has a disposition and drives, exactly
+like the NPCs in D19. You do not press a button and mount it.
+
+- It has to be approached, calmed, fed, or owned.
+- `EDIBLE` gets you closer. `LOUD` and `FRIGHTENING` push it away. Fire terrifies it.
+- A skill (Riding) makes it easier, which is progression that is not a stat bar.
+- It can be spooked out from under you, which is a real failure state.
+- It can be stolen, and somebody will mind.
+
+This means the vehicle system and the agent system share their foundations, and
+the horse should be built after NPCs rather than before.
+
+### What riding actually changes
+
+1. **Speed**, obviously. Which only matters if there is distance to cover, and
+   that is the tension below.
+2. **Camera.** It has to pull back with speed or the player outruns their own
+   sightline. This is a real feel problem, not a setting.
+3. **What you can do while moving.** Trample, ram, carry more, reach a high
+   shelf from horseback, outrun something.
+4. **What you cannot do.** Doorways, stairs, dense wood, anything narrow. A
+   vehicle should close options as well as open them, or it is strictly better
+   and therefore boring.
+5. **Upkeep as a property problem, not a fuel bar.** A horse wants `EDIBLE` and
+   rest. A car wants something `FLAMMABLE` and liquid, which is the same
+   property fire already reads. A bicycle wants nothing, which is why it
+   survives Band 2 better than the car does.
+
+### The tension worth stating up front
+
+Vehicles only feel good when there is distance to cover, and the current region
+is a deliberately small 36 by 32 clearing that was cut down precisely because
+the bigger one felt empty. Both of those are right, and they conflict.
+
+The likely resolution is that vehicles arrive with multi-region travel rather
+than inside one region: a horse is how you cross between gateways at speed, not
+how you cross a clearing. That also stops the starting area needing to be
+inflated to justify them.
+
+Do not build vehicles to make the map feel bigger. Build them when the map
+already is.
+
+### This is what brings Rapier back
+
+D13 removed Rapier from the runtime and said explicitly that it returns for
+crates, rope and vehicles. This is that trigger.
+
+Rapier has a raycast vehicle controller, which is the right tool for the car,
+and joint chains for anything towed. The horse is probably NOT a Rapier vehicle;
+it is an agent with a movement model, closer to the player's analytic movement
+than to a chassis with suspension.
+
+So the likely split is: horse and bicycle stay analytic and cheap; the car gets
+real physics, because that is where the fun of a car lives. Revisit D13 when
+this happens rather than quietly reintroducing the dependency.
