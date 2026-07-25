@@ -654,9 +654,9 @@ def make_ring():
     bm = bmesh.new()
     sec = [(0.026, 0.0), (0.020, 0.019), (-0.012, 0.024),
            (-0.021, 0.0), (-0.012, -0.024), (0.020, -0.019)]
-    bm_sweep(bm, arc_frames(0.140, 0.0, 2.0 * math.pi, 20, closed=True),
+    bm_sweep(bm, arc_frames(0.140, 0.0, 2.0 * math.pi, 16, closed=True),
              lambda i, t: sec, closed=True)
-    emit(bm, "ring_band", "none", bevel_width=0.003)
+    emit(bm, "ring_band", "none", bevel_width=0.003, bevel_segments=1)
 
 
 def make_horseshoe():
@@ -773,14 +773,16 @@ def make_apple():
 
 def make_straw_bale():
     """
-    A bound bale: bulged in the middle, cut square at the ends, with two twine
-    cords standing proud of it.
+    A bound bale: long and low, bulged between the cords, cut square at the ends,
+    with two twine bands biting deep into it.
 
-    The cords are modelled in rather than left to the recipe. On the ground a
-    bale is a tan rectangle roughly thirty pixels across, and a rectangle of one
-    flat colour is unreadable whatever it is made of. Two raised bands, each
-    with a groove either side of it, put four shadow lines across that rectangle
-    and are most of why this now reads as straw rather than as a crate.
+    The cords are modelled in rather than left to the recipe, and they are cut
+    deep on purpose. On the ground a bale is a tan rectangle about thirty pixels
+    across, and a rectangle of one flat colour is unreadable whatever it is made
+    of. The first attempt used shallow eighteen millimetre grooves and they
+    vanished at that size, which is the whole lesson: detail that survives is
+    detail cut deep enough to throw its own shadow. These are thirty two, and
+    the bale reads from across the map.
     """
     bm = bmesh.new()
 
@@ -788,27 +790,27 @@ def make_straw_bale():
         return box_section(x, sy, -sz, sz, ch)
 
     stations = [
-        st(-0.200, 0.128, 0.128, 0.50),
-        st(-0.190, 0.146, 0.146, 0.34),
-        st(-0.140, 0.152, 0.152),
-        st(-0.116, 0.142, 0.143),   # groove
-        st(-0.106, 0.156, 0.157),   # twine cord, proud
-        st(-0.090, 0.156, 0.157),
-        st(-0.080, 0.142, 0.143),   # groove
-        st(-0.050, 0.156, 0.156),
-        st(0.000, 0.160, 0.159),    # bulge
-        st(0.050, 0.156, 0.156),
-        st(0.080, 0.142, 0.143),    # groove
-        st(0.090, 0.156, 0.157),    # twine cord
-        st(0.106, 0.156, 0.157),
-        st(0.116, 0.142, 0.143),    # groove
-        st(0.140, 0.152, 0.152),
-        st(0.190, 0.146, 0.146, 0.34),
-        st(0.200, 0.128, 0.128, 0.50),
+        st(-0.222, 0.124, 0.122, 0.55),
+        st(-0.210, 0.148, 0.146, 0.34),
+        st(-0.160, 0.152, 0.150),
+        st(-0.130, 0.124, 0.122, 0.50),   # groove, cut deep
+        st(-0.118, 0.140, 0.138, 0.40),   # twine cord
+        st(-0.100, 0.140, 0.138, 0.40),
+        st(-0.088, 0.124, 0.122, 0.50),   # groove
+        st(-0.056, 0.154, 0.152),
+        st(0.000, 0.160, 0.156),          # bulge
+        st(0.056, 0.154, 0.152),
+        st(0.088, 0.124, 0.122, 0.50),    # groove
+        st(0.100, 0.140, 0.138, 0.40),    # twine cord
+        st(0.118, 0.140, 0.138, 0.40),
+        st(0.130, 0.124, 0.122, 0.50),    # groove
+        st(0.160, 0.152, 0.150),
+        st(0.210, 0.148, 0.146, 0.34),
+        st(0.222, 0.124, 0.122, 0.55),
     ]
     bm_loft(bm, stations)
-    o = emit(bm, "straw_bale", "base", bevel_width=0.006, bevel_segments=1)
-    jitter(o, 0.010, 23)
+    o = emit(bm, "straw_bale", "base", bevel_width=0.005, bevel_segments=1)
+    jitter(o, 0.012, 23)
     socket(o, "socket_tip", (0, 0, 0.31))
 
 
@@ -873,44 +875,49 @@ def make_leaf_cluster():
     """
     Actual leaves in a rosette, rather than a noisy ball.
 
-    Six pointed blades, each a thin lofted section with a raised midrib, splayed
-    out and tipped up at different angles. This is the one part where the
-    silhouette has to be spiky or it reads as a stone, and no amount of noise on
-    a sphere gets there.
+    Seven pointed blades, each a thin lofted section with a raised midrib,
+    splayed out at uneven angles and drooping at the tips. This is the one part
+    where the silhouette has to be spiky or it reads as a stone, and no amount
+    of noise on a sphere gets there.
+
+    Uneven is the whole job. Evenly spaced blades all pitched the same way make
+    a lotus, which is what the first pass produced. The yaw scatter and the
+    per-blade droop are what turn a flower back into foliage.
     """
     bm = bmesh.new()
     rng = _Lcg(53)
-    blades = 6
+    blades = 7
     for k in range(blades):
-        yaw = 2.0 * math.pi * k / blades + 0.12 * (rng.next() - 0.5)
-        pitch = 0.34 + 0.44 * rng.next()
-        length = 0.115 + 0.045 * rng.next()
+        yaw = 2.0 * math.pi * k / blades + 0.62 * (rng.next() - 0.5)
+        pitch = 0.10 + 0.62 * rng.next()
+        length = 0.100 + 0.070 * rng.next()
+        droop = 0.30 + 0.55 * rng.next()
         ca, sa = math.cos(yaw), math.sin(yaw)
         cp, sp = math.cos(pitch), math.sin(pitch)
 
         # Blade outline as (along, across, rib height) at several stations.
         outline = [
-            (0.00, 0.006, 0.004),
-            (0.16, 0.028, 0.009),
-            (0.38, 0.046, 0.010),
-            (0.62, 0.042, 0.008),
-            (0.84, 0.026, 0.005),
+            (0.00, 0.005, 0.004),
+            (0.18, 0.026, 0.009),
+            (0.42, 0.044, 0.010),
+            (0.66, 0.038, 0.008),
+            (0.86, 0.022, 0.005),
             (1.00, 0.003, 0.002),
         ]
         secs = []
         for (u, half, rib) in outline:
             d = u * length
-            # Leaves curl: lift the tip, and droop the outer edges.
-            lift = 0.055 * u * u
+            # A leaf falls away along its length rather than lying flat.
+            fall = -droop * length * u * u
             pts = []
             for (across, up) in ((0.0, rib), (half, 0.0), (0.0, -rib * 0.5), (-half, 0.0)):
-                x = d * cp - (up + lift) * sp
-                z = d * sp + (up + lift) * cp
-                pts.append((x * ca - across * sa, x * sa + across * ca, z + 0.028))
+                x = d * cp - up * sp
+                z = d * sp + up * cp + fall
+                pts.append((x * ca - across * sa, x * sa + across * ca, z + 0.086))
             secs.append(pts)
         bm_loft(bm, secs)
 
-    emit(bm, "leaf_cluster", "base", bevel_width=0.002)
+    emit(bm, "leaf_cluster", "base", bevel_width=0.002, bevel_segments=1)
 
 
 def make_stopper():
@@ -961,7 +968,7 @@ def make_disc():
         (0.100, 0.010),
         (0.062, 0.013),
         (0.0, 0.014),
-    ], segments=18)
+    ], segments=14)
     emit(bm, "disc_flat", "none", bevel_width=0.003)
 
 

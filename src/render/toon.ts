@@ -200,7 +200,7 @@ void main() {
   // display space always costs some.
   c = clamp( ( c - 0.46 ) * 1.13 + 0.46, 0.0, 1.0 );
   float g = dot( c, LUMA );
-  c = clamp( mix( vec3( g ), c, 1.16 ), 0.0, 1.0 );
+  c = clamp( mix( vec3( g ), c, 1.09 ), 0.0, 1.0 );
 
   // Vignette, cool rather than black, so the corners read as air between the
   // camera and the far trees rather than as a lens.

@@ -19,7 +19,7 @@
  */
 
 import type { ItemDef } from '../items/catalog'
-import { isDiscovered, merge, mergeId } from '../items/merge'
+import { canMerge, isDiscovered, mergeId, refusal, tryMerge } from '../items/merge'
 import { itemIcon } from '../render/icons'
 import { ALL_PROPERTIES, meta, ranked, type PropertyId } from '../props/registry'
 
@@ -154,10 +154,17 @@ export class Ui {
     const a = this.pack[this.slotA]
     const b = this.pack[this.slotB]
     if (!a || !b) return
-    // D18: some things never combine, and the refusal costs nothing.
-    if (a.noMerge || b.noMerge) return
+    // D18: a pair either has an authored result or it does not combine, and
+    // refusing costs nothing. There are TWO ways to refuse and only one of them
+    // is `noMerge`: the common case is an ordinary pair nobody authored, which
+    // is most of them. Guarding on `noMerge` alone let apple + sword reach
+    // merge(), which now throws.
+    const result = tryMerge(a.id, b.id)
+    if (!result) {
+      this.toast('Nothing', refusal(a.id, b.id))
+      return
+    }
 
-    const result = merge(a.id, b.id)
     this.codex.add(mergeId(a.id, b.id))
 
     // Both inputs are destroyed. Splice the higher index first so the lower
@@ -374,17 +381,19 @@ export class Ui {
     }
 
     result.hidden = false
-    const refusal = a.noMerge ?? b.noMerge
+    // Covers both refusal kinds, not just `noMerge`.
+    const combines = canMerge(a.id, b.id)
+    const refusalText = combines ? null : refusal(a.id, b.id)
 
-    if (refusal) {
+    if (refusalText) {
       // D18: a pair that has no result simply does not merge, and the bench
       // says so in the object's own voice. Nothing is consumed.
       result.classList.add('refused')
-      result.append(el('span', 'q', '✕'), el('span', 'sub', refusal))
+      result.append(el('span', 'q', '✕'), el('span', 'sub', refusalText))
     } else if (isDiscovered(a.id, b.id, this.codex)) {
       // Known pairs show their result. Undiscovered ones stay a gamble, which
       // is what keeps the irreversibility meaningful.
-      const known = merge(a.id, b.id)
+      const known = tryMerge(a.id, b.id)!
       const icon = el('img')
       icon.src = itemIcon(known)
       icon.alt = ''
@@ -395,8 +404,8 @@ export class Ui {
       result.append(el('span', 'q', '?'), el('span', 'sub', 'never merged before'))
     }
 
-    button.disabled = Boolean(refusal)
-    warn.hidden = Boolean(refusal)
+    button.disabled = !combines
+    warn.hidden = !combines
   }
 
   // ------------------------------------------------------------------ notices

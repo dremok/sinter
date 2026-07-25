@@ -123,12 +123,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     toonUnique({ ...(color === undefined ? {} : { color }), map: tiled(t, 3.2, 3.2), side: THREE.DoubleSide })
 
   const M = {
-    track: flatMat(tex.sand, 0xbb9160),
-    yard: flatMat(tex.sand, 0x9c7a4e),
-    rut: flatMat(tex.sand, 0x836444),
-    ash: flatMat(tex.stone, 0x6a5949),
-    tilled: flatMat(tex.sand, 0x6f5237),
-    shore: flatMat(tex.sand),
+    track: flatMat(tex.sand, 0xff0000),
+    yard: flatMat(tex.sand, 0x0000ff),
+    rut: flatMat(tex.sand, 0xff00ff),
+    ash: flatMat(tex.stone, 0x00ffff),
+    tilled: flatMat(tex.sand, 0x00ff00),
+    shore: flatMat(tex.sand, 0xffff00),
     water: toonUnique({
       map: tiled(tex.water, 3.2, 3.2),
       transparent: true,

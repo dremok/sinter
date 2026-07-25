@@ -592,7 +592,10 @@ export const stone = (rng: Rng) =>
  */
 export const plank = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    const BOARD = 8
+    // Four texels to a board, which at TEXELS_PER_UNIT is a third of a metre:
+    // roughly a split plank, and about five of them up a hut wall. Wider boards
+    // were tried first and a wall only showed two of them.
+    const BOARD = 4
     // Stretched four to one along y, so the noise reads as grain running the
     // length of the board rather than as blotches.
     const grain = valueNoise(r, 20)
@@ -608,24 +611,24 @@ export const plank = (rng: Rng) =>
           if (g > 0.68) idx += 1
           else if (g < 0.32) idx -= 1
           if (row === 0) idx = 0
-          else if (row === 1) idx = base + 2
-          else if (row === BOARD - 1) idx = 1
+          else if (row === 1) idx += 2
+          else if (row === BOARD - 1) idx -= 1
           put(x, y, tone(RAMP.wood, idx))
         }
       }
 
-      // One butt join per board, at a different x on every board.
-      const jx = r.int(0, n - 1)
-      for (let row = 1; row < BOARD; row++) {
-        put(jx, b * BOARD + row, tone(RAMP.wood, 0))
-        put(jx + 1, b * BOARD + row, tone(RAMP.wood, 5))
-      }
-
-      // Nails, iron-grey, paired either side of the join.
-      for (const nx of [jx - r.int(3, 6), jx + r.int(4, 7)]) {
-        const ny = b * BOARD + 4
-        put(nx, ny, tone(RAMP.stone, 1))
-        put(nx, ny - 1, tone(RAMP.stone, 3))
+      // A butt join on most boards, at a different x on each, so a wall is
+      // boards somebody cut rather than one extruded ribbon.
+      if (r.chance(0.75)) {
+        const jx = r.int(0, n - 1)
+        for (let row = 1; row < BOARD; row++) {
+          put(jx, b * BOARD + row, tone(RAMP.wood, 0))
+          put(jx + 1, b * BOARD + row, tone(RAMP.wood, 5))
+        }
+        // Nails, iron-grey, either side of the join.
+        for (const nx of [jx - r.int(3, 6), jx + r.int(4, 7)]) {
+          put(nx, b * BOARD + 2, tone(RAMP.stone, 1))
+        }
       }
     }
   })
@@ -848,21 +851,35 @@ export function textures(rng: Rng): TextureSet {
 }
 
 /**
+ * Fewest texels any surface is allowed to show. The floor exists for parts
+ * whose caller passes a nominal size well under the size they render at, such
+ * as kitbash items at DISPLAY_SCALE; without it a bucket gets two texels.
+ */
+const MIN_TEXELS = 12
+
+/**
  * Clone a texture with its own repeat, since repeat is per-texture state.
  *
- * The divisor is the texture's real pixel size rather than a constant, which is
- * what lets tiles have different resolutions without silently changing their
- * texel density. Density stays at TEXELS_PER_UNIT for anything big enough to
- * need more than one tile; anything smaller clamps to a single tile, which is
- * what the item call site in kitbash.ts relies on to keep a whole bitmap on a
- * bucket rather than one texel.
+ * Two changes from the version that assumed every tile was 32px. The divisor is
+ * the texture's real pixel size, which is what lets tiles have different
+ * resolutions without silently changing their density. And the repeat is no
+ * longer rounded up to a whole tile.
+ *
+ * That rounding was the more damaging of the two. region.ts lays its tracks and
+ * yards with UVs authored in world units, one unit of UV to 3.2 world units,
+ * and asks for `tiled(sand, 3.2, 3.2)`. Rounded to a whole tile that put the
+ * entire 256px bitmap inside 3.2 metres of ground: eighty texels to the unit,
+ * every ripple and pebble smaller than a screen pixel, and a track that read as
+ * flat orange paint. A fractional repeat gives exactly TEXELS_PER_UNIT on every
+ * surface in the scene, which is the density rule D14 asks for, and it means a
+ * 256px tile spans 21 world units of track before it has to repeat.
  */
 export function tiled(tex: THREE.CanvasTexture, worldW: number, worldH: number): THREE.Texture {
   const t = tex.clone()
   t.needsUpdate = true
   const img = tex.image as HTMLCanvasElement
   const per = (world: number, texels: number) =>
-    Math.max(1, Math.round((world * TEXELS_PER_UNIT) / texels))
+    Math.max(MIN_TEXELS / texels, (world * TEXELS_PER_UNIT) / texels)
   t.repeat.set(per(worldW, img.width), per(worldH, img.height))
   return t
 }
