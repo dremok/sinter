@@ -71,6 +71,14 @@ export class Ui {
   private slotB: number | null = null
   private open = false
 
+  /** Live notices by group key, so repeats update in place instead of stacking. */
+  private notices = new Map<
+    string,
+    { node: HTMLElement; body: HTMLElement; tally: HTMLElement; count: number; timer: ReturnType<typeof setTimeout> }
+  >()
+  /** The pair whose refusal has already been toasted. See `announce`. */
+  private announced: string | null = null
+
   constructor(private hooks: UiHooks) {
     this.buildFilters()
     this.mountDebug()
@@ -160,10 +168,11 @@ export class Ui {
     // refusing costs nothing. There are TWO ways to refuse and only one of them
     // is `noMerge`: the common case is an ordinary pair nobody authored, which
     // is most of them. Guarding on `noMerge` alone let apple + sword reach
-    // merge(), which now throws.
-    // Unreachable through the UI, because the bench announces a refusal the
-    // moment the second slot fills and disables the button. Kept as a guard so
-    // a future caller cannot reach merge(), which throws on an unauthored pair.
+    // merge(), which throws.
+    //
+    // Unreachable from the UI now, because the bench announces the refusal as
+    // soon as the second slot fills and the button is disabled behind it. Kept
+    // so a future caller cannot reach merge() by another route.
     const result = tryMerge(a.id, b.id)
     if (!result) return
 
@@ -378,7 +387,7 @@ export class Ui {
     // slots and a dead button already say "nothing is selected" twice over.
     const hint = $('bench-hint')
     hint.hidden = Boolean(a && b)
-    hint.textContent = a || b ? 'one more' : 'pick two'
+    hint.textContent = a || b ? 'Pick one more.' : 'Pick two things.'
 
     const result = $('result')
     const button = $('merge-btn') as HTMLButtonElement
@@ -391,6 +400,7 @@ export class Ui {
       result.hidden = true
       button.disabled = true
       warn.hidden = true
+      this.announced = null
       return
     }
 
@@ -398,12 +408,19 @@ export class Ui {
     // Covers both refusal kinds, not just `noMerge`.
     const combines = canMerge(a.id, b.id)
     const refusalText = combines ? null : refusal(a.id, b.id)
+    if (combines) this.announced = null
 
     if (refusalText) {
       // D18: a pair that has no result simply does not merge, and the bench
-      // says so in the object's own voice. Nothing is consumed.
+      // says so in the object's own voice. Nothing is consumed, so this is
+      // information rather than a warning, and it arrives the instant the
+      // second slot fills. Making the player press a dead button to learn it
+      // was the complaint.
       result.classList.add('refused')
-      result.append(el('span', 'q', '✕'), el('span', 'sub', refusalText))
+      const text = el('div', 'rtext')
+      text.append(el('div', 'name', 'Nothing to make.'), el('div', 'sub', refusalText))
+      result.append(text)
+      this.announce(mergeId(a.id, b.id), refusalText)
     } else if (isDiscovered(a.id, b.id, this.codex)) {
       // Known pairs show their result. Undiscovered ones stay a gamble, which
       // is what keeps the irreversibility meaningful.
@@ -412,28 +429,125 @@ export class Ui {
       icon.src = itemIcon(known)
       icon.alt = ''
       const text = el('div', 'rtext')
-      text.append(el('div', 'name', known.name), el('div', 'sub', 'you have made this before'))
+      text.append(el('div', 'name', known.name), el('div', 'sub', 'You have made this before.'))
       result.append(icon, text)
     } else {
-      result.append(el('span', 'q', '?'), el('span', 'sub', 'never merged before'))
+      result.append(el('span', 'q', '?'), el('span', 'sub', 'Never merged before.'))
     }
 
     button.disabled = !combines
     warn.hidden = !combines
   }
 
+  /**
+   * Say a refusal out loud once per pair. `renderBench` runs on every render,
+   * including filter clicks and pickups, so the pair that was last announced is
+   * remembered and a toast never repeats itself while the same two things sit
+   * on the bench.
+   */
+  private announce(pair: string, text: string): void {
+    if (this.announced === pair) return
+    this.announced = pair
+    this.toast('Nothing to make', text)
+  }
+
   // ------------------------------------------------------------------ notices
 
-  toast(label: string, text: string, kind: 'normal' | 'fire' = 'normal'): void {
+  /**
+   * Live notices.
+   *
+   * The important behaviour here is that repeats COALESCE rather than stack.
+   * Chopping a tree fires once per swing and a spreading fire fires once per
+   * post, so the naive version buried the screen in boxes saying nearly the
+   * same thing. A notice with the same `group` updates the existing box in
+   * place, keeps its position so nothing jumps, counts the repeats, and
+   * restarts its own timer.
+   *
+   * Position is deliberately NOT bumped to the end on an update. Reordering on
+   * every swing is its own kind of noise.
+   */
+  toast(
+    label: string,
+    text: string,
+    opts: { kind?: 'normal' | 'fire'; group?: string } | 'normal' | 'fire' = {},
+  ): void {
+    // Third argument used to be a bare kind. Accept both so no call site lies.
+    const o = typeof opts === 'string' ? { kind: opts } : opts
+    const kind = o.kind ?? 'normal'
+
+    // Default grouping is by label, so identical labels merge without every
+    // call site having to remember to pass a key.
+    const key = o.group ?? label
+
     const host = $('toasts')
+    const existing = this.notices.get(key)
+
+    if (existing && existing.node.isConnected) {
+      existing.count++
+      existing.body.textContent = text
+      existing.node.className = 'toast' + (kind === 'fire' ? ' fire' : '')
+      if (existing.count > 1) existing.tally.textContent = `x${existing.count}`
+      // Retrigger the entry animation so an update is still noticed.
+      existing.node.classList.remove('bump')
+      void existing.node.offsetWidth
+      existing.node.classList.add('bump')
+      clearTimeout(existing.timer)
+      existing.timer = setTimeout(() => {
+        existing.node.remove()
+        this.notices.delete(key)
+      }, 5200)
+      return
+    }
+
     const node = el('div', 'toast' + (kind === 'fire' ? ' fire' : ''))
-    node.append(el('div', 'label', label), el('div', 'body', text))
+    const head = el('div', 'label', label)
+    const tally = el('span', 'tally')
+    head.append(tally)
+    const body = el('div', 'body', text)
+    node.append(head, body)
     host.append(node)
 
     // Headless runs never advance the wall clock, so these would pile up
-    // forever; cap the list instead of relying on the timer alone.
-    while (host.children.length > 4) host.removeChild(host.firstChild!)
-    setTimeout(() => node.remove(), 5200)
+    // forever; cap the list instead of relying on the timer alone. Oldest goes,
+    // and its bookkeeping goes with it.
+    while (host.children.length > 4) {
+      const oldest = host.firstChild as HTMLElement
+      for (const [k, v] of this.notices) if (v.node === oldest) this.notices.delete(k)
+      host.removeChild(oldest)
+    }
+
+    const timer = setTimeout(() => {
+      node.remove()
+      this.notices.delete(key)
+    }, 5200)
+
+    this.notices.set(key, { node, body, tally, count: 1, timer })
+  }
+
+  /**
+   * The held item strip.
+   *
+   * A11 says every item must answer "what happens if I press use right now?"
+   * and that the answer must never be a silent nothing. This is where that
+   * answer lives: what is in hand, and the one line describing what USE does
+   * with it. Without this, throwing was a keypress that consumed an item the
+   * player never chose and could not see.
+   */
+  held(icon: string | null, name: string, summary: string, index: number, total: number): void {
+    const node = $('held')
+    node.classList.toggle('on', icon !== null)
+    if (icon === null) return
+
+    node.replaceChildren()
+    const img = el('img', 'held-icon')
+    img.src = icon
+    img.alt = ''
+
+    const text = el('div', 'held-text')
+    text.append(el('div', 'held-name', name), el('div', 'held-use', summary))
+
+    node.append(img, text)
+    if (total > 1) node.append(el('div', 'held-count', `${index + 1}/${total}`))
   }
 
   prompt(html: string | null): void {

@@ -3,8 +3,9 @@ import { createRng } from './core/rng'
 import { Clock, TICK_DT } from './core/clock'
 import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
-import { Grade, groundBlob, sizeToPixelBuffer, toonUnique } from './render/toon'
-import { Flame } from './render/flame'
+import { Grade, groundBlob, sizeToDisplay, toonUnique } from './render/toon'
+import { Flame, setFlameViewport } from './render/flame'
+import { applyOutlines } from './render/outline'
 import { loadParts } from './render/parts'
 import { Character } from './render/character'
 import { BOUNDS, buildRegion } from './world/region'
@@ -14,8 +15,9 @@ import { spatial } from './sim/spatial'
 import { applyReactions } from './props/derive'
 import { p } from './props/registry'
 import { buildItemMesh } from './render/kitbash'
-import { CATALOG, useOf, type ItemDef } from './items/catalog'
+import { CATALOG, useOf, useSummary, type ItemDef } from './items/catalog'
 import { landingOf } from './items/interactions'
+import { itemIcon } from './render/icons'
 import { Ui } from './ui/interface'
 
 /**
@@ -40,13 +42,9 @@ const PACK = params.get('pack')
 const rng = createRng(SEED)
 const clock = new Clock()
 
-// TEMP PERF INSTRUMENTATION
-const __t: Record<string, number> = { moduleStart: performance.now() }
-
 // The kitbash library has to be in memory before anything assembles an item.
 // Top-level await, so the headless harness still sees a single settled frame.
 await loadParts()
-__t.parts = performance.now()
 
 // ---------------------------------------------------------------- rendering
 
@@ -57,11 +55,20 @@ document.body.appendChild(renderer.domElement)
 
 // Antialiasing is off and the buffer is tiny on purpose: crisp pixel edges are
 // the entire look, and AA would smear them back into mush.
-sizeToPixelBuffer(renderer, innerWidth, innerHeight)
+sizeToDisplay(renderer, innerWidth, innerHeight)
 
 // One fullscreen pass on the way to the canvas: shoulder, split tone, contrast,
 // vignette. No post-processing dependency, one extra draw.
 const grade = new Grade()
+
+// Ember and smoke sizes are authored in metres; the particle shaders need the
+// buffer height to turn that into points. Set here and on every resize.
+const bufferSize = new THREE.Vector2()
+function syncBufferSize(): void {
+  renderer.getDrawingBufferSize(bufferSize)
+  setFlameViewport(bufferSize.y)
+}
+syncBufferSize()
 
 const scene = new THREE.Scene()
 
@@ -98,12 +105,12 @@ scene.fog = new THREE.Fog(HAZE, fogRange.near, fogRange.far)
  * split tone catches cast shadows, where the key is switched off entirely and
  * neither of the other two has anything to say.
  */
-scene.add(new THREE.HemisphereLight(BAND0.skyLight, BAND0.groundLight, 0.8))
+scene.add(new THREE.HemisphereLight(BAND0.skyLight, BAND0.groundLight, 0.62))
 
 // Sun azimuth must differ from the camera's, or shadows hide behind their own
 // casters and read as broken. `iso.sunOffset()` owns that now, at every camera
 // angle rather than only the starting one. (DECISIONS D9)
-const sun = new THREE.DirectionalLight(new THREE.Color(BAND0.sun).lerp(new THREE.Color(0xffc46a), 0.5), 3.1)
+const sun = new THREE.DirectionalLight(new THREE.Color(BAND0.sun).lerp(new THREE.Color(0xffc46a), 0.5), 3.6)
 sun.castShadow = true
 
 /**
@@ -117,7 +124,7 @@ sun.castShadow = true
  * near/far bracket the sun's actual distance for the same reason: a shadow
  * camera 1 to 90 deep spends most of its depth precision on empty air.
  */
-const SHADOW_EXTENT = 19
+const SHADOW_EXTENT = 16
 const SUN_REACH = iso.sunOffset().length()
 sun.shadow.mapSize.set(2048, 2048)
 sun.shadow.bias = -0.0004
@@ -129,7 +136,7 @@ sc.far = SUN_REACH + SHADOW_EXTENT + 12
 sc.updateProjectionMatrix()
 scene.add(sun, sun.target)
 
-const fill = new THREE.DirectionalLight(new THREE.Color(BAND0.skyLight).lerp(new THREE.Color(0x3f6fc0), 0.6), 0.65)
+const fill = new THREE.DirectionalLight(new THREE.Color(BAND0.skyLight).lerp(new THREE.Color(0x3f6fc0), 0.6), 0.5)
 scene.add(fill, fill.target)
 
 const sunOffset = new THREE.Vector3()
@@ -148,28 +155,7 @@ function placeLights(): void {
 
 // ---------------------------------------------------------------- region
 
-// TEMP PERF INSTRUMENTATION: textures() caches, and forks from the base seed by
-// label alone, so pulling it forward here measures it without changing it.
-const __tex = await import('./render/textures')
-__tex.textures(rng)
-__t.textures = performance.now()
-
-// TEMP: per-generator cost. Second copies, thrown away; only the clock matters.
-const __texMs: Record<string, number> = {}
-if (params.has('texprofile')) {
-  const r2 = rng.fork('probe')
-  for (const name of [
-    'grass', 'sand', 'bark', 'foliage', 'stone', 'plank',
-    'straw', 'steel', 'cloth', 'clay', 'water', 'glass', 'gold', 'ember',
-  ] as const) {
-    const a = performance.now()
-    ;(__tex as unknown as Record<string, (r: typeof r2) => unknown>)[name]!(r2)
-    __texMs[name] = +(performance.now() - a).toFixed(1)
-  }
-}
-
 const region = buildRegion(rng, scene)
-__t.region = performance.now()
 
 if (START_AT) {
   const [sx, sz] = START_AT.split(',').map(Number)
@@ -257,7 +243,7 @@ addEventListener(
 )
 
 addEventListener('resize', () => {
-  sizeToPixelBuffer(renderer, innerWidth, innerHeight)
+  sizeToDisplay(renderer, innerWidth, innerHeight)
   iso.setAspect(innerWidth / innerHeight)
 })
 
@@ -287,7 +273,9 @@ function affordances(target: Entity): Affordance[] {
         const damage = 30 * (cut.props.TOOL_CUTTING ?? 0.5)
         target.structure!.hp -= damage
         const left = Math.max(0, Math.round((target.structure!.hp / target.structure!.maxHp) * 100))
-        ui.toast('Chopped', `${target.structure!.label} at ${left}%`)
+        ui.toast('Chopped', `${target.structure!.label} at ${left}%`, {
+          group: `chop:${target.structure!.label}`,
+        })
         if (target.structure!.hp <= 0) fail(target, { onStructureFail: onFail })
       },
     })
@@ -339,7 +327,9 @@ function affordances(target: Entity): Affordance[] {
       label: `Batter with ${maul.name}`,
       run: () => {
         target.structure!.hp -= 24 * (maul.props.TOOL_STRIKING ?? 0.5)
-        ui.toast('Struck', `${target.structure!.label} shudders`)
+        ui.toast('Struck', `${target.structure!.label} shudders`, {
+          group: `strike:${target.structure!.label}`,
+        })
         if (target.structure!.hp <= 0) fail(target, { onStructureFail: onFail })
       },
     })
@@ -349,7 +339,7 @@ function affordances(target: Entity): Affordance[] {
 }
 
 function onFail(e: Entity): void {
-  ui.toast('Fell', `${e.label ?? 'It'} came down`)
+  ui.toast('Fell', `${e.label ?? 'It'} came down`, { group: `fell:${e.label ?? 'it'}` })
   if (e.mesh) {
     e.mesh.rotation.z += 1.3
     e.mesh.position.y -= (e.structure?.height ?? 2) * 0.3
@@ -357,13 +347,25 @@ function onFail(e: Entity): void {
   }
 }
 
+/**
+ * Char a thing.
+ *
+ * Toward ash, not down toward nothing. Scaling the colour was what made a
+ * burnt-out palisade section read as a solid maroon slab: brown times 0.3 is
+ * still brown, just wrong-valued, and a felled section lying flat then looks
+ * like somebody spilled a shadow of the wrong hue on the grass. Burnt wood is
+ * a desaturated blue-grey charcoal, so that is what it lerps to.
+ */
+const ASH = new THREE.Color(0x2b2926)
+
 function darken(root: THREE.Object3D, factor: number): void {
   root.traverse((o) => {
     const mesh = o as THREE.Mesh
+    if (mesh.userData.outlineHull) return
     const m = mesh.material as THREE.MeshToonMaterial | undefined
     if (m && 'color' in m) {
       const dark = m.clone()
-      dark.color.multiplyScalar(factor)
+      dark.color.lerp(ASH, 1 - factor)
       mesh.material = dark
     }
   })
@@ -466,6 +468,54 @@ function syncFireVisuals(): void {
  */
 let groundedChildren = -1
 
+/**
+ * A mesh that lies flat on the terrain: a track, a patch of mud, the pond
+ * surface. These must never be outlined. An inverted hull on a flat ribbon
+ * pushes straight up along its own normal and lands on top of the thing it was
+ * meant to edge, so every path in the clearing turns into a dark stripe.
+ *
+ * They are identified by `side: DoubleSide`, which in `world/region.ts` is used
+ * by `flatMat()` and by the water and by nothing else. That is exact today and
+ * fragile tomorrow, so `userData.noOutline` is also honoured and region.ts
+ * should move to it.
+ */
+function isGroundSurface(mesh: THREE.Mesh): boolean {
+  const m = mesh.material as THREE.Material | undefined
+  return m?.side === THREE.DoubleSide
+}
+
+const blobs = new Map<Entity, THREE.Mesh>()
+const bbox = new THREE.Box3()
+
+/**
+ * Sit a thing on the ground.
+ *
+ * The shadow map grounds anything big, but it cannot help in two cases that
+ * cover most of the frame: an object standing inside another object's cast
+ * shadow throws none of its own, because there is no key light left to block;
+ * and a small object's shadow lands several pixels away from its own base at
+ * this sun angle, so the eye never connects the two. A decal directly under the
+ * footprint does not care about either.
+ *
+ * Sized from the mesh's own world bounding box, so a boulder gets a boulder's
+ * worth and an apple gets an apple's.
+ */
+function sitOnGround(e: Entity): void {
+  if (blobs.has(e) || !e.mesh) return
+  bbox.setFromObject(e.mesh)
+  if (bbox.isEmpty()) return
+
+  const w = bbox.max.x - bbox.min.x
+  const d = bbox.max.z - bbox.min.z
+  const radius = Math.min(Math.max(w, d) * 0.42, 2.2)
+  if (radius < 0.05) return
+
+  const blob = groundBlob(radius, 0.55)
+  blob.position.set((bbox.min.x + bbox.max.x) / 2, bbox.min.y + 0.03, (bbox.min.z + bbox.max.z) / 2)
+  scene.add(blob)
+  blobs.set(e, blob)
+}
+
 function groundEverything(): void {
   if (region.group.children.length === groundedChildren) return
   const first = groundedChildren < 0
@@ -480,9 +530,22 @@ function groundEverything(): void {
     })
   }
 
+  // Outlines. Thicker on the character than on the world, because the player
+  // has to be findable in a frame that is otherwise all one hue, and a line
+  // that reads at a glance on a 1.5m figure would be a black cage on a tree.
+  applyOutlines(region.group, 0.05, isGroundSurface)
+  applyOutlines(character.group, 0.075)
+
+  for (const e of queries.meshed) sitOnGround(e)
+  for (const [e, blob] of blobs) {
+    if (e.mesh?.parent) continue
+    blob.removeFromParent()
+    blobs.delete(e)
+  }
+
   // Parented to the character rather than moved each frame: the group already
   // sits at the player's feet, so following is free and cannot drift.
-  if (first) character.group.add(groundBlob(0.62, 0.5))
+  if (first) character.group.add(groundBlob(0.6, 0.62))
 }
 
 // ---------------------------------------------------------------- interaction
@@ -624,6 +687,68 @@ function throwCarried(def: ItemDef): boolean {
   return true
 }
 
+/**
+ * What is in hand.
+ *
+ * Throwing originally used "the first projected item in the pack", which meant
+ * the player never chose what left their hands and could not see what would.
+ * A11 is explicit that every item must answer "what happens if I press use
+ * right now?" and that the answer must never be a silent nothing, so there has
+ * to be a selection and it has to be visible.
+ *
+ * Q and E cycle, R uses, and the strip above the control bar always names the
+ * item and what R will do with it. Number keys stay reserved for the
+ * contextual affordances on whatever you are facing, which are a different
+ * question: those are about the world, this is about your hands.
+ */
+let held = 0
+
+function heldItem(): ItemDef | undefined {
+  if (ui.count === 0) return undefined
+  if (held >= ui.count) held = ui.count - 1
+  return ui.pack[held]
+}
+
+function useHeld(): void {
+  const def = heldItem()
+  if (!def) {
+    ui.toast('Empty handed', 'Walk over something and press F.')
+    return
+  }
+
+  const use = useOf(def)
+  switch (use.mode) {
+    case 'projected':
+      throwCarried(def)
+      break
+    case 'contextual':
+      // The world decides. If something in front offers an action, the numbered
+      // prompt already covers it, so say that rather than silently doing nothing.
+      ui.toast(
+        def.name,
+        focusAffordances.length > 0
+          ? 'Use it on what you are facing, with the numbered keys.'
+          : 'Nothing in front of you to use this on.',
+      )
+      break
+    case 'panel':
+      ui.toast(def.name, 'It opens, but its panel is not built yet.')
+      break
+    case 'worn':
+      ui.toast(def.name, `Worn on the ${use.slot}. It works on its own.`)
+      break
+  }
+}
+
+function syncHeld(): void {
+  const def = heldItem()
+  if (!def) {
+    ui.held(null, '', '', 0, 0)
+    return
+  }
+  ui.held(itemIcon(def), def.name, useSummary(def), held, ui.count)
+}
+
 function handleInput(): void {
   if (pressed.has('f') && focus?.item) {
     ui.add(focus.item.def)
@@ -636,12 +761,15 @@ function handleInput(): void {
     focus = null
   }
 
-  // R throws the first projected thing carried. A11's mode 3.
-  if (pressed.has('r')) {
-    const throwable = ui.pack.find((d) => useOf(d).mode === 'projected')
-    if (throwable) throwCarried(throwable)
-    else if (ui.count > 0) ui.toast('Nothing to throw', 'None of what you carry is meant to leave your hands.')
+  // Q and E cycle what is in hand. They are free again now that camera rotation
+  // is gone, and they sit next to WASD, which is where a quick-select belongs.
+  if (ui.count > 0) {
+    if (pressed.has('q')) held = (held - 1 + ui.count) % ui.count
+    if (pressed.has('e')) held = (held + 1) % ui.count
   }
+
+  // R uses what is in hand, and what "use" means is the item's business.
+  if (pressed.has('r')) useHeld()
 
   if (pressed.has('g')) {
     const def = ui.takeLast()
@@ -710,7 +838,12 @@ function stepSimulation(): void {
 
   stepFire(rng.fork(`fire:${clock.tick}`), {
     onIgnite: (e) => {
-      if (e.structure) ui.toast('Caught', `${e.structure.label} is alight`, 'fire')
+      if (e.structure) {
+        ui.toast('Caught', `${e.structure.label} is alight`, {
+          kind: 'fire',
+          group: `caught:${e.structure.label}`,
+        })
+      }
     },
     onStructureFail: onFail,
   })
@@ -753,6 +886,7 @@ function syncMeshes(dt: number): void {
   groundEverything()
   syncFireVisuals()
   placeLights()
+  syncBufferSize()
 }
 
 // ---------------------------------------------------------------- hud
@@ -827,86 +961,15 @@ if (IGNITE_AT) {
 }
 
 if (HEADLESS_TICKS > 0) {
-  __t.simStart = performance.now()
   for (let i = 0; i < HEADLESS_TICKS; i++) {
     stepSimulation()
     clock.forceTicks(1)
   }
-  __t.simEnd = performance.now()
   syncMeshes(TICK_DT)
   updateFocus()
   updateHud(0)
   iso.update()
-  __t.renderStart = performance.now()
   grade.render(renderer, scene, iso.camera)
-  __t.renderEnd = performance.now()
-
-  // TEMP: renderer.info resets per render() call and grade.render() does two,
-  // so a plain read only ever reports the fullscreen quad. Turn autoReset off
-  // and take a second frame; totals are then scene pass + 1 quad draw / 2 tris.
-  renderer.info.autoReset = false
-  renderer.info.reset()
-  grade.render(renderer, scene, iso.camera)
-  const drawInfo = { ...renderer.info.render }
-  renderer.info.autoReset = true
-
-  // TEMP PERF INSTRUMENTATION
-  {
-    let meshes = 0
-    let objects = 0
-    let sceneTris = 0
-    const mats = new Set<unknown>()
-    const geos = new Set<unknown>()
-    const maps = new Set<unknown>()
-    const sources = new Set<unknown>()
-    scene.traverse((o) => {
-      objects++
-      const m = o as THREE.Mesh
-      if (!m.isMesh) return
-      meshes++
-      geos.add(m.geometry)
-      const idx = m.geometry.index
-      const posAttr = m.geometry.getAttribute('position')
-      sceneTris += (idx ? idx.count : (posAttr?.count ?? 0)) / 3
-      for (const mm of Array.isArray(m.material) ? m.material : [m.material]) {
-        mats.add(mm)
-        const map = (mm as THREE.MeshToonMaterial).map
-        if (map) {
-          maps.add(map)
-          sources.add(map.source)
-        }
-      }
-    })
-    let entities = 0
-    for (const _ of world.entities) entities++
-    ;(window as unknown as { __perf: unknown }).__perf = {
-      ticks: HEADLESS_TICKS,
-      ms: {
-        toParts: +(__t.parts! - __t.moduleStart!).toFixed(1),
-        textures: +(__t.textures! - __t.parts!).toFixed(1),
-        region: +(__t.region! - __t.textures!).toFixed(1),
-        sim: +(__t.simEnd! - __t.simStart!).toFixed(1),
-        msPerTick: +((__t.simEnd! - __t.simStart!) / HEADLESS_TICKS).toFixed(4),
-        firstRender: +(__t.renderEnd! - __t.renderStart!).toFixed(1),
-        moduleStartSinceNav: +__t.moduleStart!.toFixed(1),
-        totalSinceNav: +__t.renderEnd!.toFixed(1),
-      },
-      render: drawInfo,
-      programs: renderer.info.programs?.length ?? -1,
-      memory: { ...renderer.info.memory },
-      textureBreakdown: __texMs,
-      scene: {
-        objects,
-        meshes,
-        geometries: geos.size,
-        materials: mats.size,
-        mapTextures: maps.size,
-        textureSources: sources.size,
-        sceneTriangles: Math.round(sceneTris),
-        entities,
-      },
-    }
-  }
   window.__sinterReady = true
 } else {
   let lastFpsSample = performance.now()

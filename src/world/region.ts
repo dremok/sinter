@@ -150,6 +150,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     plankDark: toonUnique({ color: 0x8c6038, map: tiled(tex.plank, 2.4, 1.6) }),
     stone: toonUnique({ map: tiled(tex.stone, 2.4, 2.4) }),
     stoneDark: toonUnique({ color: 0x8a8c92, map: tiled(tex.stone, 2.4, 2.4) }),
+    // Warm grey. The lighting ramp turns anything neutral bright blue on its
+    // shadow side, and a blue plinth under a cottage reads as painted plastic.
+    rubbleWall: toonUnique({ color: 0xb2a08a, map: tiled(tex.stone, 1.4, 1.4) }),
     thatch: toonUnique({ map: tiled(tex.straw, 2.2, 2.2) }),
     thatchOld: toonUnique({ color: 0xbda06a, map: tiled(tex.straw, 2.2, 2.2) }),
     straw: toonUnique({ map: tiled(tex.straw, 0.7, 0.7) }),
@@ -160,17 +163,19 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     steel: toonUnique({ map: tiled(tex.steel, 0.8, 0.8) }),
     clay: toonUnique({ map: tiled(tex.clay, 1, 1) }),
     lily: toonUnique({ color: 0x4f9c3c, map: tiled(tex.foliage, 1, 1) }),
-    smoke: toonUnique({ color: 0xdfe4e8, transparent: true, opacity: 0.42 }),
     hen: toonUnique({ color: 0xf0e4d0, map: tiled(tex.cloth, 0.5, 0.5) }),
     henDark: toonUnique({ color: 0xb08a5e, map: tiled(tex.cloth, 0.5, 0.5) }),
     comb: toonUnique({ color: 0xd05040 }),
   }
 
   const foliage = BAND0.leaf.map((hex) => toonUnique({ color: hex, map: tiled(tex.foliage, 3, 3) }))
-  const pineMats = [0x2f6b34, 0x275c2c, 0x376f3a].map((hex) =>
+  // Species read by silhouette first and colour second, so the tints are pushed
+  // much further apart than is natural. At 12 texels to the unit and this much
+  // fog, three greens a shade apart are one green.
+  const pineMats = [0x1f5230, 0x1a4628, 0x27603a].map((hex) =>
     toonUnique({ color: hex, map: tiled(tex.foliage, 3, 3) }),
   )
-  const birchMats = [0x8cc456, 0x9ed166].map((hex) =>
+  const birchMats = [0xa8d465, 0xbadf7c].map((hex) =>
     toonUnique({ color: hex, map: tiled(tex.foliage, 3, 3) }),
   )
 
@@ -509,7 +514,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     const tree = new THREE.Group()
 
     const trunkH =
-      species === 'pine' ? 2.4 * scale : species === 'birch' ? 2.0 * scale : 1.7 * scale
+      species === 'pine' ? 3.1 * scale : species === 'birch' ? 2.3 * scale : 1.7 * scale
 
     if (species !== 'scrub') {
       const mat =
@@ -529,23 +534,31 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
 
     if (species === 'dead') {
-      for (let i = 0; i < 3; i++) {
+      // Long, thin, steeply angled. Short fat branches read as antlers.
+      for (let i = 0; i < 5; i++) {
         const b = new THREE.Mesh(branchGeo, M.barkDead)
-        const len = scale * r.range(0.9, 1.5)
-        b.scale.set(scale, len, scale)
-        b.position.y = trunkH * r.range(0.55, 0.95)
-        b.rotation.z = r.range(0.5, 1.15) * (i % 2 === 0 ? 1 : -1)
+        const len = scale * r.range(1.4, 2.6)
+        b.scale.set(scale * 0.55, len, scale * 0.55)
+        b.position.y = trunkH * r.range(0.4, 0.95)
+        b.rotation.z = r.range(0.28, 0.7) * (i % 2 === 0 ? 1 : -1)
         b.rotation.y = r.range(0, Math.PI * 2)
-        b.translateY(len * 0.4)
+        b.translateY(len * 0.45)
         b.castShadow = true
         tree.add(b)
       }
+      // Snapped off rather than tapering to a point.
+      const snap = new THREE.Mesh(trunkGeo, M.barkDead)
+      snap.scale.set(scale * 0.7, scale * 0.5, scale * 0.7)
+      snap.position.y = trunkH + scale * 0.2
+      snap.rotation.z = r.range(-0.3, 0.3)
+      snap.castShadow = true
+      tree.add(snap)
     } else {
       const tiers = species === 'pine' ? 5 : species === 'birch' ? 2 : 3
       const mats = species === 'pine' ? pineMats : species === 'birch' ? birchMats : foliage
-      const base = species === 'pine' ? 1.05 : species === 'birch' ? 1.05 : 1.3
-      const step = species === 'pine' ? 0.16 : 0.28
-      const rise = species === 'pine' ? 0.5 : 0.6
+      const base = species === 'pine' ? 0.88 : species === 'birch' ? 1.0 : 1.3
+      const step = species === 'pine' ? 0.13 : 0.28
+      const rise = species === 'pine' ? 0.46 : 0.6
       const tint = r.int(0, mats.length - 1)
 
       for (let t = 0; t < tiers; t++) {
@@ -594,14 +607,17 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   ): void {
     let t = from
     while (t < to) {
-      const n = r.int(1, 3)
+      // Clumps and thin places, rather than an even hedge. A wood that is
+      // uniformly dense has no depth in it; the gaps are what make the mass
+      // read as mass.
+      const n = r.chance(0.22) ? 0 : r.int(1, 3)
       for (let i = 0; i < n; i++) {
-        const depth = r.range(0, 1) ** 1.6 * 8
-        const [x, z] = place(t + r.range(-1.1, 1.1), depth)
+        const depth = r.range(0, 1) ** 1.6 * 9
+        const [x, z] = place(t + r.range(-1.4, 1.4), depth)
         const far = depth > 3.5
-        plantTree(x, z, r.pick(mix), r.range(far ? 0.95 : 0.75, far ? 1.4 : 1.15), r)
+        plantTree(x, z, r.pick(mix), r.range(far ? 1.0 : 0.7, far ? 1.7 : 1.25), r)
       }
-      t += r.range(1.3, 2.6)
+      t += r.range(1.9, 3.4)
     }
   }
 
@@ -690,7 +706,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       const x = cx + treeRng.range(-1.5, 1.5)
       const z = cz + treeRng.range(-1.5, 1.5)
       if (Math.hypot(x - POND.x, z - POND.z) < pondRadius(Math.atan2(z - POND.z, x - POND.x)) + 0.5) continue
-      const s = treeRng.range(0.6, 1.25)
+      const s = treeRng.range(0.45, 0.95)
       const b = new THREE.Mesh(brackenGeo, treeRng.pick(brackenMats))
       b.scale.set(s, s * treeRng.range(0.7, 1.2), s)
       b.position.set(x, heightAt(x, z) + s * 0.28, z)
@@ -1156,8 +1172,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     const g = new THREE.Group()
     const wallH = 2.05
 
-    const footing = new THREE.Mesh(new THREE.BoxGeometry(w + 0.24, 0.34, dep + 0.24), M.stone)
-    footing.position.y = 0.17
+    const footing = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.26, dep + 0.3), M.rubbleWall)
+    footing.position.y = 0.13
     footing.castShadow = true
     footing.receiveShadow = true
     g.add(footing)
@@ -1230,15 +1246,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       crown.position.set(cx, top + 0.1, 0)
       crown.castShadow = true
       g.add(crown)
-      // A thin wisp, leaning with the same wind that leans the washing.
-      for (let i = 0; i < 5; i++) {
-        const puff = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.26, 0.26), M.smoke)
-        const t = i / 4
-        puff.scale.setScalar(0.6 + t * 1.4)
-        puff.position.set(cx - t * 0.85, top + 0.4 + i * 0.58, -t * 0.45)
-        puff.rotation.y = i * 0.7
-        g.add(puff)
-      }
+      // No smoke plume. A static one reads as three grey boxes hanging in the
+      // air, and it cannot be animated from here: this file builds the scene
+      // and never gets a tick. It belongs with the flame visuals or nowhere.
     }
 
     g.position.set(x, h, z)
@@ -1421,7 +1431,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // Gaps are in the parametric angle of the ellipse, and each one has to line
     // up with a track or the track walks through the fence.
     const gaps = [
-      [-1.95, -1.15], // the main track, leaving for the gate
+      [-1.82, -1.3], // the main track, leaving for the gate
       [-2.95, -2.4], // the pond path, leaving west
       [-0.62, -0.12], // east, to the chopping block
     ]
@@ -1533,8 +1543,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Washing line. Two forked poles, a sag, and three things drying. */
   {
-    const a = new THREE.Vector3(-8.0, 0, 11.6)
-    const b = new THREE.Vector3(-7.2, 0, 14.6)
+    const a = new THREE.Vector3(-8.6, 0, 11.4)
+    const b = new THREE.Vector3(-7.9, 0, 14.5)
     a.y = heightAt(a.x, a.z)
     b.y = heightAt(b.x, b.z)
 
@@ -1658,9 +1668,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     const bodyGeo = new THREE.SphereGeometry(0.17, 7, 5)
     const headGeo = new THREE.SphereGeometry(0.09, 6, 5)
     for (const [x, z, dark] of [
-      [1.9, 15.6, false],
-      [3.6, 15.3, true],
-      [1.2, 17.0, false],
+      [1.7, 15.2, false],
+      [3.2, 14.4, true],
+      [1.0, 17.2, false],
     ] as const) {
       const y = heightAt(x, z)
       const mat = dark ? M.henDark : M.hen
@@ -1680,9 +1690,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   {
     const crateGeo = new THREE.BoxGeometry(0.62, 0.56, 0.6)
     for (const [x, z, y, ry] of [
-      [6.4, 16.6, 0, 0.3],
-      [6.9, 16.4, 0.56, -0.4],
-      [7.5, 16.9, 0, 0.9],
+      [-0.2, 17.0, 0, 0.3],
+      [0.35, 16.8, 0.56, -0.4],
+      [0.9, 17.3, 0, 0.9],
     ] as const) {
       const crate = new THREE.Mesh(crateGeo, M.plank)
       crate.position.set(x, heightAt(x, z) + 0.28 + y, z)
@@ -1709,9 +1719,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
     // Tools leaning where somebody left them.
     const leaning: [number, number, number, 'rake' | 'fork' | 'broom'][] = [
-      [-2.9, 14.1, 0.4, 'rake'],
-      [-6.1, 14.2, -0.5, 'fork'],
-      [3.9, 14.5, 0.9, 'broom'],
+      [-2.2, 13.0, 0.4, 'rake'],
+      [-7.4, 13.6, -0.5, 'fork'],
+      [3.4, 14.0, 0.9, 'broom'],
     ]
     for (const [x, z, ry, kind] of leaning) {
       const h = heightAt(x, z)

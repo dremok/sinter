@@ -1,38 +1,47 @@
 /**
  * Band 0: Hearth.
  *
- * Tuned for a 16-bit console look rather than a naturalistic one. That means
- * high saturation, few hues, and clear separation between neighbouring
- * surfaces, because the frame is rendered at 720p and then upscaled with hard
- * pixel edges. Muddy, closely related colours turn to noise at that size; the
- * original olive-and-tan palette read as sludge once pixellated.
+ * ## Saturation is a spotlight, not a floodlight
  *
- * Rule of thumb when adding a colour here: if you cannot tell it apart from its
- * neighbour in a 16x16 thumbnail, it is wrong.
+ * This file used to say "high saturation, few hues". That instruction existed
+ * because the first art pass read as olive sludge, and it worked, and then it
+ * overshot: Max's words on the build were "some of the colors are too harsh and
+ * too saturated, hurts my eyes". A measurement of the rendered frame agreed —
+ * mean HSV saturation 64%, with the ground alone about three quarters of every
+ * pixel. **Do not treat the old instruction as still binding.**
  *
- * ## Ramps are the source of truth
+ * The rule now is that saturation varies by role, because chroma is what the
+ * eye goes to first and there is no point spending it on the backdrop:
  *
- * Everything below is built from `RAMP`, which is the whole palette as a set of
- * ordered dark-to-light runs, one per material family. This replaced two dozen
- * hex literals scattered through `textures.ts` that had drifted away from the
- * colours named here, so "the palette" and "what the textures actually draw"
- * were two different sets that nobody could compare.
+ *   - Ground, foliage, terrain: 30-40%. These are what everything else sits
+ *     against. A field should be restful.
+ *   - Wood, stone, sand, cloth: 30-40% and warm rather than colourful; stone
+ *     is nearly neutral.
+ *   - Items, fire, gold, the player: 50-80%. These are the spotlight, and they
+ *     read as important precisely because their surroundings do not.
  *
- * Three rules hold across every ramp, and they are what make the set read as
- * one palette rather than eleven unrelated gradients:
+ * Greens moved toward olive and sage rather than emerald, following the Don't
+ * Starve direction: muted and earthy, with separation carried by value and by
+ * the outline pass, not by chroma.
  *
- *   1. **Six steps, spanning roughly 3:1 in luminance.** The old textures sat
- *      inside a narrow band, which is why they read as mud once the toon ramp
- *      quantised them: three lighting bands landing on three near-identical
- *      colours is one flat colour. A wide internal range gives cel shading
- *      something to bite on, because the texture's own light and dark survive
- *      inside a single lighting band.
- *   2. **Hue rotates warm as a ramp gets lighter, cool as it gets darker.**
- *      Grass runs from a blue-leaning shadow green to a yellow-leaning sunlit
- *      green. This is the oldest trick in painted sprite work and it is most of
- *      what stops a ramp looking like a brightness slider.
- *   3. **Saturation peaks in the middle.** The darkest and lightest steps pull
- *      toward neutral, so highlights read as light rather than as neon.
+ * ## Value does the reading
+ *
+ * This is the part that must not be lost while desaturating. Every ramp is six
+ * steps spanning roughly 3:1 in luminance, and that span is what makes cel
+ * shading work: the toon shader quantises lighting to three bands, so if a
+ * texture's own range is narrower than one band the whole surface collapses to
+ * a flat colour. Desaturating should *widen* the gap between how much work
+ * value does and how much chroma does, not flatten value along with it.
+ *
+ * A greyscale check of the frame is the honest test, and it is how the ground
+ * was caught reading as one uniform carpet. `RAMP.grass` in particular must not
+ * sit tight in value, because everything in the game stands on it.
+ *
+ * Two more rules that hold across every ramp:
+ *   - Hue rotates warm as a ramp lightens and cool as it darkens.
+ *   - Saturation peaks in the middle and pulls toward neutral at both ends, so
+ *     highlights read as sun-bleached rather than as neon. Check this in the
+ *     rendered frame, not only in the table.
  *
  * Ramps are hex strings because their consumer is a 2D canvas. The numeric
  * exports below are the same colours for three.js, which wants ints.
@@ -40,37 +49,54 @@
 
 /** Dark to light. Index 0 is deepest shadow, the last index is full sunlight. */
 export const RAMP = {
-  /** Field grass. Cool in shadow, yellowing in the sun. */
-  grass: ['#2c4a1e', '#3a6023', '#4a7a2a', '#5d9634', '#74b241', '#93cc55'],
-  /** Bare soil showing through the sward, and the trodden ring around the pond. */
-  dirt: ['#4a3720', '#63492a', '#7d5d36', '#977345', '#b08c58', '#c4a271'],
+  /** Field grass. Olive-sage, ~32-40% saturation, spanning 3.6:1 in value. */
+  grass: ['#28301d', '#374227', '#4a5834', '#617043', '#7c8c59', '#9cab75'],
+  /** Bare soil. Warmer and redder than bark, so worn ground reads as earth. */
+  dirt: ['#352a1c', '#473828', '#5a4835', '#705843', '#876c53', '#9e8267'],
   /**
-   * Canopy. Deliberately light: `foliage` is multiplied by a per-tier leaf
-   * colour in region.ts, and a mid-green map times a mid-green tint is a black
-   * green. Keeping the map pale lets the tint do the colouring and the map do
-   * the structure, which is the division of labour that makes three tinted
-   * copies of one bitmap look like three kinds of leaf.
+   * Canopy. Deliberately pale and near-neutral (8-15% saturation): region.ts
+   * multiplies this by a per-tier leaf colour, and multiplication compounds
+   * saturation, so any chroma in the map is chroma the tint cannot take back.
+   * Keeping the map neutral lets the tint choose the hue and the map carry the
+   * structure, which is what makes three tinted copies of one bitmap look like
+   * three kinds of leaf.
    */
-  leaf: ['#6f9c5a', '#86b06a', '#9dc47c', '#b3d68e', '#c6e29e', '#d8ecb2'],
+  leaf: ['#5a6152', '#6f7767', '#848c7c', '#99a191', '#aeb6a6', '#c3cbbb'],
   /** Standing timber: trunks, palisade posts, the woodpile. */
-  bark: ['#3d2916', '#52361c', '#6b4724', '#85582c', '#9e6c38', '#b78446'],
+  bark: ['#332b21', '#453a2d', '#584b3a', '#6b5c48', '#816f57', '#988468'],
   /** Sawn and dressed timber. Lighter and yellower than bark: a cut face. */
-  wood: ['#6d4826', '#85582f', '#9c6b3a', '#b47f46', '#c89457', '#dcaa6d'],
-  /** Granite. Warm-neutral rather than blue-grey, so it sits beside the wood. */
-  stone: ['#4f5250', '#676a66', '#7f827c', '#979a92', '#b0b2a9', '#c8cabf'],
-  /** Wet-to-dry shore sand. */
-  sand: ['#9c7845', '#b48e57', '#c5a36c', '#d6b884', '#e4ca9c', '#f0dcb8'],
+  wood: ['#3e3324', '#544534', '#6a5843', '#806c53', '#9a8568', '#bcab8d'],
+  /** Granite. Nearly neutral, faintly warm, so it sits beside the wood. */
+  stone: ['#353735', '#4b4d4a', '#636560', '#7c7e77', '#9b9c93', '#c2c3ba'],
+  /** Wet-to-dry shore sand, and the tinted base for tracks and tilled ground. */
+  sand: ['#57482f', '#6f5e40', '#877453', '#a08c68', '#bda882', '#dacbae'],
   /** Cut thatch, dry pasture, roofing. */
-  straw: ['#8a6a2e', '#a3813a', '#bb9848', '#d0ae5c', '#e2c478', '#f0d998'],
-  /** Still fresh water. */
-  water: ['#1a5480', '#1f6b9c', '#2b85bc', '#3898cf', '#4fb0e0', '#7fcdf0'],
-  steel: ['#4a5865', '#66737f', '#828f9c', '#9eabb8', '#bcc8d4', '#dde6ef'],
-  cloth: ['#9c8264', '#b39a7c', '#c8ae90', '#d9c1a4', '#e8d4ba', '#f4e6d2'],
-  clay: ['#6d3a26', '#874c31', '#a25f3e', '#b8734c', '#cb8a62', '#daa17c'],
-  glass: ['#4f95a6', '#6cb0be', '#8ac8d4', '#a6dbe4', '#c0e9f0', '#d8f4f8'],
-  gold: ['#8a6418', '#ab7f24', '#c89a34', '#dcb84a', '#efd268', '#ffe98c'],
-  /** Live coals: a dark crust with fire in the cracks. Ends far brighter. */
+  straw: ['#463b26', '#5c4f34', '#726343', '#8a7a54', '#a5966e', '#c9bd96'],
+  /** Still fresh water. Allowed more chroma than the land, but not much more. */
+  water: ['#30474f', '#3b5b66', '#48727f', '#578a98', '#71a4b1', '#96c2ce'],
+  steel: ['#3f474f', '#555d66', '#6c747d', '#848c95', '#a2aab2', '#c6ccd2'],
+  /**
+   * Cloth, and rope. The light end used to run to near-white, which made a
+   * rope coil vanish against pale sand at play distance. It now tops out around
+   * 0.65 luminance against sand's 0.80, so the two separate by value.
+   */
+  cloth: ['#463c2e', '#5a4e3c', '#6e614b', '#83755c', '#9a8b70', '#b3a488'],
+  clay: ['#4e3226', '#63402f', '#785039', '#8d6146', '#a37556', '#b98c6c'],
+  glass: ['#3f5d66', '#52757f', '#668d98', '#7ea5b0', '#9bbfc8', '#bcd8de'],
+  /** An item, so it keeps its chroma. Gold that is not loud is just brass. */
+  gold: ['#6b4d13', '#8d681c', '#af8528', '#c9a03a', '#dfba58', '#f2d485'],
+  /**
+   * Live coals: a dark crust with fire in the cracks. The most saturated thing
+   * in the game, on purpose. Fire is the one surface that should be loud.
+   */
   ember: ['#3d1608', '#6b2410', '#a63817', '#d95420', '#ff7a2f', '#ffc247'],
+  /**
+   * Ripe fruit. Exists because the apple's kitbash recipe asks for `ember`, a
+   * fire ramp, so a Red Apple renders pumpkin orange in the world and in its
+   * icon. Wiring this up needs one line in kitbash.ts's material map and one in
+   * the apple recipe; nothing outside those two files has to change.
+   */
+  fruit: ['#3f1614', '#5e211d', '#802e26', '#a03d31', '#bb5343', '#d1745f'],
 } as const
 
 /** A ramp step as a three.js int. `RAMP.grass[3]` and `hex('grass', 3)` agree. */
@@ -80,43 +106,53 @@ export function hex(ramp: keyof typeof RAMP, step: number): number {
 }
 
 export const BAND0 = {
-  sky: 0x7ec8e3,
+  /** Softened from a 44%-saturation cyan; sky is a large area and it glared. */
+  sky: 0x9cc6d6,
   fogNear: 34,
   fogFar: 96,
 
-  // Sampled off RAMP.grass, mid to light. These are reference values for
-  // anything that needs a flat green; the ground itself is textured.
-  grass: [0x5d9634, 0x4a7a2a, 0x74b241, 0x3a6023],
-  dirt: 0x977345,
-  sand: 0xd6b884,
-  rock: 0x979a92,
-  water: 0x3898cf,
-  waterDeep: 0x1a5480,
+  // Sampled off RAMP.grass. Reference values for anything needing a flat green;
+  // the ground itself is textured.
+  grass: [0x617043, 0x4a5834, 0x7c8c59, 0x374227],
+  dirt: 0x705843,
+  sand: 0xa08c68,
+  rock: 0x7c7e77,
+  water: 0x48727f,
+  waterDeep: 0x30474f,
 
-  bark: 0x85582c,
-  barkDark: 0x52361c,
+  bark: 0x6b5c48,
+  barkDark: 0x453a2d,
 
   /**
    * Three canopy tints, one per cone tier, multiplied over the pale `foliage`
    * bitmap. Ordered dark to light so the lowest tier of a tree is its deepest
-   * green and the crown catches the most sun, which is the single cheapest way
-   * to make a stack of cones read as a tree rather than as a stack of cones.
+   * green and the crown catches the most sun, which is the cheapest way to make
+   * a stack of cones read as a tree rather than as a stack of cones.
+   *
+   * Held near 36% saturation. Tint times map compounds, so these land at about
+   * 43% on screen; anything more saturated here and the canopy goes emerald.
    */
-  leaf: [0x2f6b28, 0x3f8a33, 0x59a83f],
+  leaf: [0x4a5738, 0x5c6b45, 0x707f54],
 
   sun: 0xfff4dc,
-  skyLight: 0xa8d8ee,
-  groundLight: 0x4a5c30,
+  skyLight: 0xb4d2e0,
+  groundLight: 0x555c46,
 
   ember: 0xff7a2f,
   flame: 0xffc247,
 
-  // The player. A saturated tunic against saturated grass needs a hue that is
-  // nowhere else in the scene, or the character vanishes into the field.
-  tunic: 0xc8443c,
-  trouser: 0x3c4a7a,
+  /**
+   * The player. Two jobs, and the second one was being failed: the tunic needs
+   * a hue that is nowhere else in the scene, *and* a luminance clearly off the
+   * ground's, or the character cannot be found in a greyscale check. The old
+   * tunic sat at 0.37 against a field averaging 0.42 and disappeared. This one
+   * is a deep red at 0.26, well under the field, and the ramp from hair (0.16)
+   * through tunic to skin (0.75) gives the figure its own internal contrast.
+   */
+  tunic: 0x9e332c,
+  trouser: 0x2e3752,
   skin: 0xe8b98a,
-  hair: 0x4a3220,
+  hair: 0x33241a,
 } as const
 
 /**
@@ -126,15 +162,15 @@ export const BAND0 = {
  * that reads as "this material in full sun".
  */
 export const MATERIAL_COLOR = {
-  wood: 0xb47f46,
-  steel: 0x9eabb8,
-  stone: 0x979a92,
-  cloth: 0xd9c1a4,
-  glass: 0xa6dbe4,
-  leaf: 0x3f8a33,
-  water: 0x3898cf,
+  wood: 0x806c53,
+  steel: 0x848c95,
+  stone: 0x7c7e77,
+  cloth: 0x83755c,
+  glass: 0x7ea5b0,
+  leaf: 0x5c6b45,
+  water: 0x578a98,
   ember: 0xff7a2f,
-  gold: 0xdcb84a,
-  straw: 0xd0ae5c,
-  clay: 0xb8734c,
+  gold: 0xc9a03a,
+  straw: 0x8a7a54,
+  clay: 0x8d6146,
 } as const

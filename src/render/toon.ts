@@ -25,17 +25,6 @@
 import * as THREE from 'three'
 
 /**
- * Vertical resolution of the internal buffer.
- *
- * Raised twice on playtest feedback: 240 was unreadable, 400 was still too
- * soft. At 720 the upscale to a 1080p display is 1.5x, which keeps edges hard
- * and the hand-drawn textures legible without the frame reading as pixellated.
- * The look now comes from the textures and the cel ramp rather than from
- * throwing resolution away.
- */
-export const PIXEL_HEIGHT = 720
-
-/**
  * Let the toon gradient ramp carry colour.
  *
  * Stock three reads only the red channel of `gradientMap`, so a toon ramp can
@@ -78,18 +67,88 @@ vec3 getGradientIrradiance( vec3 normal, vec3 lightDirection ) {
 }
 `
 
+/**
+ * A hard rim on the shadow side of everything.
+ *
+ * This is the other half of the readability problem the outlines solve. An
+ * outline says where an object ends; a rim says which way it faces and how far
+ * it stands off what is behind it. Together they are why shapes in Hyper Light
+ * Drifter and Don't Starve sit *in front of* the ground rather than on it.
+ *
+ * Three deliberate choices:
+ *
+ *   - it is `smoothstep`ed to a narrow edge rather than a smooth falloff,
+ *     because a soft fresnel glow is a PBR idea and reads as wet plastic under
+ *     flat shading. Quantised, it reads as drawn.
+ *   - it is strongest where the key light is weakest, so it lands on the
+ *     silhouette that would otherwise disappear into shadow, not on the lit
+ *     side that already reads.
+ *   - it takes its colour from the light, so it is warm under the sun and
+ *     orange next to a fire, and a band retint carries through it.
+ *
+ * The ground gets almost none of it for free: an upward normal under this
+ * camera sits nowhere near grazing, so the fresnel term stays near zero and
+ * only things that stand up are rimmed.
+ */
+THREE.ShaderChunk.lights_toon_pars_fragment = /* glsl */ `
+varying vec3 vViewPosition;
+
+struct ToonMaterial {
+
+	vec3 diffuseColor;
+
+};
+
+void RE_Direct_Toon( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in ToonMaterial material, inout ReflectedLight reflectedLight ) {
+
+	vec3 irradiance = getGradientIrradiance( geometryNormal, directLight.direction ) * directLight.color;
+
+	reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );
+
+	float grazing = 1.0 - abs( dot( geometryNormal, geometryViewDir ) );
+	float rim = smoothstep( 0.55, 0.78, grazing );
+	float away = 1.0 - smoothstep( -0.15, 0.45, dot( geometryNormal, directLight.direction ) );
+
+	reflectedLight.directDiffuse += directLight.color * rim * away * 0.5;
+
+}
+
+void RE_IndirectDiffuse_Toon( const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in ToonMaterial material, inout ReflectedLight reflectedLight ) {
+
+	reflectedLight.indirectDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );
+
+}
+
+#define RE_Direct				RE_Direct_Toon
+#define RE_IndirectDiffuse		RE_IndirectDiffuse_Toon
+`
+
 let ramp: THREE.DataTexture | null = null
 
 /**
  * The lighting ramp, eight texels wide, sampled at `dot(N,L) * 0.5 + 0.5`.
- * Texel i therefore covers dot(N,L) from `i/4 - 1` to `(i+1)/4 - 1`, which puts
- * the terminator exactly on the texel 3/4 boundary.
+ * Texel i therefore covers dot(N,L) from `i/4 - 1` to `(i+1)/4 - 1`.
  *
- * It is eight texels to place three *visual* bands precisely, not to have eight
- * of them. Texels 0-3 are one cool shadow with a barely perceptible inner step,
- * texel 4 is a single narrow warm terminator, and 5-7 are one lit band that
- * lifts very slightly toward the sun. A narrow terminator is what separates
- * shaped cel work from a two-tone stencil.
+ * Three bands, and the gaps between them are the entire point.
+ *
+ * The previous version had eight subtly different values, which is not cel
+ * shading, it is a smooth falloff quantised so finely that nothing reads as a
+ * step. Its top three bands were 0.94, 1.00 and 1.00: a 6% difference, which is
+ * invisible, so every lit surface collapsed into one tone and the frame looked
+ * like plain lambert. Bands only read if the jump between them is larger than
+ * the variation inside them.
+ *
+ * So: 0.26 shadow, 0.56 terminator, 1.00 light. Roughly a factor of two at each
+ * step, held flat across four, two and two texels. The terminator is two texels
+ * wide (dot(N,L) from 0 to 0.5) because a one-texel band never lands on faceted
+ * low-poly geometry, where each face has a single constant normal and therefore
+ * a single band. A narrow terminator is correct for smooth surfaces and useless
+ * here.
+ *
+ * The boundary at dot(N,L) = 0.5 is why the sun sits at ~44 degrees of
+ * elevation rather than 36: flat ground then lands at 0.69, comfortably inside
+ * the top band, so only genuinely sloped ground breaks into the terminator.
+ * Drop the sun lower and the whole clearing bands into blotches.
  */
 export function toonRamp(): THREE.DataTexture {
   if (ramp) return ramp
@@ -97,14 +156,14 @@ export function toonRamp(): THREE.DataTexture {
   // r, g, b per band. Values multiply the key light, so blue here means the
   // shadow side is lit by a blue version of the sun rather than by nothing.
   const bands = [
-    [0.30, 0.38, 0.58], // facing fully away: deep, cool
-    [0.30, 0.38, 0.58],
-    [0.32, 0.40, 0.60],
-    [0.36, 0.45, 0.63], // the shadow lifts a little as it approaches the turn
-    [0.80, 0.55, 0.38], // terminator: one narrow band of hot orange
-    [0.94, 0.82, 0.62], // and one golden step out of it, or the turn is a jump
-    [1.00, 0.96, 0.87],
-    [1.00, 0.99, 0.93], // square to the sun
+    [0.26, 0.33, 0.52], // shadow: one flat cool band, no internal shape
+    [0.26, 0.33, 0.52],
+    [0.26, 0.33, 0.52],
+    [0.27, 0.34, 0.53],
+    [0.56, 0.41, 0.33], // terminator: a real value step, warm and dirty
+    [0.56, 0.41, 0.33],
+    [1.00, 0.94, 0.82], // light
+    [1.00, 0.98, 0.90],
   ]
 
   const data = new Uint8Array(bands.length * 4)
@@ -140,18 +199,25 @@ export function toonUnique(params: THREE.MeshToonMaterialParameters): THREE.Mesh
   return new THREE.MeshToonMaterial({ gradientMap: toonRamp(), ...params })
 }
 
+/** Retina is worth having, 3x is not worth the fill rate. */
+const MAX_PIXEL_RATIO = 2
+
 /**
- * Size the drawing buffer to ~PIXEL_HEIGHT lines while leaving the CSS size
- * alone, so the browser scales it up. `false` for `updateStyle` is the whole
- * trick; without it three.js overwrites the CSS size and the pixellation
- * disappears.
+ * Render at the display's own resolution.
+ *
+ * This replaces the 720-line buffer, and it is a deliberate change of identity
+ * rather than a tuning pass. Chunky pixels were doing two jobs: hiding coarse
+ * geometry, and being the style. The first is no longer needed now that the
+ * geometry is kitbashed and textured, and the second is now carried by the cel
+ * bands, the outlines and the drawn textures, all of which get *better* with
+ * resolution while a downsample only ever destroys them.
+ *
+ * `false` for `updateStyle` stays: the canvas is sized by CSS to fill the
+ * window and three must not overwrite that.
  */
-export function sizeToPixelBuffer(renderer: THREE.WebGLRenderer, w: number, h: number): void {
-  const aspect = w / h
-  const bufferH = PIXEL_HEIGHT
-  const bufferW = Math.round(bufferH * aspect)
-  renderer.setPixelRatio(1)
-  renderer.setSize(bufferW, bufferH, false)
+export function sizeToDisplay(renderer: THREE.WebGLRenderer, w: number, h: number): void {
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO))
+  renderer.setSize(w, h, false)
 }
 
 // ------------------------------------------------------------- contact shadow
@@ -235,13 +301,19 @@ vec3 toSrgb( vec3 c ) {
 void main() {
   vec3 c = texture2D( tFrame, vUv ).rgb;
 
-  // Highlight shoulder, in linear light. A flame core or a sunlit thatch roof
-  // rolls off into warm white instead of clipping every channel to 1.0 at once,
-  // which is what turns a fire into a white hole.
-  vec3 knee = vec3( 0.76 );
-  vec3 head = vec3( 1.0 ) - knee;
-  vec3 over = max( c - knee, vec3( 0.0 ) );
-  c = min( c, knee ) + head * ( vec3( 1.0 ) - exp( -over / head ) );
+  // Highlight shoulder, in linear light, driven by the brightest channel and
+  // applied to all three equally.
+  //
+  // Rolling off per channel is what turned firelit boulders pale pink: red
+  // clipped first, so it stopped rising while green and blue kept climbing, and
+  // a saturated orange desaturated into nothing on its way to white. Scaling by
+  // one factor keeps the hue and the saturation and only spends the value, so a
+  // very hot rock stays a very hot orange rock.
+  float peak = max( c.r, max( c.g, c.b ) );
+  float knee = 0.76;
+  float head = 1.0 - knee;
+  float rolled = min( peak, knee ) + head * ( 1.0 - exp( -max( peak - knee, 0.0 ) / head ) );
+  c *= peak > 1e-4 ? rolled / peak : 1.0;
 
   c = toSrgb( c );
 
@@ -261,6 +333,17 @@ void main() {
   c = clamp( ( c - 0.46 ) * 1.13 + 0.46, 0.0, 1.0 );
   float g = dot( c, LUMA );
   c = clamp( mix( vec3( g ), c, mix( 0.80, 1.14, smoothstep( 0.04, 0.58, l ) ) ), 0.0, 1.0 );
+
+  // A cooler, flatter, darker band along the top edge.
+  //
+  // The isometric rig never shows sky: the ground plane runs from the bottom of
+  // the frame to the top, so there is no horizon and nothing tells the eye which
+  // part of the frame is far away. Fog alone cannot do it, because at this zoom
+  // the depth across the frame is only about twenty metres. This is the same
+  // trick a painter uses when the horizon is out of shot.
+  float far = smoothstep( 0.66, 1.0, vUv.y );
+  vec3 distant = mix( vec3( dot( c, LUMA ) ), c, 0.62 ) * vec3( 0.88, 0.92, 1.02 );
+  c = mix( c, distant, far * 0.55 );
 
   // Vignette, cool rather than black, so the corners read as air between the
   // camera and the far trees rather than as a lens.

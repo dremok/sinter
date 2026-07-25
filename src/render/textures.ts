@@ -45,19 +45,35 @@
  * Everything else stays at 64, because props are small and clamp to one tile
  * anyway. Their gain is not size, it is structure: see below.
  *
- * ## Structure, not noise
+ * ## Few marks, big marks
  *
- * The other half of the second pass's problem was that bark, stone and plank
- * were per-texel random picks from a three-colour list. Per-texel randomness
- * reads as dirt on the lens, never as a material. Everything here is built from
- * deliberate shapes instead: grain columns that bend around knots, Voronoi
- * blocks with mortar and a lit bevel, boards with joins and staggered butt
- * ends, grass in clumps with a dark base and a lit tip.
+ * The pass before this one replaced per-texel randomness with structure, which
+ * was right, and then kept the density of a noise field, which was wrong. An
+ * art review of the rendered frame called the ground "green static" and it was
+ * correct: twenty-six thousand three-texel grass clumps on one tile is a noise
+ * function wearing a costume. At 720 lines, and heading toward native, fine
+ * variation stops reading as texture and starts reading as grain on the lens.
  *
- * The value range matters as much as the shapes. Each texture spans most of its
- * six-step ramp (see palette.ts), because the toon shader quantises lighting to
- * three bands: if a texture's own range is narrower than one band, the whole
- * surface collapses to a single flat colour and reads as mud.
+ * So the rule is Don't Starve's rather than a 16-bit tileset's. A surface is
+ * mostly one flat tone carrying a few deliberate marks: a couple of grain
+ * lines, one knot, a few chips. Contrast comes from the gap between the flat
+ * tone and those marks, not from having twenty tones of brown at texel scale,
+ * which is mush at every resolution. Item materials go furthest in this
+ * direction, because item parts are small on screen and the outline pass and
+ * the cel band should be doing the work.
+ *
+ * Grass tufts also now each pick their own direction. Every blade used to grow
+ * along -v, which on a ground plane is one fixed world direction, so the whole
+ * field ran the same diagonal and read as a woven carpet.
+ *
+ * ## Value does the reading
+ *
+ * Each texture spans most of its six-step ramp (see palette.ts), because the
+ * toon shader quantises lighting to three bands: if a texture's own range is
+ * narrower than one band, the surface collapses to a flat colour and reads as
+ * mud. The ground gets the widest span of all, as large soft drift rather than
+ * as speckle, because a greyscale check showed the field as one uniform value
+ * with nothing for the eye to rest on.
  *
  * Two rules from D14 that still hold:
  *   - NearestFilter always. Linear filtering blurs a pixel tile into porridge.

@@ -1,29 +1,32 @@
 /**
  * Fire, as a thing you look at.
  *
- * The previous version was two cones and a point light. It read as an orange
+ * The first version was two cones and a point light. It read as an orange
  * arrow, because a flame is not a shape, it is a shape that will not hold
  * still. Everything here is in service of that:
  *
  *   - a cluster of teardrop tongues rather than one form, so the silhouette
  *     changes as they move against each other
+ *   - each tongue alpha-cut by a scrolling noise mask, so the OUTLINE breaks up
+ *     and reforms. This is the part that matters. Scaling and rotating a solid
+ *     shape gives you a wobbling solid shape; fire reads because its edge is
+ *     never the same edge twice, and no amount of tinting the burning object
+ *     substitutes for it
  *   - a bright core tongue taller than the cluster, so something licks up out
  *     of the mass instead of the whole mass pulsing together
  *   - stepped flicker per tongue at different rates, roughly 7 to 20 Hz, which
  *     is where real flame sits. A smooth sine reads as breathing, not burning
- *   - square pixel embers rising and fading, which is what makes it read at a
- *     distance where the tongues are only a dozen pixels tall
- *   - smoke, and a light that pulses with the flame so the warmth on nearby
- *     geometry moves too
+ *   - square pixel embers rising and fading, and smoke above them
+ *   - a light that pulses with the flame, so the warmth on nearby geometry
+ *     moves too
  *
- * Nothing here calls Math.random. Every particle and every flicker step comes
- * from a hash of its own index and the fire's world position, so a seed
+ * Nothing here calls Math.random. Every particle, every flicker step and the
+ * noise mask itself come from a hash of index and position, so a seed
  * reproduces a frame exactly and the headless screenshots stay comparable.
  */
 
 import * as THREE from 'three'
 import { BAND0 } from './palette'
-import { PIXEL_HEIGHT } from './toon'
 
 /** Deterministic 0..1 noise. Stands in for the RNG, which is not the right tool
  *  here: this has to be a pure function of (particle, time), not a stream. */
@@ -32,20 +35,70 @@ function hash01(n: number): number {
   return s - Math.floor(s)
 }
 
+// ------------------------------------------------------------------ the mask
+
+const NOISE_SIZE = 32
+
+let noiseTex: THREE.DataTexture | null = null
+
+/**
+ * Tiling value noise, smoothed, single channel.
+ *
+ * Wraps in both axes so the mask can scroll forever without a seam. Coarse on
+ * purpose: eight cells across means the blobs are the size of a flame's own
+ * lobes, which is what makes the erosion read as fire rather than as static.
+ */
+function flameNoise(): THREE.DataTexture {
+  if (noiseTex) return noiseTex
+
+  const cells = 8
+  const grid = new Float32Array(cells * cells)
+  for (let i = 0; i < grid.length; i++) grid[i] = hash01(i * 17.3 + 5.1)
+
+  const fade = (t: number): number => t * t * (3 - 2 * t)
+  const wrap = (v: number): number => ((v % cells) + cells) % cells
+  const at = (x: number, y: number): number => grid[wrap(y) * cells + wrap(x)]!
+
+  const data = new Uint8Array(NOISE_SIZE * NOISE_SIZE)
+  for (let y = 0; y < NOISE_SIZE; y++) {
+    for (let x = 0; x < NOISE_SIZE; x++) {
+      const gx = (x / NOISE_SIZE) * cells
+      const gy = (y / NOISE_SIZE) * cells
+      const x0 = Math.floor(gx)
+      const y0 = Math.floor(gy)
+      const tx = fade(gx - x0)
+      const ty = fade(gy - y0)
+      const top = at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx
+      const bot = at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx
+      data[y * NOISE_SIZE + x] = Math.round((top * (1 - ty) + bot * ty) * 255)
+    }
+  }
+
+  noiseTex = new THREE.DataTexture(data, NOISE_SIZE, NOISE_SIZE, THREE.RedFormat)
+  noiseTex.wrapS = THREE.RepeatWrapping
+  noiseTex.wrapT = THREE.RepeatWrapping
+  noiseTex.minFilter = THREE.LinearFilter
+  noiseTex.magFilter = THREE.LinearFilter
+  noiseTex.generateMipmaps = false
+  noiseTex.needsUpdate = true
+  return noiseTex
+}
+
+// ------------------------------------------------------------------ geometry
+
 /**
  * A teardrop, revolved. Widest a third of the way up and drawn to a point, with
- * few enough segments to stay faceted; a smooth flame reads as a balloon once
- * the frame is pixellated.
+ * few enough segments to stay faceted; a smooth flame reads as a balloon.
  */
 function tongueGeometry(): THREE.LatheGeometry {
   const profile: THREE.Vector2[] = []
-  const rings = 8
+  const rings = 10
   for (let i = 0; i <= rings; i++) {
     const t = i / rings
     const r = Math.sin(Math.pow(t, 0.62) * Math.PI) * (1 - t * 0.28) * 0.5
     profile.push(new THREE.Vector2(Math.max(r, 1e-4), t))
   }
-  return new THREE.LatheGeometry(profile, 7)
+  return new THREE.LatheGeometry(profile, 9)
 }
 
 const TONGUE = tongueGeometry()
@@ -57,6 +110,38 @@ const FLAME = new THREE.Color(BAND0.flame)
 const DEEP = EMBER.clone().lerp(new THREE.Color(0x8c1e05), 0.55)
 const CORE = FLAME.clone().lerp(new THREE.Color(0xffffff), 0.28)
 
+// ------------------------------------------------------------------- tongues
+
+const TONGUE_VERT = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+}
+`
+
+/**
+ * Erode the tongue with scrolling noise.
+ *
+ * The mask scrolls downward in UV, so the holes travel *up* the flame, and the
+ * cut threshold rises with height, so the tip shreds into separate licks while
+ * the base stays solid. That gradient is the whole illusion; a uniform cut just
+ * makes a moth-eaten cone.
+ */
+const TONGUE_FRAG = /* glsl */ `
+uniform sampler2D uNoise;
+uniform vec3 uColor;
+uniform float uTime;
+uniform float uCut;
+varying vec2 vUv;
+
+void main() {
+  float n = texture2D( uNoise, vec2( vUv.x * 2.0, vUv.y * 0.9 - uTime ) ).r;
+  if ( n < uCut + vUv.y * 0.78 ) discard;
+  gl_FragColor = vec4( uColor, 1.0 );
+}
+`
+
 interface TongueSpec {
   color: THREE.Color
   /** Height and width as a fraction of the fire's size. */
@@ -67,38 +152,58 @@ interface TongueSpec {
   radius: number
   /** Flicker rate in Hz. Spread out so the cluster never beats in time. */
   rate: number
+  /** How aggressively the noise eats it. The core survives; the outer lobes are
+   *  mostly holes, which is what gives the fire a ragged edge. */
+  cut: number
+  /** How fast the mask scrolls, in UV per second. */
+  scroll: number
 }
 
 const TONGUES: readonly TongueSpec[] = [
-  { color: DEEP, height: 0.86, width: 1.05, angle: 0.0, radius: 0.17, rate: 7 },
-  { color: EMBER, height: 0.94, width: 0.92, angle: 2.09, radius: 0.16, rate: 11 },
-  { color: EMBER, height: 0.8, width: 0.86, angle: 4.19, radius: 0.18, rate: 9 },
-  { color: FLAME, height: 1.04, width: 0.68, angle: 0.0, radius: 0.0, rate: 14 },
-  { color: CORE, height: 1.18, width: 0.46, angle: 0.0, radius: 0.0, rate: 19 },
+  { color: DEEP, height: 0.9, width: 1.1, angle: 0.0, radius: 0.17, rate: 7, cut: 0.3, scroll: 1.1 },
+  { color: EMBER, height: 1.0, width: 0.95, angle: 2.09, radius: 0.16, rate: 11, cut: 0.26, scroll: 1.4 },
+  { color: EMBER, height: 0.84, width: 0.9, angle: 4.19, radius: 0.18, rate: 9, cut: 0.28, scroll: 1.25 },
+  { color: FLAME, height: 1.06, width: 0.7, angle: 0.0, radius: 0.0, rate: 14, cut: 0.16, scroll: 1.7 },
+  { color: CORE, height: 1.2, width: 0.48, angle: 0.0, radius: 0.0, rate: 19, cut: 0.08, scroll: 2.1 },
 ]
 
-const EMBERS = 14
-const SMOKE = 8
+/** One material per tongue role, shared by every fire in the scene. The time
+ *  uniform is set per draw in `onBeforeRender`, which is what lets two posts
+ *  alight side by side flicker out of step without a material each. */
+const tongueMaterials = TONGUES.map(
+  (spec) =>
+    new THREE.ShaderMaterial({
+      uniforms: {
+        uNoise: { value: flameNoise() },
+        uColor: { value: spec.color },
+        uTime: { value: 0 },
+        uCut: { value: spec.cut },
+      },
+      vertexShader: TONGUE_VERT,
+      fragmentShader: TONGUE_FRAG,
+      side: THREE.DoubleSide,
+    }),
+)
 
-// --------------------------------------------------------------- particles
+// ----------------------------------------------------------------- particles
 
 /**
  * Points with a per-particle size and alpha.
  *
  * `PointsMaterial` has neither, and both are what separate embers that rise and
- * die from a fixed constellation of dots. The size is given in world units and
- * converted here, using the fact that the drawing buffer is always PIXEL_HEIGHT
- * tall whatever the window does, so the conversion needs no uniform and no
- * resize plumbing.
+ * die from a fixed constellation of dots. Size is in world units and converted
+ * with the live drawing-buffer height, so it survives the move to native
+ * resolution and a window resize without anything being hardcoded.
  */
 const PARTICLE_VERT = /* glsl */ `
 attribute float aSize;
 attribute vec4 aTint;
+uniform float uHalfHeight;
 varying vec4 vTint;
 void main() {
   vTint = aTint;
   gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-  gl_PointSize = max( aSize * projectionMatrix[1][1] * ${(PIXEL_HEIGHT / 2).toFixed(1)}, 1.0 );
+  gl_PointSize = max( aSize * projectionMatrix[1][1] * uHalfHeight, 1.0 );
 }
 `
 
@@ -115,13 +220,37 @@ void main() {
 }
 `
 
+function particleMaterial(round: boolean, blending: THREE.Blending): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: { uRound: { value: round ? 1 : 0 }, uHalfHeight: { value: 360 } },
+    vertexShader: PARTICLE_VERT,
+    fragmentShader: PARTICLE_FRAG,
+    transparent: true,
+    depthWrite: false,
+    blending,
+  })
+}
+
+const emberMaterial = particleMaterial(false, THREE.AdditiveBlending)
+const smokeMaterial = particleMaterial(true, THREE.NormalBlending)
+
+/** Tell the particle shaders how tall the drawing buffer is, so a world-space
+ *  ember size lands on the same fraction of the screen at any resolution. */
+export function setFlameViewport(bufferHeight: number): void {
+  emberMaterial.uniforms.uHalfHeight!.value = bufferHeight / 2
+  smokeMaterial.uniforms.uHalfHeight!.value = bufferHeight / 2
+}
+
+const EMBERS = 16
+const SMOKE = 9
+
 class Particles {
   readonly points: THREE.Points
   private readonly position: THREE.BufferAttribute
   private readonly size: THREE.BufferAttribute
   private readonly tint: THREE.BufferAttribute
 
-  constructor(count: number, round: boolean, blending: THREE.Blending) {
+  constructor(count: number, material: THREE.ShaderMaterial) {
     const geo = new THREE.BufferGeometry()
     this.position = new THREE.BufferAttribute(new Float32Array(count * 3), 3)
     this.size = new THREE.BufferAttribute(new Float32Array(count), 1)
@@ -129,21 +258,10 @@ class Particles {
     geo.setAttribute('position', this.position)
     geo.setAttribute('aSize', this.size)
     geo.setAttribute('aTint', this.tint)
-    // The bounding sphere is never right for particles that are rewritten every
-    // frame, and a wrong one culls the whole system at the screen edge.
-    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 6)
 
-    this.points = new THREE.Points(
-      geo,
-      new THREE.ShaderMaterial({
-        uniforms: { uRound: { value: round ? 1 : 0 } },
-        vertexShader: PARTICLE_VERT,
-        fragmentShader: PARTICLE_FRAG,
-        transparent: true,
-        depthWrite: false,
-        blending,
-      }),
-    )
+    this.points = new THREE.Points(geo, material)
+    // The bounding sphere is never right for particles rewritten every frame,
+    // and a wrong one culls the whole system at the edge of the screen.
     this.points.frustumCulled = false
   }
 
@@ -161,11 +279,10 @@ class Particles {
 
   dispose(): void {
     this.points.geometry.dispose()
-    ;(this.points.material as THREE.Material).dispose()
   }
 }
 
-// -------------------------------------------------------------------- fire
+// ---------------------------------------------------------------------- fire
 
 const SMOKE_COLOR = new THREE.Color(0x6b6058)
 const scratchColor = new THREE.Color()
@@ -175,48 +292,45 @@ export class Flame {
   readonly light: THREE.PointLight
 
   private readonly tongues: THREE.Mesh[] = []
-  private readonly materials: THREE.MeshBasicMaterial[] = []
-  private readonly embers = new Particles(EMBERS, false, THREE.AdditiveBlending)
-  private readonly smoke = new Particles(SMOKE, true, THREE.NormalBlending)
-  private readonly glow: THREE.Mesh
+  private readonly embers = new Particles(EMBERS, emberMaterial)
+  private readonly smoke = new Particles(SMOKE, smokeMaterial)
 
   /** Per-fire phase offset, so two posts alight side by side do not flicker in
    *  lockstep. Derived from where the fire is, so it is stable across a replay. */
   private readonly seed: number
+  /** Read by each tongue's `onBeforeRender`, which is how a shared material can
+   *  still draw a different moment of the animation per fire. */
+  private phase = 0
 
   constructor(at: THREE.Vector3) {
     this.seed = hash01(at.x * 12.9898 + at.z * 78.233) * 97
 
-    for (const spec of TONGUES) {
-      const mat = new THREE.MeshBasicMaterial({ color: spec.color, fog: false })
+    for (let i = 0; i < TONGUES.length; i++) {
+      const spec = TONGUES[i]!
+      const mat = tongueMaterials[i]!
       const mesh = new THREE.Mesh(TONGUE, mat)
-      this.materials.push(mat)
+      mesh.userData.noShadow = true
+      mesh.userData.noOutline = true
+      mesh.onBeforeRender = () => {
+        mat.uniforms.uTime!.value = this.phase * spec.scroll
+      }
       this.tongues.push(mesh)
       this.group.add(mesh)
     }
 
-    // A soft additive envelope. Does most of the work of making the fire look
-    // hot rather than orange, and costs one more draw of the same geometry.
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: EMBER,
-      transparent: true,
-      opacity: 0.3,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      fog: false,
-    })
-    this.glow = new THREE.Mesh(TONGUE, glowMat)
-    this.materials.push(glowMat)
-    this.group.add(this.glow)
-
     this.group.add(this.embers.points, this.smoke.points)
 
-    // decay 1.2 rather than a physical 2. Inverse square puts almost all of a
-    // fire's light inside the first half metre, so anything standing in the
-    // flames (a cooking tripod, a fence post) blows to white while the ground
-    // two metres away gets nothing. A flatter falloff spends the same light
-    // over the area the player can actually see it in.
-    this.light = new THREE.PointLight(BAND0.ember, 0, 9, 1.2)
+    /**
+     * decay 1.4 rather than a physical 2.
+     *
+     * The two complaints about fire light pull in opposite directions: it must
+     * reach a character three metres away, and it must not blow a boulder one
+     * metre away into a bright structureless mass. Inverse square cannot do
+     * both, because it spends almost everything inside the first half metre. A
+     * flatter falloff, a light sitting above the flame rather than in it, and a
+     * hue-preserving shoulder in the grade solve both at once.
+     */
+    this.light = new THREE.PointLight(BAND0.ember, 0, 12, 1.4)
     this.group.add(this.light)
   }
 
@@ -231,6 +345,7 @@ export class Flame {
     this.group.position.copy(at)
 
     const t = age + this.seed
+    this.phase = t
 
     for (let i = 0; i < TONGUES.length; i++) {
       const spec = TONGUES[i]!
@@ -254,12 +369,6 @@ export class Flame {
       mesh.rotation.set((m - 0.5) * 0.34 * spec.height, ang, (n - 0.5) * 0.34 * spec.height)
     }
 
-    const glowStep = Math.floor(t * 6)
-    const glowN = hash01(glowStep + this.seed)
-    this.glow.scale.set(size * heat * 1.6, size * heat * 1.35 * (0.9 + glowN * 0.2), size * heat * 1.6)
-    this.glow.position.y = size * heat * 0.1
-    ;(this.glow.material as THREE.MeshBasicMaterial).opacity = 0.18 + heat * 0.16
-
     this.updateEmbers(heat, size, t)
     this.updateSmoke(heat, size, t)
 
@@ -267,11 +376,12 @@ export class Flame {
     // like the fire as a whole, not like its tips.
     this.light.visible = light
     if (light) {
-      const pulse = 0.76 + hash01(Math.floor(t * 5) + this.seed) * 0.3
-      this.light.position.y = size * heat * 0.9
-      this.light.intensity = heat * heat * 4.5 * pulse * size
-      this.light.distance = 4 + heat * size * 6
-      this.light.color.copy(EMBER).lerp(FLAME, pulse * 0.45)
+      const pulse = 0.78 + hash01(Math.floor(t * 5) + this.seed) * 0.28
+      // Above the flame, not inside it. Nothing should sit 20cm from a light
+      // that is meant to warm a clearing.
+      this.light.position.y = size * (0.7 + heat * 0.6)
+      this.light.intensity = heat * heat * 9 * pulse * size
+      this.light.distance = 6 + heat * size * 9
     }
   }
 
@@ -335,7 +445,6 @@ export class Flame {
   }
 
   dispose(): void {
-    for (const m of this.materials) m.dispose()
     this.embers.dispose()
     this.smoke.dispose()
   }

@@ -151,6 +151,24 @@
       }
       .key + .key { margin-left: 3px; }
 
+      /* ------------------------------------------------------------- held */
+      /* What is in hand, and what USE will do with it. Sits above the control
+         bar so the two read as one block of "what can I press". */
+      #held {
+        position: fixed; bottom: 46px; left: 50%; transform: translateX(-50%);
+        display: none; align-items: center; gap: 10px;
+        background: var(--panel); border: 1px solid var(--edge); border-radius: 4px;
+        padding: 7px 12px; pointer-events: none; backdrop-filter: blur(6px);
+      }
+      #held.on { display: flex; }
+      .held-icon { width: 30px; height: 30px; image-rendering: pixelated; }
+      .held-name { font-size: 12px; }
+      .held-use { font-size: 10.5px; color: var(--dim); margin-top: 1px; }
+      .held-count {
+        font-size: 10px; color: var(--dim); margin-left: 6px;
+        padding-left: 10px; border-left: 1px solid var(--edge);
+      }
+
       /* --------------------------------------------------------- controls */
       #controls {
         position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
@@ -472,6 +490,18 @@
         backdrop-filter: blur(6px);
         animation: rise 300ms ease-out;
       }
+      /* Repeat counter on a coalesced notice, and the pulse that marks an update. */
+      .toast .tally {
+        margin-left: 7px; opacity: 0.62; font-weight: 400; letter-spacing: 0;
+      }
+      .toast .tally:empty { display: none; }
+      .toast.bump { animation: bump 220ms ease-out; }
+      @keyframes bump {
+        0% { transform: translateX(-2px); }
+        55% { transform: translateX(1px); }
+        100% { transform: none; }
+      }
+
       .toast .label {
         font: 500 10px/1 var(--ui); letter-spacing: 0.1em;
         color: var(--dim); margin-bottom: 4px;
@@ -501,6 +531,8 @@
     <div id="hud"></div>
 
     <div id="prompt"></div>
+
+    <div id="held"></div>
 
     <!--
       The always-true verbs, and only those. Camera rotation is gone from

@@ -231,6 +231,9 @@ export class Character {
     this.chest.position.y = HIP
     this.root.add(this.hips, this.chest)
 
+    // TEMP-VALUE-PROBE
+    ;(window as unknown as { __charGroup?: THREE.Group }).__charGroup = this.group
+
     this.buildLegs()
     this.buildTorso()
     this.buildArms()

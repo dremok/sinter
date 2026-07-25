@@ -549,30 +549,44 @@ def make_bucket():
 
 
 def make_flask():
-    """A bellied flask with a real shoulder, a neck the stopper can seat in, and
-    a footed base so it stands. The old sphere-with-a-pinch read as a bauble
-    because there was no straight run anywhere on it for the light to sit."""
+    """
+    A flattened costrel: wide low belly, a hard shoulder, and a long narrow neck.
+
+    Measured, not eyeballed. On the ground this is about 15 by 18 pixels, and at
+    that size a bellied bottle with a short neck is a circle with a bump, which
+    is the same glyph as an apple. Two changes fix it. The shoulder steps in
+    sharply instead of curving, so the outline has a corner. And the neck runs
+    long and thin, roughly a third of the total height at a quarter of the body
+    width, which turns "blob" into "bulb on a stem" in about three pixels.
+
+    The whole thing is then squashed across Y. A flask carried on a belt is
+    flat, and the flattening also stops the silhouette being a circle from every
+    direction the world happens to rotate it.
+    """
     bm = bmesh.new()
     bm_lathe(bm, [
         (0.0, 0.0),
-        (0.070, 0.0),                # foot
-        (0.078, 0.012),
-        (0.068, 0.030),              # undercut above the foot
-        (0.104, 0.070),
-        (0.124, 0.128),              # widest point, low, so it looks heavy
-        (0.121, 0.170),
-        (0.098, 0.216),              # shoulder
-        (0.062, 0.250),
-        (0.043, 0.266),              # neck root
-        (0.041, 0.300),
-        (0.048, 0.312),              # lip
-        (0.046, 0.322),
-        (0.034, 0.324),
+        (0.066, 0.0),                # foot
+        (0.076, 0.014),
+        (0.066, 0.032),              # undercut above the foot
+        (0.108, 0.070),
+        (0.126, 0.118),              # widest point, low, so it looks heavy
+        (0.122, 0.156),
+        (0.106, 0.184),
+        (0.070, 0.208),              # shoulder, stepped in hard
+        (0.038, 0.228),
+        (0.032, 0.248),              # neck root
+        (0.031, 0.300),              # long thin neck
+        (0.044, 0.312),              # lip
+        (0.042, 0.324),
+        (0.030, 0.326),
         (0.0, 0.318),
     ], segments=16)
+    for v in bm.verts:
+        v.co.y *= 0.66
     o = emit(bm, "flask_body", "base", smooth=True, bevel_width=0.003)
     socket(o, "socket_tip", (0, 0, 0.30))
-    socket(o, "socket_mid", (0, 0, 0.13))
+    socket(o, "socket_mid", (0, 0, 0.12))
 
 
 def make_jar():
@@ -707,6 +721,13 @@ def make_rope_coil():
     the loop gives the diagonal ridging that says rope at any size, and it costs
     the same triangles. Nine twists per turn closes exactly, so there is no seam
     where the sweep meets itself.
+
+    The loose end matters more than the lay does. Dropped on sand this is a pale
+    ring on a pale ground about 26 by 12 pixels, and a ring is a shape the eye
+    slides off. One tail spiralling out of it and hanging off the side gives the
+    outline a break, and a break is the only thing that survives when the fill
+    colour is the same as what it is lying on. `items/catalog.ts` stacks two of
+    these, so the coil ends up with two ends, which is what a coil has.
     """
     bm = bmesh.new()
     lobes, twists, sides = 3, 9, 7
@@ -720,6 +741,27 @@ def make_rope_coil():
         return pts
 
     bm_sweep(bm, arc_frames(0.148, 0.0, 2.0 * math.pi, 24, closed=True), sec, closed=True)
+
+    # The loose end: spirals out of the coil, drops off its side, and frays.
+    tail = []
+    steps = 8
+    for i in range(steps):
+        t = i / (steps - 1)
+        a = math.radians(-30.0) + t * math.radians(95.0)
+        r = 0.148 + 0.098 * t * t
+        c, s = math.cos(a), math.sin(a)
+        tail.append((Vector((r * c, r * s, 0.024 - 0.062 * t * t)),
+                     Vector((c, s, 0.0)), Vector((0.0, 0.0, 1.0)), t))
+
+    def tail_sec(i, t):
+        pts = []
+        for k in range(sides):
+            a = 2.0 * math.pi * k / sides
+            rr = 0.036 * (1.0 - 0.48 * t) * (1.0 + 0.30 * math.cos(lobes * a + 5.0 * t))
+            pts.append((rr * math.cos(a), rr * math.sin(a)))
+        return pts
+
+    bm_sweep(bm, tail, tail_sec)
     emit(bm, "rope_coil", "none", bevel_width=0.0015, bevel_segments=1)
 
 
@@ -749,29 +791,34 @@ def make_stone_shard():
 
 def make_apple():
     """
-    Apple: wider than it is tall, five soft lobes, a deep crown well and a calyx
-    pucker underneath.
+    Apple: distinctly wider than it is tall, five lobes, a broad sunken crown
+    and a calyx pucker underneath.
 
     The lobes are the fix for reading as an orange. A sphere is a sphere from
-    every angle and no shading trick rescues it; five shallow ridges give the
-    silhouette a wobble and put five light bands down the side. The crown well
-    is deep because the recipe plants a stem in it, and a stem sitting on a
-    smooth dome looks stuck on.
+    every angle and no shading trick rescues it; five ridges give the silhouette
+    a wobble and put five light bands down the side.
+
+    The crown is wide rather than deep, and that is a play-size decision. This
+    renders about 18 by 14 pixels. A narrow well two pixels across disappears
+    entirely; a shallow dish a third of the fruit wide flattens the whole top of
+    the outline, and a flat-topped shape with shoulders is not a circle. Depth
+    buys nothing here, width buys everything.
     """
     bm = bmesh.new()
-    lobe = 0.0075
+    lobe = 0.011
     bm_lathe(bm, [
-        (0.0, 0.010),
-        (0.030, 0.0),                # calyx, puckered in
-        (0.070, 0.012, lobe),
-        (0.108, 0.044, lobe),
-        (0.126, 0.090, lobe),        # widest, below centre
-        (0.122, 0.128, lobe),
-        (0.100, 0.166, lobe),
-        (0.062, 0.192),
-        (0.030, 0.198),              # rim of the crown well
-        (0.020, 0.172),              # and down into it
-        (0.0, 0.168),
+        (0.0, 0.012),
+        (0.032, 0.0),                # calyx, puckered in
+        (0.074, 0.012, lobe),
+        (0.112, 0.042, lobe),
+        (0.132, 0.086, lobe),        # widest, below centre
+        (0.128, 0.122, lobe),
+        (0.108, 0.156, lobe),
+        (0.078, 0.178, lobe),
+        (0.058, 0.184),              # rim of the crown, wide and low
+        (0.040, 0.170),
+        (0.022, 0.164),              # and down into the dish
+        (0.0, 0.162),
     ], segments=15, lobes=5)
     o = emit(bm, "apple_body", "base", smooth=True, bevel_width=0.002)
     socket(o, "socket_tip", (0, 0, 0.19))
@@ -843,38 +890,42 @@ def make_rag_wrap():
 
 def make_torch_head():
     """
-    Pitch soaked rag bound to the shaft: narrow where it grips, flaring out and
-    up, torn off at the top, with two cords biting into it near the base.
+    Pitch soaked rag bound to the shaft: narrow where it grips, flaring out hard
+    and up, torn off at the top, with two cords biting into it near the base.
 
-    The old head was a cylinder the same width as the haft, which is why the
-    torch read as a lollipop. Flaring to nearly three times the haft radius is
-    what makes the silhouette read at icon size.
+    Sized by measurement rather than by eye. At play distance a whole torch is
+    about 34 pixels tall, and the haft inside it is 3 of those across. A head
+    that flares to 8 pixels reads as a pin; the shaft and the head are the same
+    object. This flares to about 14, more than four times the haft radius, which
+    is the point at which "stick" and "bundle tied to a stick" become different
+    silhouettes. Three lobes and a torn top stop the bundle being a ball.
     """
     bm = bmesh.new()
     bm_lathe(bm, [
-        (0.0, -0.008),
-        (0.030, -0.010),
-        (0.033, 0.006),
-        (0.030, 0.016),              # cord groove
-        (0.040, 0.026),
-        (0.036, 0.038),              # cord groove
-        (0.056, 0.054),
-        (0.074, 0.086),
-        (0.081, 0.118),              # widest, high up, so it looks top heavy
-        (0.072, 0.146),
-        (0.048, 0.162),
-        (0.022, 0.166),
-        (0.0, 0.158),                # dished, as if burnt down
-    ], segments=10)
+        (0.0, -0.010),
+        (0.028, -0.012),
+        (0.032, 0.006),
+        (0.028, 0.018),              # cord groove
+        (0.043, 0.032),
+        (0.037, 0.046),              # cord groove
+        (0.072, 0.072, 0.008),
+        (0.106, 0.110, 0.013),
+        (0.128, 0.152, 0.016),
+        (0.135, 0.188, 0.016),       # widest, high up, so it looks top heavy
+        (0.121, 0.218, 0.014),
+        (0.086, 0.240, 0.010),
+        (0.044, 0.252),
+        (0.0, 0.244),                # dished, as if burnt down
+    ], segments=12, lobes=3)
 
-    for z, rad in ((0.017, 0.036), (0.039, 0.042)):
+    for z, rad in ((0.017, 0.035), (0.039, 0.041)):
         bm_sweep(bm, arc_frames(rad, 0.0, 2.0 * math.pi, 10, z=z, closed=True),
                  lambda i, t: [(0.006, 0.0), (0.0, 0.008), (-0.006, 0.0), (0.0, -0.008)],
                  closed=True)
 
     o = emit(bm, "torch_head", "base", bevel_width=0.004, bevel_segments=1)
-    jitter(o, 0.009, 41)
-    socket(o, "socket_tip", (0, 0, 0.17))
+    jitter(o, 0.010, 41)
+    socket(o, "socket_tip", (0, 0, 0.26))
 
 
 def make_leaf_cluster():

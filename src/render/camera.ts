@@ -17,11 +17,19 @@ const AZIMUTHS: readonly THREE.Vector3[] = [
   new THREE.Vector3(1, 1, -1),
 ].map((v) => v.normalize())
 
-/** How far out the sun sits horizontally, and how high. atan gives ~36 degrees
- * of elevation: low enough that shadows have length and every vertical face
- * shows a terminator, high enough that they do not stripe the whole clearing. */
+/**
+ * How far out the sun sits horizontally, and how high. atan gives ~44 degrees
+ * of elevation.
+ *
+ * Raised from 36 for the toon ramp's sake, not for the shadows'. The ramp's
+ * light band starts at dot(N,L) = 0.5; flat ground under a 36 degree sun sits
+ * at 0.59, so any slope over 6 degrees tipped the whole clearing into the
+ * terminator band and the ground broke out in blotches. At 44 degrees flat
+ * ground sits at 0.69 and only genuinely angled faces band. Shadows are still
+ * a little longer than their casters are tall, which is all they need to read.
+ */
 const SUN_REACH = 42
-const SUN_HEIGHT = 31
+const SUN_HEIGHT = 40
 
 export class IsoCamera {
   readonly camera: THREE.OrthographicCamera
