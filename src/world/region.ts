@@ -87,7 +87,32 @@ export interface Region {
    * a tree you are behind.
    */
   fadeOccluders: (playerPos: THREE.Vector3, camera: THREE.Camera, dt: number) => void
+  /**
+   * Flat tops the player can stand on: a felled trunk, the jetty deck, a
+   * chopping block, a bench. `top` is the world height of the surface.
+   *
+   * Separate from `blocker` on purpose, and the split is a property question
+   * rather than a per-prop one. Something PLATFORM-ish and low enough to step
+   * onto raises the walkable height; everything else stops you. That is rule 2
+   * doing the work, and it means a plank the player drops becomes a step
+   * without anybody writing that down.
+   */
+  standables: { x: number; z: number; radius: number; top: number }[]
 }
+
+/**
+ * The camera azimuth is fixed now, so what is hidden is decidable at build
+ * time. These are the three components of the isometric projection for
+ * AZIMUTHS[0], the direction the camera actually sits in.
+ *
+ *   sx  across the screen        sy  up the screen        depth  toward camera
+ *
+ * Used only by the build-time item check. The runtime fade goes through the
+ * real camera matrix instead, so it stays correct if rotation ever comes back.
+ */
+const ISO_SX = Math.SQRT1_2
+const ISO_SY_GROUND = 0.4082
+const ISO_SY_UP = 0.8165
 
 /** How see-through a tree gets when it is in the way. Not zero, on purpose. */
 const FADE_TO = 0.26
@@ -153,6 +178,28 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Everything that can hide the player. Filled in as the world is built. */
   const occluders: Occluder[] = []
+  const standables: { x: number; z: number; radius: number; top: number }[] = []
+
+  /** A surface to walk on. Long props get several, laid along their length. */
+  const stand = (x: number, z: number, radius: number, top: number): void => {
+    standables.push({ x, z, radius, top })
+  }
+
+  /**
+   * Solid scenery. Anything a player can bump into needs one of these or they
+   * walk through it, which was the whole of the lakeside bug: the logs and the
+   * jetty looked solid and were not there at all as far as movement was
+   * concerned.
+   */
+  const solid = (
+    mesh: THREE.Object3D,
+    at: THREE.Vector3,
+    label: string,
+    props: Entity['props'],
+    radius: number,
+  ): void => {
+    world.add({ transform: { pos: at, ry: 0 }, mesh, label, props, blocker: { radius } })
+  }
   const occluder = (object: THREE.Object3D, radius: number, top: number): Occluder => ({
     object,
     radius,
@@ -439,17 +486,32 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     group.add(pad)
   }
 
-  // A fallen trunk half in the water, and stones along the bank.
+  // A fallen trunk half in the water. You walk along this rather than through
+  // it: it is low, it is flat on top once it has settled, and a log lying at
+  // the water's edge invites exactly one thing.
   {
     const a = 0.55
     const rad = pondRadius(a)
-    const x = POND.x + Math.cos(a) * rad
-    const z = POND.z + Math.sin(a) * rad
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 5.4, 7), M.log)
-    trunk.rotation.set(0, a + 0.3, Math.PI / 2 - 0.12)
-    trunk.position.set(x - 0.6, heightAt(x, z) + 0.2, z - 0.4)
+    const bx = POND.x + Math.cos(a) * rad - 0.6
+    const bz = POND.z + Math.sin(a) * rad - 0.4
+    const len = 5.4
+    const girth = 0.31
+    const yaw = a + 0.3
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, len, 7), M.log)
+    trunk.rotation.set(0, yaw, Math.PI / 2 - 0.12)
+    const by = heightAt(bx, bz) + 0.2
+    trunk.position.set(bx, by, bz)
     trunk.castShadow = true
     group.add(trunk)
+
+    // Several footprints along its length, because one disc around the middle
+    // of a five metre log is not the shape of a five metre log.
+    const dx = Math.cos(yaw)
+    const dz = -Math.sin(yaw)
+    for (let i = -3; i <= 3; i++) {
+      const t = (i / 3) * (len / 2 - girth)
+      stand(bx + dx * t, bz + dz * t, girth * 1.5, by + girth)
+    }
   }
 
   const boulderGeo = new THREE.DodecahedronGeometry(1, 0)

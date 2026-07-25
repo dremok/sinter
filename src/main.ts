@@ -4,7 +4,7 @@ import { Clock, TICK_DT } from './core/clock'
 import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
 import { Grade, groundBlob, sizeToDisplay, toonUnique } from './render/toon'
-import { advanceSmoke, createSmokeColumn, Flame, setFlameViewport } from './render/flame'
+import { advanceSmoke, Flame, setFlameViewport } from './render/flame'
 import { applyOutlines } from './render/outline'
 import { loadParts } from './render/parts'
 import { Character } from './render/character'
@@ -571,12 +571,6 @@ function groundEverything(): void {
   key.position.set(0, 1.1, 0)
   character.group.add(key)
 
-  // TEMP SMOKE COLUMN PROBE
-  for (const [cx, cz, sc] of [[2.4, 8.6, 1.0], [-3.2, 9.4, 0.7]] as const) {
-    const col = createSmokeColumn({ scale: sc * 2.5, density: 1, puffs: 10, seed: cx * 13, drift: [0.3, 0.2] })
-    col.object3D.position.set(cx, region.heightAt(cx, cz) + 2.2, cz)
-    scene.add(col.object3D)
-  }
 }
 
 // ---------------------------------------------------------------- interaction

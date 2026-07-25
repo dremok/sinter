@@ -284,7 +284,16 @@ class Particles {
 
 // --------------------------------------------------------------------- smoke
 
-const SMOKE_COLOR = new THREE.Color(0xff00ff)
+/**
+ * Pale warm grey, not the dark grey it started as.
+ *
+ * Smoke lit by a low sun is brighter than what it drifts across, not darker.
+ * At 0x6b6058 and a quarter alpha over a warm, busy background it was
+ * arithmetically present and visually absent: it took reading the alpha back
+ * out of the framebuffer to establish the plume had been rendering correctly
+ * the whole time and simply could not be seen.
+ */
+const SMOKE_COLOR = new THREE.Color(0xa79a8c)
 const scratchColor = new THREE.Color()
 
 /**
@@ -414,7 +423,7 @@ export interface SmokeColumn {
 export function createSmokeColumn(opts: SmokeColumnOptions = {}): SmokeColumn {
   const shape: PlumeShape = {
     scale: opts.scale ?? 0.9,
-    density: opts.density ?? 0.34,
+    density: opts.density ?? 0.55,
     base: 0.1,
     rise: 3.4,
     speed: opts.rate ?? 0.42,
@@ -602,7 +611,7 @@ export class Flame {
     // Starts above the flame tip rather than at the base, and does not lean:
     // a fire in a clearing has no chimney to be drawn up.
     this.shape.scale = size
-    this.shape.density = 0.46 * heat
+    this.shape.density = 0.6 * heat
     this.smoke.write(t, this.shape)
   }
 

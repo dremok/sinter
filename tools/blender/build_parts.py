@@ -75,6 +75,22 @@ def active(obj):
 
 
 def bevel(obj, width=0.008, segments=1, angle=48):
+    """
+    A single chamfer segment by default, not two.
+
+    Two segments rounds an edge; one puts a single flat facet on it. Under a cel
+    ramp those are almost indistinguishable, because the ramp quantises the
+    falloff either way and the difference lands inside one band. But two
+    segments costs about twice the triangles, and the bevel is already 39
+    percent of this file. One is the right default; the shape is what should be
+    paid for.
+
+    A width of zero skips it. That is for parts whose faces are ALREADY the
+    detail, like the convex hull rocks, where softening every edge costs three
+    times the part's own geometry and makes it less crisp rather than more.
+    """
+    if width <= 0.0:
+        return
     m = obj.modifiers.new(name="bevel", type="BEVEL")
     m.width = width
     m.segments = segments
@@ -122,7 +138,7 @@ def socket(part, name, location):
 COST = {}
 
 
-def finish(obj, name, anchor_mode="base", smooth=False, bevel_width=0.008):
+def finish(obj, name, anchor_mode="base", smooth=False, bevel_width=0.008, bevel_segments=1):
     obj.name = name
     obj.data.name = name
     anchor(obj, anchor_mode)
@@ -322,7 +338,7 @@ def bm_box(bm, lo, hi):
         _face(bm, [v[i] for i in q])
 
 
-def emit(bm, name, anchor_mode="base", smooth=False, bevel_width=0.008):
+def emit(bm, name, anchor_mode="base", smooth=False, bevel_width=0.008, bevel_segments=1):
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     mesh = bpy.data.meshes.new(name)

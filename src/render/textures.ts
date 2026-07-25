@@ -361,8 +361,14 @@ export const grass = (rng: Rng) =>
         // the hash keeps this decision independent of the one inside
         // ditherStep, which would otherwise correlate the two stipples.
         const dry = clamp((patch(u, v) - 0.55) * 2.2, 0, 1)
-        const ramp = dry > hashDither(x + 977, y) ? RAMP.dryGrass : RAMP.grass
-        ditherStep(put, x, y, ramp, idx)
+        // Confined to a narrow band, for the same reason ditherStep is. A
+        // stipple of two hues held at 50/50 across a whole region is invisible
+        // in greyscale, which is what the matched luminances were for, but in
+        // colour at native resolution it is simply grain. Most of the parched
+        // ground is now solidly parched and most of the green is solidly green.
+        const dryT = dry < 0.35 ? 0 : dry > 0.65 ? 1 : (dry - 0.35) / 0.3
+        const ramp = dryT > hashDither(x + 977, y) ? RAMP.dryGrass : RAMP.grass
+        put(x, y, tone(ramp, idx))
       }
     }
 

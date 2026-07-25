@@ -15,6 +15,38 @@
       "dominance": 0.303
     }
   },
+  "grass": {
+    "hash": "d09ad2370058c68f",
+    "size": 1024,
+    "worldUnits": 85.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9074,
+    "bytes": 94322,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 1.067,
+      "seamY": 0.839,
+      "busyness": 0.0127,
+      "used": 9,
+      "dominance": 0.358
+    }
+  },
+  "sand": {
+    "hash": "35b2ab57b8d85e46",
+    "size": 256,
+    "worldUnits": 21.3,
+    "model": "fal-ai/patina/material",
+    "seed": 16962,
+    "bytes": 5253,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.556,
+      "seamY": 0.879,
+      "busyness": 0.017,
+      "used": 7,
+      "dominance": 0.297
+    }
+  },
   "stone": {
     "hash": "937bf46afdd5c143",
     "size": 64,
@@ -29,6 +61,22 @@
       "busyness": 0.046,
       "used": 5,
       "dominance": 0.345
+    }
+  },
+  "water": {
+    "hash": "28158bfe0c16d0ea",
+    "size": 128,
+    "worldUnits": 10.7,
+    "model": "fal-ai/patina/material",
+    "seed": 9074,
+    "bytes": 1161,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.568,
+      "seamY": 0.457,
+      "busyness": 0.0086,
+      "used": 5,
+      "dominance": 0.3
     }
   }
 }
