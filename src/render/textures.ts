@@ -162,11 +162,6 @@ function tone(ramp: readonly string[], i: number): string {
   return ramp[clamp(Math.round(i), 0, ramp.length - 1)]!
 }
 
-/** Pick a ramp step from a 0..1 position along it. */
-function shade(ramp: readonly string[], t: number): string {
-  return ramp[clamp(Math.floor(t * ramp.length), 0, ramp.length - 1)]!
-}
-
 /** Shortest signed distance between two coordinates on a wrapping tile. */
 function wrapDelta(d: number, size: number): number {
   let v = ((d % size) + size) % size
@@ -263,159 +258,170 @@ function blob(put: Put, x: number, y: number, rx: number, ry: number, color: str
   }
 }
 
+// ------------------------------------------------------------- mark helpers
+
+/**
+ * One straight mark, from a point along a direction, shading along its length.
+ *
+ * The direction argument is the point of this. Grass blades used to be drawn by
+ * walking -y, which on the ground plane is a single fixed world direction, so
+ * every blade in the region ran the same diagonal and the field read as woven
+ * carpet. A mark that can point anywhere is the fix.
+ */
+function stroke(
+  put: Put,
+  x0: number,
+  y0: number,
+  dx: number,
+  dy: number,
+  len: number,
+  ramp: readonly string[],
+  from: number,
+  to: number,
+): void {
+  for (let k = 0; k < len; k++) {
+    const f = len <= 1 ? 0 : k / (len - 1)
+    put(x0 + dx * k, y0 + dy * k, tone(ramp, from + f * (to - from)))
+  }
+}
+
+/**
+ * Pick a ramp step from a continuous position, dithering between the two
+ * neighbouring steps rather than snapping to one.
+ *
+ * This is what lets the ground carry a wide, slow value drift without banding
+ * into four visible contour rings, while still only ever putting six colours on
+ * the tile. Large soft gradients and a strictly limited palette are usually in
+ * tension; an ordered dither is how the era resolved it.
+ */
+function ditherStep(put: Put, x: number, y: number, ramp: readonly string[], f: number): void {
+  const lo = Math.floor(f)
+  put(x, y, tone(ramp, f - lo > dither(x, y) ? lo + 1 : lo))
+}
+
 // ---------------------------------------------------------------- generators
 
 /**
  * Ground cover, and the most important texture in the game: it is most of what
- * is on screen at any moment.
+ * is on screen at any moment, so it sets how tiring the whole image is.
  *
- * Four layers, deliberately at four different scales, because a single scale of
- * detail is what makes procedural ground read as carpet:
- *   1. Regional drift, ~15 world units, decides lush versus dry green.
- *   2. Bare soil, ~7 world units, dithered in so the edge is stamped not blended.
- *   3. Clumps, ~0.5 world units, dense in the lush regions and absent on soil.
- *   4. Blades and flowers at texel scale, but only ever attached to a clump, so
- *      the tile never degenerates into salt-and-pepper noise.
+ * Three layers and no fine layer at all, which is the change from the previous
+ * pass. A greyscale check of the frame showed the field as one flat value with
+ * texel-scale speckle over it, so the eye had nothing to rest on and the ground
+ * read as static.
+ *
+ *   1. Slow drift, ~17 world units, swinging across three and a half ramp steps
+ *      and dithered so it reads as soft light on a field rather than as bands.
+ *      This is the layer that was missing.
+ *   2. Bare soil, ~9 world units, dithered in so its edge is stamped not blended.
+ *   3. Tufts, sparse and large: roughly one every one and a half metres, each a
+ *      fan of blades pointing its own way.
  */
 export const grass = (rng: Rng) =>
   build(GROUND, rng, (put, r, n) => {
-    const lush = normalized(fbm(r, 6))
-    const bare = normalized(fbm(r, 11, 3))
-    const fine = valueNoise(r, 96)
+    const drift = normalized(fbm(r, 5))
+    const patch = normalized(fbm(r, 9, 3))
 
     for (let y = 0; y < n; y++) {
       const v = y / n
       for (let x = 0; x < n; x++) {
         const u = x / n
-        // Soil surfaces where `bare` peaks. The steep multiplier is deliberate:
-        // a wide dithered ramp between mid green and tan is not a soft edge, it
-        // is a field of red pixels, because a 50/50 stipple of two saturated
-        // complementary hues resolves to neither of them. Keep the stipple a
-        // few texels wide and darken both sides as they approach it, so the
-        // boundary reads as worn ground rather than as measles.
-        // Kept sparse. region.ts now lays authored tracks, yards and tilled
-        // ground as overlay meshes, and a texture that invents its own
-        // clearings everywhere competes with the layout somebody meant.
-        const soil = (bare(u, v) - 0.78) * 16
+        // Soil surfaces where `patch` peaks. The steep multiplier keeps the
+        // stipple a few texels wide: a wide dithered ramp between mid green and
+        // tan is not a soft edge, it is a field of red pixels, because a 50/50
+        // stipple of two saturated complementary hues resolves to neither.
+        const soil = (patch(u, v) - 0.8) * 16
         if (soil > dither(x, y)) {
-          put(x, y, shade(RAMP.dirt, 0.02 + clamp(soil, 0, 1) * 0.5 + fine(u, v) * 0.3))
+          ditherStep(put, x, y, RAMP.dirt, 0.4 + clamp(soil, 0, 1) * 2.6)
         } else {
-          const t = lush(u, v) * 0.75 + fine(u, v) * 0.2
-          const dim = 1 - clamp(soil + 0.6, 0, 1) * 0.35
-          put(x, y, shade(RAMP.grass, (0.16 + t * 0.62) * dim))
+          // The whole value range of the ramp, spent on one slow gradient.
+          const dim = clamp(soil + 0.6, 0, 1) * 1.4
+          ditherStep(put, x, y, RAMP.grass, clamp(0.9 + drift(u, v) * 3.4 - dim, 0, 4.9))
         }
       }
     }
 
-    // Clumps. This is the layer that turns a speckled field into tile art: each
-    // is a small fan of blades with a shadow at the root and the lightest step
-    // of the ramp at the tips, so the eye reads discrete plants.
-    const clumps = Math.round((n * n) / 40)
-    for (let i = 0; i < clumps; i++) {
+    // Tufts. Sparse and large on purpose: about one every one and a half
+    // metres, each four to six texels across, so they read as individual plants
+    // at play distance instead of dissolving into grain.
+    const tufts = Math.round((n * n) / 380)
+    for (let i = 0; i < tufts; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
       const u = x / n
       const v = y / n
-      if (bare(u, v) > 0.7) continue
-      const lift = lush(u, v)
-      if (!r.chance(0.2 + lift * 0.9)) continue
+      if (patch(u, v) > 0.76) continue
+      if (!r.chance(0.35 + drift(u, v) * 0.6)) continue
 
-      // A root shadow on only a third of them. On all of them it reads as
-      // polka dots, which is the failure mode one step along from speckle.
-      if (r.chance(0.34)) put(x, y + 1, tone(RAMP.grass, 0))
-      const blades = r.int(2, 3)
-      for (let bl = 0; bl < blades; bl++) {
-        const bx = x + r.int(-1, 1)
-        const by = y + r.int(-1, 1)
-        const len = r.int(2, 4)
-        const lean = r.int(-1, 1)
-        const tip = 3.4 + lift * 1.6
-        for (let k = 0; k < len; k++) {
-          const f = k / Math.max(1, len - 1)
-          put(bx + Math.round(lean * f), by - k, tone(RAMP.grass, 2 + f * (tip - 2)))
-        }
+      const aim = r.range(0, Math.PI * 2)
+      const blades = r.int(3, 5)
+      put(x, y, tone(RAMP.grass, 1))
+      for (let b = 0; b < blades; b++) {
+        const a = aim + r.range(-1, 1)
+        stroke(put, x, y, Math.cos(a), Math.sin(a), r.int(3, 6), RAMP.grass, 2.4, 5)
       }
     }
 
-    // Pebbles and twigs, on the soil only, so a bare patch reads as ground that
-    // something wore through rather than as a paint spill.
-    for (let i = 0; i < Math.round((n * n) / 2600); i++) {
+    // Stones and fallen sticks, on the soil only, so a bare patch reads as
+    // ground something wore through rather than as a paint spill.
+    for (let i = 0; i < Math.round((n * n) / 5200); i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      if (bare(x / n, y / n) < 0.72) continue
-      if (r.chance(0.6)) {
-        blob(put, x, y, r.range(1, 2.2), r.range(1, 1.8), tone(RAMP.stone, r.int(1, 3)))
-        put(x, y - 1, tone(RAMP.stone, 5))
+      if (patch(x / n, y / n) < 0.82) continue
+      if (r.chance(0.55)) {
+        const rx = r.range(1.6, 3)
+        blob(put, x, y, rx, rx * 0.8, tone(RAMP.stone, 2))
+        blob(put, x, y - 1, rx * 0.7, rx * 0.4, tone(RAMP.stone, 4))
       } else {
-        const len = r.int(3, 7)
-        const dy = r.int(-1, 1)
-        for (let k = 0; k < len; k++) put(x + k, y + Math.round((k * dy) / len), tone(RAMP.bark, 1))
+        const a = r.range(0, Math.PI * 2)
+        stroke(put, x, y, Math.cos(a), Math.sin(a), r.int(5, 9), RAMP.bark, 1, 2)
       }
-    }
-
-    // Wildflowers. Two texels each and roughly one every six world units: any
-    // denser and they stop being a detail the eye finds and start being noise.
-    for (let i = 0; i < Math.round((n * n) / 9000); i++) {
-      const x = r.int(0, n - 1)
-      const y = r.int(0, n - 1)
-      if (bare(x / n, y / n) > 0.55 || lush(x / n, y / n) < 0.45) continue
-      const c = r.chance(0.6) ? tone(RAMP.straw, 5) : tone(RAMP.cloth, 5)
-      put(x, y, c)
-      put(x + 1, y, c)
-      put(x, y + 1, tone(RAMP.grass, 1))
     }
   })
 
 /**
- * Shore sand. One tile covers the whole ring around the pond.
- *
- * Ripples run as broad low-frequency arcs rather than as speckle, because sand
- * at this distance is read by its banding, not by its grains; the grains are
- * there but they are worth one ramp step, no more.
+ * Shore sand, and the tinted base region.ts uses for tracks, yards and tilled
+ * ground. Nearly flat: a slow damp drift, a handful of ripple lines, some
+ * stones. The ripples used to run at full strength across the whole tile and
+ * read as wood grain on every path in the game.
  */
 export const sand = (rng: Rng) =>
   build(SHORE, rng, (put, r, n) => {
     const damp = normalized(fbm(r, 5))
-    const warp = valueNoise(r, 7)
-    const grain = valueNoise(r, n / 2)
 
     for (let y = 0; y < n; y++) {
       const v = y / n
       for (let x = 0; x < n; x++) {
-        const u = x / n
-        // Ripple crests: a sine whose phase is dragged around by low-frequency
-        // noise, which is what stops them reading as corduroy. Kept tight and
-        // low contrast, because region.ts tints this same bitmap for tracks,
-        // yards and tilled ground, and a bold ripple on all of them reads as
-        // wood grain rather than as worn earth.
-        const ripple = Math.sin((v * 13 + warp(u, v) * 2.4) * Math.PI * 2)
-        let idx = 3 + (ripple > 0.62 ? 1 : ripple < -0.66 ? -1 : 0)
-        idx -= Math.round(damp(u, v) * 1.6)
-        if (grain(u, v) > 0.72) idx += 1
-        else if (grain(u, v) < 0.3) idx -= 1
-        put(x, y, tone(RAMP.sand, idx + 1))
+        ditherStep(put, x, y, RAMP.sand, 1.4 + damp(x / n, v) * 2.9)
       }
     }
 
-    // Pebbles, lit from above so the shore has something with a top and a
-    // bottom on it. Everything else here is flat by design.
-    for (let i = 0; i < Math.round((n * n) / 900); i++) {
+    // A few long ripple marks rather than a modulation of every texel.
+    for (let i = 0; i < 26; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      const rx = r.range(1.2, 2.6)
-      // Mostly waterworn brown, occasionally grey. All-grey pebbles read as
-      // blue flecks against tan, which is the one hue the shore must not have.
-      const grey = r.chance(0.35)
-      blob(put, x, y, rx, rx * 0.75, tone(grey ? RAMP.stone : RAMP.dirt, r.int(1, 2)))
-      put(x, y - Math.round(rx * 0.7), tone(grey ? RAMP.stone : RAMP.dirt, 4))
-      put(x, y + Math.round(rx * 0.75), tone(RAMP.dirt, 0))
+      const a = r.range(-0.5, 0.5)
+      const len = r.int(14, 40)
+      stroke(put, x, y, Math.cos(a), Math.sin(a) * 0.35, len, RAMP.sand, 1, 2)
+    }
+
+    // Stones, lit from above so the shore has something with a top and a bottom
+    // on it. Mostly waterworn brown: all-grey pebbles read as blue flecks
+    // against tan, which is the one hue a shore must not have.
+    for (let i = 0; i < Math.round((n * n) / 1400); i++) {
+      const x = r.int(0, n - 1)
+      const y = r.int(0, n - 1)
+      const rx = r.range(1.4, 3)
+      const grey = r.chance(0.3)
+      blob(put, x, y, rx, rx * 0.75, tone(grey ? RAMP.stone : RAMP.dirt, 1))
+      blob(put, x, y - 1, rx * 0.7, rx * 0.35, tone(grey ? RAMP.stone : RAMP.dirt, 4))
     }
   })
 
 /**
- * Still water. Kept deliberately low-frequency: this is the one surface where
- * fine detail is actively wrong, because a pond of per-texel noise shimmers the
- * moment the camera moves and there is no mipmap chain to save it.
+ * Still water. The one surface where fine detail is actively wrong: a pond of
+ * per-texel noise shimmers the moment the camera moves and there is no mipmap
+ * chain to save it.
  */
 export const water = (rng: Rng) =>
   build(POOL, rng, (put, r, n) => {
@@ -423,9 +429,7 @@ export const water = (rng: Rng) =>
     const warp = valueNoise(r, 6)
 
     // Two frequencies, because one gives stripes of exactly equal width and a
-    // pond of those reads as a beach towel. Phase drift is kept small: at 1.6
-    // periods of warp the ripples curled into closed loops and the pond read as
-    // polished marble instead.
+    // pond of those reads as a beach towel.
     const ripple = (u: number, v: number) =>
       Math.sin((v * 9 + warp(u, v) * 0.5) * Math.PI * 2) * 0.72 +
       Math.sin((v * 22 + warp(u, v) * 0.3) * Math.PI * 2) * 0.28
@@ -435,130 +439,112 @@ export const water = (rng: Rng) =>
       for (let x = 0; x < n; x++) {
         const u = x / n
         const band = ripple(u, v)
-        let idx = 4 + (band > 0.5 ? 1 : band > 0 ? 0 : band > -0.5 ? -1 : -2)
-        idx -= Math.round(deep(u, v) * 1.2)
-        put(x, y, tone(RAMP.water, idx))
+        const idx = 3.6 + (band > 0.5 ? 1 : band > 0 ? 0 : band > -0.5 ? -0.9 : -1.8)
+        ditherStep(put, x, y, RAMP.water, clamp(idx - deep(u, v) * 1.4, 0, 4.9))
       }
     }
 
-    // Glints: short horizontal dashes on the crests only, so they read as light
-    // catching a wave rather than as scattered white pixels.
-    for (let i = 0; i < Math.round((n * n) / 220); i++) {
+    // Glints: a few long dashes on the crests, not a scatter of white pixels.
+    for (let i = 0; i < 26; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      if (ripple(x / n, y / n) < 0.72) continue
-      const len = r.int(2, 5)
-      for (let k = 0; k < len; k++) put(x + k, y, tone(RAMP.water, 5))
+      if (ripple(x / n, y / n) < 0.7) continue
+      stroke(put, x, y, 1, 0, r.int(5, 12), RAMP.water, 5, 5)
     }
   })
 
 /**
- * Standing timber. Vertical grain, knots, and depth, which the old version had
- * none of: it picked a random shade per texel and hoped.
+ * Standing timber. A flat trunk tone carrying a few long grain lines and two
+ * knots, rather than a ridge profile evaluated at every texel.
  *
- * The grain is a ridge profile repeated every four texels, drifting sideways
- * with height and *bending around the knots*, which is the detail that makes it
- * read as wood rather than as stripes. The profile is asymmetric on purpose: a
- * deep groove, a broad face, a lit crest, in the proportions a split log has.
+ * The previous version computed a grain column for all 4096 texels and read, at
+ * play distance, as corduroy. Six lines and two knots read as bark.
  */
 export const bark = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    const drift = valueNoise(r, 8)
-    const jitter = valueNoise(r, 6)
-    const GRAIN = 4
+    const drift = valueNoise(r, 6)
+    fill(put, n, tone(RAMP.bark, 3))
 
-    const knots = Array.from({ length: 3 }, () => ({
-      x: r.int(0, n - 1),
-      y: r.int(0, n - 1),
-      rad: r.range(3, 5.5),
-    }))
-
-    for (let y = 0; y < n; y++) {
-      const v = y / n
-      const slide = (drift(0.5, v) - 0.5) * 7
-      for (let x = 0; x < n; x++) {
-        let gx = x + slide
-        for (const k of knots) {
-          const dx = wrapDelta(x - k.x, n)
-          const dy = wrapDelta(y - k.y, n)
-          const d = Math.hypot(dx, dy)
-          const reach = k.rad * 3
-          if (d < reach) gx += (1 - d / reach) * (dx < 0 ? -1 : 1) * k.rad * 1.5
-        }
-        const g = gx / GRAIN + jitter(gx / n, v) * 0.7
-        const f = g - Math.floor(g)
-        const idx = f < 0.16 ? 0 : f < 0.34 ? 1 : f < 0.66 ? 3 : f < 0.86 ? 4 : 2
-        put(x, y, tone(RAMP.bark, idx))
+    // Long grain, wandering with height. `drift` is toroidal in v, so a line
+    // that leaves the bottom of the tile arrives back at the top in the same
+    // place and the trunk has no seam ring around it.
+    const lines = 7
+    for (let i = 0; i < lines; i++) {
+      const x0 = Math.round((i / lines) * n) + r.int(-2, 2)
+      const dark = r.chance(0.65)
+      const wide = r.chance(0.3)
+      for (let y = 0; y < n; y++) {
+        const x = x0 + Math.round((drift(i / lines, y / n) - 0.5) * 7)
+        put(x, y, tone(RAMP.bark, dark ? 1 : 5))
+        if (wide) put(x + 1, y, tone(RAMP.bark, dark ? 2 : 4))
       }
     }
 
-    // Knots: concentric rings around a dark core, with a lit rim, so each one
-    // is a hole in the surface rather than a dark smudge on it.
-    for (const k of knots) {
-      const rad = k.rad
+    // Two knots: a dark core, one ring, a lit rim. A knot is a hole in the
+    // surface, so it needs a light edge or it is only a dark smudge.
+    for (let i = 0; i < 2; i++) {
+      const kx = r.int(0, n - 1)
+      const ky = r.int(0, n - 1)
+      const rad = r.range(4, 6)
       for (let dy = -Math.ceil(rad); dy <= Math.ceil(rad); dy++) {
         for (let dx = -Math.ceil(rad); dx <= Math.ceil(rad); dx++) {
-          const d = Math.hypot(dx, dy * 1.25)
+          const d = Math.hypot(dx, dy * 1.2)
           if (d > rad) continue
-          let idx = Math.floor(d / 1.5) % 2 === 0 ? 0 : 2
-          if (d < 1.3) idx = 0
-          else if (d > rad - 1.1) idx = 5
-          put(k.x + dx, k.y + dy, tone(RAMP.bark, idx))
+          const idx = d < rad * 0.35 ? 0 : d > rad - 1.2 ? 5 : 2
+          put(kx + dx, ky + dy, tone(RAMP.bark, idx))
         }
       }
     }
   })
 
 /**
- * Canopy. Clusters with a lit top-left and a dark underside, so a cone of this
+ * Canopy. Big clusters with a lit crown and a dark underside, so a cone of this
  * reads as a mass of leaves instead of a green cone.
  *
- * Values sit high on purpose. region.ts multiplies this by a per-tier leaf
- * colour, and a mid-green map under a mid-green tint comes out nearly black,
- * which is exactly what the trees used to look like.
+ * Values sit high and near-neutral on purpose. region.ts multiplies this by a
+ * per-tier leaf colour, and both the value and the saturation of the result are
+ * the product of map and tint, so a mid-green map under a mid-green tint comes
+ * out nearly black and twice as saturated as either.
  */
 export const foliage = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
     const light = normalized(fbm(r, 3))
-    fill(put, n, tone(RAMP.leaf, 1))
+    fill(put, n, tone(RAMP.leaf, 2))
 
     // Gaps first, so clusters drawn over them leave ragged holes rather than a
     // continuous sheet. A canopy you cannot see through has no depth.
-    for (let i = 0; i < 14; i++) {
-      blob(put, r.int(0, n - 1), r.int(0, n - 1), r.range(2, 4), r.range(2, 4), tone(RAMP.leaf, 0))
+    for (let i = 0; i < 8; i++) {
+      blob(put, r.int(0, n - 1), r.int(0, n - 1), r.range(3, 6), r.range(3, 6), tone(RAMP.leaf, 0))
     }
 
-    for (let i = 0; i < 90; i++) {
+    for (let i = 0; i < 26; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      const rx = r.range(1.8, 3.6)
-      const ry = rx * r.range(0.6, 0.9)
+      const rx = r.range(4, 7)
+      const ry = rx * r.range(0.6, 0.85)
       const lit = light(x / n, y / n)
-      const idx = 2 + Math.round(lit * 2.4)
-      blob(put, x, y, rx, ry, tone(RAMP.leaf, idx))
-      // Underside shadow, one texel down and right of the cluster.
-      blob(put, x + 1, y + Math.round(ry), rx * 0.7, 0.9, tone(RAMP.leaf, 0))
-      if (lit > 0.62) {
-        put(x - 1, y - Math.round(ry * 0.7), tone(RAMP.leaf, 5))
-        put(x, y - Math.round(ry * 0.7), tone(RAMP.leaf, 5))
-      }
+      blob(put, x, y, rx, ry, tone(RAMP.leaf, 2 + Math.round(lit * 2)))
+      // Underside shadow and a lit crown: two marks, both worth their texels.
+      blob(put, x + 1, y + Math.round(ry * 0.8), rx * 0.8, ry * 0.35, tone(RAMP.leaf, 1))
+      blob(put, x - 1, y - Math.round(ry * 0.7), rx * 0.55, ry * 0.3, tone(RAMP.leaf, 5))
     }
   })
 
 /**
- * Granite. Voronoi blocks with mortar-dark joints and a bevel: light on the
- * up-facing side of every joint, shadow on the down-facing side.
+ * Granite. Flat facets with a lit top plane, a shadowed under plane, dark
+ * joints between, a few chips, and some lichen.
  *
- * That bevel is doing most of the work. Blocks of flat colour separated by dark
- * lines read as a floor plan; the same blocks with two texels of directional
- * edge read as carved stone, and it survives cel shading because it is baked
- * into the albedo rather than left to the lighting.
+ * Two constraints shaped this. It has to survive being stretched: the rocks are
+ * dodecahedra, so each face gets its own UV scale and the same bitmap appears
+ * at wildly different densities on the top and the side of one boulder. Big
+ * flat shapes tolerate that; the fine hatch that used to be here turned into
+ * corrugated fabric at one scale and stripes at the other. And the interiors
+ * have to stay flat, because per-texel grit on stone is the exact noise this
+ * pass exists to remove.
  */
 export const stone = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    // Fifty blocks to the tile puts each one at about nine texels, which is
-    // three quarters of a metre: three or four courses across a boulder.
-    const SEEDS = 50
+    const SEEDS = 26
     const sx: number[] = []
     const sy: number[] = []
     const base: number[] = []
@@ -567,10 +553,6 @@ export const stone = (rng: Rng) =>
       sy.push(r.range(0, n))
       base.push(r.int(2, 4))
     }
-    // Grit sampled at half resolution: single-texel speckle on stone is the
-    // exact noise this rewrite is trying to remove, and it aliases badly on a
-    // rock seen from thirty metres.
-    const grit = valueNoise(r, n / 4)
 
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
@@ -589,79 +571,73 @@ export const stone = (rng: Rng) =>
         }
 
         const edge = Math.sqrt(second) - Math.sqrt(best)
-        let idx = base[hit]!
-        const g = grit(x / n, y / n)
-        if (g > 0.66) idx += 1
-        else if (g < 0.34) idx -= 1
-
-        // Thin joints on purpose. The rocks are dodecahedra, so their UVs
-        // stretch badly across a face and a fat joint turns into a long black
-        // scratch rather than a seam between two blocks.
-        if (edge < 0.8) idx = 0
-        else if (edge < 2) idx = wrapDelta(y - sy[hit]!, n) < 0 ? 5 : 1
-
+        // Flat interior, then a facet: the half of the block above its seed
+        // catches light, the half below falls away.
+        const up = wrapDelta(y - sy[hit]!, n) < 0
+        let idx = base[hit]! + (up ? 1 : -1)
+        if (edge < 0.9) idx = 0
+        else if (edge < 2.1) idx = up ? 5 : 1
         put(x, y, tone(RAMP.stone, idx))
       }
     }
 
-    // Cracks, which wander downward and thin out. Two per tile: any more and
-    // the blocks stop reading as solid.
-    for (let i = 0; i < 2; i++) {
-      let x = r.int(0, n - 1)
-      let y = r.int(0, n - 1)
-      const len = r.int(10, 20)
-      for (let k = 0; k < len; k++) {
-        put(x, y, tone(RAMP.stone, 0))
-        if (k < len * 0.6) put(x + 1, y, tone(RAMP.stone, 1))
-        x += r.int(-1, 1)
-        y += 1
+    // Chips: a struck corner shows fresh, pale rock.
+    for (let i = 0; i < 7; i++) {
+      const x = r.int(0, n - 1)
+      const y = r.int(0, n - 1)
+      const w = r.int(2, 5)
+      for (let dy = 0; dy < w; dy++) {
+        for (let dx = 0; dx < w - dy; dx++) put(x + dx, y + dy, tone(RAMP.stone, 5))
       }
+    }
+
+    // Lichen. A few muted green blotches, which is the cheapest way to tie the
+    // rocks to the grass they sit in. A top-face-only variant would be better
+    // and needs a second material in region.ts.
+    for (let i = 0; i < 4; i++) {
+      const x = r.int(0, n - 1)
+      const y = r.int(0, n - 1)
+      blob(put, x, y, r.range(2.5, 5), r.range(2, 4), tone(RAMP.grass, 3))
+      blob(put, x + 1, y + 1, r.range(1, 2.5), r.range(1, 2), tone(RAMP.grass, 4))
     }
   })
 
 /**
- * Sawn boards. Joins between boards, a lit arris under each join, lengthwise
- * grain with runout, staggered butt ends, and nails.
- *
- * The butt ends matter more than they look. Without them a wall of this is one
- * extruded ribbon eight boards tall; with them it is a wall somebody built.
+ * Sawn boards: a flat board tone, one dark join, one lit arris, and at most a
+ * single grain line. Every texel used to get a noise lookup, which at item
+ * scale was mush and at wall scale was dirt.
  */
 export const plank = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
     // Four texels to a board, which at TEXELS_PER_UNIT is a third of a metre:
-    // roughly a split plank, and about five of them up a hut wall. Wider boards
-    // were tried first and a wall only showed two of them.
+    // roughly a split plank, and about five of them up a hut wall.
     const BOARD = 4
-    // Stretched four to one along y, so the noise reads as grain running the
-    // length of the board rather than as blotches.
-    const grain = valueNoise(r, 20)
     const boards = n / BOARD
 
     for (let b = 0; b < boards; b++) {
       const base = 2 + [1, 0, 2, 0][b % 4]!
       for (let row = 0; row < BOARD; row++) {
         const y = b * BOARD + row
-        for (let x = 0; x < n; x++) {
-          let idx = base
-          const g = grain(x / n, (y * 4) / n)
-          if (g > 0.68) idx += 1
-          else if (g < 0.32) idx -= 1
-          if (row === 0) idx = 0
-          else if (row === 1) idx += 2
-          else if (row === BOARD - 1) idx -= 1
-          put(x, y, tone(RAMP.wood, idx))
-        }
+        const idx = row === 0 ? 0 : row === 1 ? base + 2 : row === BOARD - 1 ? base - 1 : base
+        for (let x = 0; x < n; x++) put(x, y, tone(RAMP.wood, idx))
+      }
+
+      // One grain line down the middle of most boards, wandering a little.
+      if (r.chance(0.7)) {
+        const y = b * BOARD + 2
+        const len = r.int(Math.round(n * 0.4), n)
+        const x0 = r.int(0, n - 1)
+        for (let k = 0; k < len; k++) put(x0 + k, y + (r.chance(0.06) ? 1 : 0), tone(RAMP.wood, 1))
       }
 
       // A butt join on most boards, at a different x on each, so a wall is
       // boards somebody cut rather than one extruded ribbon.
-      if (r.chance(0.75)) {
+      if (r.chance(0.7)) {
         const jx = r.int(0, n - 1)
         for (let row = 1; row < BOARD; row++) {
           put(jx, b * BOARD + row, tone(RAMP.wood, 0))
           put(jx + 1, b * BOARD + row, tone(RAMP.wood, 5))
         }
-        // Nails, iron-grey, either side of the join.
         for (const nx of [jx - r.int(3, 6), jx + r.int(4, 7)]) {
           put(nx, b * BOARD + 2, tone(RAMP.stone, 1))
         }
@@ -670,143 +646,139 @@ export const plank = (rng: Rng) =>
   })
 
 /**
- * Thatch and dry pasture. Laid in courses, the way a roof actually is, with the
- * stalk ends of each course overhanging the shadow of the one below.
+ * Thatch and dry pasture. Laid in courses, the way a roof is, with a hard
+ * shadow under each course and a handful of bold stalks rather than fur.
  */
 export const straw = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    // Eight texels to a course, about two thirds of a metre, so a cottage roof
-    // shows three or four courses rather than one and a half.
     const COURSE = 8
-    fill(put, n, tone(RAMP.straw, 1))
+    fill(put, n, tone(RAMP.straw, 3))
 
     for (let c = 0; c < n / COURSE; c++) {
       const top = c * COURSE
-      // The shadow the course above throws down onto this one.
-      for (let x = 0; x < n; x++) put(x, top, tone(RAMP.straw, 0))
-
-      // Stalks, grouped into bundles so a course has rhythm rather than fur,
-      // but each stalk keeps its own tone. Giving a whole bundle one tone was
-      // what made the roof read as a patchwork quilt.
-      for (let bundle = 0; bundle < 7; bundle++) {
-        const bx = r.int(0, n - 1)
-        const bidx = r.range(2.4, 4)
-        for (let s = 0; s < r.int(3, 5); s++) {
-          const x = bx + r.int(-2, 2)
-          const len = r.int(6, COURSE + 3)
-          const lean = r.range(-0.2, 0.2)
-          const start = top + 1 + r.int(0, 1)
-          // Dark where it disappears under the course above, lightest at the
-          // cut end, which is the only part of a thatch stalk in full sun.
-          for (let k = 0; k < len; k++) {
-            put(x + Math.round(lean * k), start + k, tone(RAMP.straw, bidx - 1 + (k / len) * 2.4))
-          }
-        }
+      // The shadow the course above throws down onto this one. Two texels, hard
+      // edged: this is the mark that makes a roof read as thatch at all.
+      for (let x = 0; x < n; x++) {
+        put(x, top, tone(RAMP.straw, 0))
+        put(x, top + 1, tone(RAMP.straw, 1))
+      }
+      // Bold stalks, few of them, running down out of the shadow.
+      for (let s = 0; s < 9; s++) {
+        const x = r.int(0, n - 1)
+        const len = r.int(4, COURSE)
+        const lean = r.range(-0.3, 0.3)
+        stroke(put, x, top + 2, lean, 1, len, RAMP.straw, 2, r.chance(0.4) ? 5 : 4)
       }
     }
   })
 
-/**
- * Hammered iron. Broad brushed banding with dents that have a lit top edge and
- * a shadowed bottom, since a dent with no direction to it is just a smudge.
- */
+/** Hammered iron: flat, two brushed highlights, four rivets. */
 export const steel = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    const brush = valueNoise(r, 16)
-    for (let y = 0; y < n; y++) {
-      for (let x = 0; x < n; x++) {
-        const b = brush(x / n, (y * 6) / n)
-        put(x, y, tone(RAMP.steel, 2 + Math.round(b * 2.4)))
+    fill(put, n, tone(RAMP.steel, 3))
+    for (let i = 0; i < 3; i++) {
+      const y = r.int(0, n - 1)
+      const h = r.int(2, 5)
+      for (let dy = 0; dy < h; dy++) {
+        for (let x = 0; x < n; x++) put(x, y + dy, tone(RAMP.steel, dy === 0 ? 5 : 4))
       }
     }
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 6; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      const rad = r.range(2, 4)
-      blob(put, x, y, rad, rad * 0.8, tone(RAMP.steel, 1))
-      blob(put, x, y - 1, rad * 0.8, rad * 0.4, tone(RAMP.steel, 4))
-      put(x, y - Math.round(rad * 0.8), tone(RAMP.steel, 5))
+      blob(put, x, y, 2.4, 2.2, tone(RAMP.steel, 1))
+      blob(put, x, y - 1, 1.6, 1, tone(RAMP.steel, 5))
     }
   })
 
-/** Woven cloth: a 2/2 twill, with slubs where a thread runs thick. */
+/** Cloth: a flat weave with a few darker threads and a fold or two. */
 export const cloth = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    const fold = normalized(fbm(r, 4))
+    const fold = normalized(fbm(r, 3))
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
-        // Twill: the over-under offsets by one thread each row, which is what
-        // gives real cloth its diagonal.
-        const over = (x + (y >> 1)) % 4 < 2
-        const base = 2 + Math.round(fold(x / n, y / n) * 2)
-        put(x, y, tone(RAMP.cloth, base + (over ? 1 : -1)))
+        ditherStep(put, x, y, RAMP.cloth, 2 + fold(x / n, y / n) * 2.2)
       }
     }
-    for (let i = 0; i < 22; i++) {
-      const x = r.int(0, n - 1)
+    // Weave: one darker thread every four texels, in one direction only. Two
+    // directions at texel scale is a moire pattern, not a fabric.
+    for (let y = 0; y < n; y += 4) {
+      for (let x = 0; x < n; x++) put(x, y, tone(RAMP.cloth, 1))
+    }
+    for (let i = 0; i < 5; i++) {
       const y = r.int(0, n - 1)
-      const len = r.int(3, 8)
-      for (let k = 0; k < len; k++) put(x + k, y, tone(RAMP.cloth, r.int(0, 1)))
+      stroke(put, r.int(0, n - 1), y, 1, 0, r.int(10, 26), RAMP.cloth, 5, 5)
     }
   })
 
-/** Fired clay: the ridges left by the wheel, and a sheen along one of them. */
+/** Fired clay: flat, with the ridges the wheel left. */
 export const clay = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    const wobble = valueNoise(r, 6)
-    for (let y = 0; y < n; y++) {
+    fill(put, n, tone(RAMP.clay, 3))
+    for (let y = 0; y < n; y += 6) {
       for (let x = 0; x < n; x++) {
-        const ridge = Math.sin((y / n * 11 + wobble(x / n, y / n) * 0.8) * Math.PI * 2)
-        put(x, y, tone(RAMP.clay, 3 + (ridge > 0.5 ? 1 : ridge < -0.55 ? -2 : 0)))
+        put(x, y, tone(RAMP.clay, 1))
+        put(x, y + 1, tone(RAMP.clay, 4))
       }
     }
-    for (let i = 0; i < 40; i++) {
-      put(r.int(0, n - 1), r.int(0, n - 1), tone(RAMP.clay, r.int(1, 5)))
+    for (let i = 0; i < 3; i++) {
+      stroke(put, r.int(0, n - 1), r.int(0, n - 1), 1, 0, r.int(12, 30), RAMP.clay, 5, 5)
     }
   })
 
-/** Cloudy glass: streaked, with the odd trapped bubble. */
+/** Cloudy glass: flat and pale, with two streak highlights and a bubble. */
 export const glass = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    const streak = valueNoise(r, 10)
-    for (let y = 0; y < n; y++) {
-      for (let x = 0; x < n; x++) {
-        // (x+y)/n advances by exactly one period per tile on both axes, so the
-        // diagonal streaks still wrap.
-        const s = streak((x + y) / n, (y * 3) / n)
-        put(x, y, tone(RAMP.glass, 2 + Math.round(s * 3)))
-      }
-    }
-    for (let i = 0; i < 10; i++) {
+    fill(put, n, tone(RAMP.glass, 3))
+    for (let i = 0; i < 3; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      blob(put, x, y, 2, 2, tone(RAMP.glass, 4))
-      put(x, y - 1, tone(RAMP.glass, 5))
-      put(x, y + 2, tone(RAMP.glass, 1))
+      const len = r.int(16, 40)
+      stroke(put, x, y, 0.8, 0.6, len, RAMP.glass, 5, 4)
+      stroke(put, x + 2, y, 0.8, 0.6, len, RAMP.glass, 2, 2)
+    }
+    for (let i = 0; i < 4; i++) {
+      const x = r.int(0, n - 1)
+      const y = r.int(0, n - 1)
+      blob(put, x, y, 2.2, 2.2, tone(RAMP.glass, 1))
+      blob(put, x, y, 1.2, 1.2, tone(RAMP.glass, 5))
     }
   })
 
-/** Polished gold: broad diagonal bands, because gold is read by its contrast. */
+/** Polished gold: flat, with two broad bands. Gold is read by its contrast. */
 export const gold = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    const warp = valueNoise(r, 5)
+    const warp = valueNoise(r, 4)
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
-        const band = Math.sin(((x + y) / n * 3 + warp(x / n, y / n) * 0.7) * Math.PI * 2)
-        put(x, y, tone(RAMP.gold, band > 0.6 ? 5 : band > 0 ? 3 : band > -0.6 ? 2 : 1))
+        const band = Math.sin((((x + y) / n) * 2 + warp(x / n, y / n) * 0.5) * Math.PI * 2)
+        put(x, y, tone(RAMP.gold, band > 0.7 ? 5 : band > -0.2 ? 3 : 1))
       }
+    }
+  })
+
+/** Ripe fruit: flat skin, one highlight, one shadowed base, a couple of flecks. */
+export const fruit = (rng: Rng) =>
+  build(PROP, rng, (put, r, n) => {
+    fill(put, n, tone(RAMP.fruit, 3))
+    for (let i = 0; i < 3; i++) {
+      const x = r.int(0, n - 1)
+      const y = r.int(0, n - 1)
+      blob(put, x, y, r.range(7, 11), r.range(6, 9), tone(RAMP.fruit, 4))
+      blob(put, x - 2, y - 2, r.range(3, 5), r.range(2.5, 4), tone(RAMP.fruit, 5))
+    }
+    for (let i = 0; i < 3; i++) {
+      blob(put, r.int(0, n - 1), r.int(0, n - 1), r.range(5, 9), r.range(4, 7), tone(RAMP.fruit, 1))
     }
   })
 
 /**
- * Live coals: a crust of dark cells with fire showing in the cracks between
+ * Live coals: a crust of dark plates with fire showing in the cracks between
  * them. Inverted stone, essentially, and the same Voronoi trick.
  */
 export const ember = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    // Small plates: the hearth is barely a metre across, so a crust cell has to
-    // be four or five texels or the whole fire is one plate.
-    const SEEDS = 200
+    const SEEDS = 90
     const sx: number[] = []
     const sy: number[] = []
     for (let i = 0; i < SEEDS; i++) {
@@ -828,8 +800,7 @@ export const ember = (rng: Rng) =>
         }
         const edge = Math.sqrt(second) - Math.sqrt(best)
         // Hot in the fissures, cooling toward the middle of each crust plate.
-        const idx = edge < 0.6 ? 5 : edge < 1.2 ? 4 : edge < 2 ? 2 : 1
-        put(x, y, tone(RAMP.ember, idx))
+        put(x, y, tone(RAMP.ember, edge < 0.8 ? 5 : edge < 1.8 ? 4 : edge < 3.2 ? 2 : 1))
       }
     }
   })
@@ -853,6 +824,13 @@ export interface TextureSet {
   glass: THREE.CanvasTexture
   gold: THREE.CanvasTexture
   ember: THREE.CanvasTexture
+  /**
+   * Unused until someone wires it up. The apple's kitbash recipe asks for
+   * `ember`, a fire ramp, so a Red Apple renders pumpkin orange in the world and
+   * in its icon. This is the red it wants; it needs one line in kitbash.ts's
+   * material map and a `fruit` material key on the recipe.
+   */
+  fruit: THREE.CanvasTexture
 }
 
 let cached: TextureSet | null = null
@@ -886,6 +864,7 @@ export function textures(rng: Rng): TextureSet {
     glass: glass(r),
     gold: gold(r),
     ember: ember(r),
+    fruit: fruit(r),
   }
   return cached
 }
@@ -917,6 +896,24 @@ const MIN_TEXELS = 12
 export function tiled(tex: THREE.CanvasTexture, worldW: number, worldH: number): THREE.Texture {
   const t = tex.clone()
   t.needsUpdate = true
+
+  // Re-asserted rather than fixed. Texture.copy() in three r185 does carry
+  // magFilter, minFilter, anisotropy and generateMipmaps across a clone, so
+  // nothing was being lost here; this is a local guarantee, so that the one
+  // function handing textures to materials cannot hand over a filtered one.
+  //
+  // Worth recording what this does NOT fix, because it was reported as texel
+  // density drifting between the near and far ground. The camera is
+  // orthographic, so density on a *flat* plane is constant by construction, and
+  // there are no mipmaps to mush anything. What actually varies is the terrain:
+  // ground tilted away from the camera compresses its texels in screen space.
+  // The other half is that the frame renders into a fixed-height buffer and is
+  // then scaled to the window by a non-integer factor, so the texel grid never
+  // lands on whole output pixels. Both live outside this file.
+  t.magFilter = THREE.NearestFilter
+  t.minFilter = THREE.NearestFilter
+  t.generateMipmaps = false
+
   const img = tex.image as HTMLCanvasElement
   const per = (world: number, texels: number) =>
     Math.max(MIN_TEXELS / texels, (world * TEXELS_PER_UNIT) / texels)

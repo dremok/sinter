@@ -106,10 +106,10 @@ void RE_Direct_Toon( const in IncidentLight directLight, const in vec3 geometryP
 	reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );
 
 	float grazing = 1.0 - abs( dot( geometryNormal, geometryViewDir ) );
-	float rim = smoothstep( 0.55, 0.78, grazing );
+	float rim = smoothstep( 0.46, 0.72, grazing );
 	float away = 1.0 - smoothstep( -0.15, 0.45, dot( geometryNormal, directLight.direction ) );
 
-	reflectedLight.directDiffuse += directLight.color * rim * away * 0.5;
+	reflectedLight.directDiffuse += directLight.color * rim * away * 0.26;
 
 }
 
@@ -138,17 +138,19 @@ let ramp: THREE.DataTexture | null = null
  * like plain lambert. Bands only read if the jump between them is larger than
  * the variation inside them.
  *
- * So: 0.26 shadow, 0.56 terminator, 1.00 light. Roughly a factor of two at each
- * step, held flat across four, two and two texels. The terminator is two texels
- * wide (dot(N,L) from 0 to 0.5) because a one-texel band never lands on faceted
- * low-poly geometry, where each face has a single constant normal and therefore
- * a single band. A narrow terminator is correct for smooth surfaces and useless
- * here.
+ * So: 0.30 shadow, 0.48 terminator, 0.78 half light, 0.95 light. Four steps,
+ * each a long way from its neighbour, and the shadow held flat across four
+ * texels so it has no internal shape at all.
  *
- * The boundary at dot(N,L) = 0.5 is why the sun sits at ~44 degrees of
- * elevation rather than 36: flat ground then lands at 0.69, comfortably inside
- * the top band, so only genuinely sloped ground breaks into the terminator.
- * Drop the sun lower and the whole clearing bands into blotches.
+ * The terminator is one texel and it stays *saturated*. Both matter. A wide
+ * terminator swallows the gently sloping ground, and a desaturated brown one
+ * turns every hectare it touches olive, which is how the previous attempt at
+ * this traded a value problem for a colour problem. Its job is to be a step in
+ * value on things that stand up, not a stain on the terrain.
+ *
+ * The sun sits at ~44 degrees of elevation for the same reason: flat ground
+ * then lands at dot(N,L) = 0.69, comfortably inside the top band, so only
+ * genuinely angled faces band at all.
  */
 export function toonRamp(): THREE.DataTexture {
   if (ramp) return ramp
@@ -160,8 +162,8 @@ export function toonRamp(): THREE.DataTexture {
     [0.26, 0.33, 0.52],
     [0.26, 0.33, 0.52],
     [0.27, 0.34, 0.53],
-    [0.56, 0.41, 0.33], // terminator: a real value step, warm and dirty
-    [0.56, 0.41, 0.33],
+    [0.60, 0.46, 0.38], // terminator: one texel, a real step, still a colour
+    [0.84, 0.76, 0.62], // the step out of it
     [1.00, 0.94, 0.82], // light
     [1.00, 0.98, 0.90],
   ]
@@ -330,7 +332,7 @@ void main() {
   // making shadow read as shadow: outdoors a shadow is lit by a broad grey-blue
   // sky, so it goes flat as well as cool. Saturating everything equally is what
   // leaves dark grass looking like dark grass instead of like grass in shade.
-  c = clamp( ( c - 0.46 ) * 1.13 + 0.46, 0.0, 1.0 );
+  c = clamp( ( c - 0.40 ) * 1.16 + 0.42, 0.0, 1.0 );
   float g = dot( c, LUMA );
   c = clamp( mix( vec3( g ), c, mix( 0.80, 1.14, smoothstep( 0.04, 0.58, l ) ) ), 0.0, 1.0 );
 
@@ -341,9 +343,9 @@ void main() {
   // part of the frame is far away. Fog alone cannot do it, because at this zoom
   // the depth across the frame is only about twenty metres. This is the same
   // trick a painter uses when the horizon is out of shot.
-  float far = smoothstep( 0.66, 1.0, vUv.y );
+  float far = smoothstep( 0.74, 1.0, vUv.y );
   vec3 distant = mix( vec3( dot( c, LUMA ) ), c, 0.62 ) * vec3( 0.88, 0.92, 1.02 );
-  c = mix( c, distant, far * 0.55 );
+  c = mix( c, distant, far * 0.3 );
 
   // Vignette, cool rather than black, so the corners read as air between the
   // camera and the far trees rather than as a lens.

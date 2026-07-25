@@ -47,7 +47,7 @@ const GRID = 184
 /** Pond centre. The radius is a function of angle; see `pondRadius`. */
 const POND = { x: -11.8, z: 5.2 }
 const POND_DEPTH = 1.6
-export const WATER_LEVEL = -0.55
+export const WATER_LEVEL = -0.42
 
 /** The hearth, and the centre everything at home is laid out around. */
 const HOME = { x: 0, z: 13.4 }
@@ -305,18 +305,18 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // waterline. Water is transparent, so the part under it reads as a bottom
     // you can see, which is most of what stops a pond looking like a decal.
     const seg = 48
-    const rings = [0, 0.3, 0.52, 0.68, 0.84]
+    const rings = [0, 0.28, 0.5, 0.7, 0.9]
     const verts: number[] = []
     const uvs: number[] = []
     const idx: number[] = []
     const ragged: number[] = []
-    for (let i = 0; i <= seg; i++) ragged.push(pondRng.range(-0.15, 0.55))
+    for (let i = 0; i <= seg; i++) ragged.push(pondRng.range(-0.3, 0.5))
 
     for (let i = 0; i <= seg; i++) {
       const a = (i / seg) * Math.PI * 2
       const rad = pondRadius(a)
       for (const f of rings) {
-        const rr = rad * f + (f === 0.84 ? ragged[i % seg]! : 0)
+        const rr = rad * f + (f === 0.9 ? ragged[i % seg]! : 0)
         const x = POND.x + Math.cos(a) * rr
         const z = POND.z + Math.sin(a) * rr
         verts.push(x, heightAt(x, z) + 0.045, z)
@@ -343,7 +343,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     const idx: number[] = []
     for (let i = 0; i <= seg; i++) {
       const a = (i / seg) * Math.PI * 2
-      const rad = pondRadius(a) * 0.8
+      const rad = pondRadius(a) * 0.82
       const x = POND.x + Math.cos(a) * rad
       const z = POND.z + Math.sin(a) * rad
       verts.push(x, WATER_LEVEL, z)
@@ -467,8 +467,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       [-5.6, 12.8],
       [-7.8, 11.3],
       [-8.2, 8.8],
-      [-7.6, 6.4],
-      [-7.0, 5.2],
+      [-7.8, 6.4],
+      [-8.0, 5.3],
     ],
     0.62,
     M.track,
@@ -1841,7 +1841,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** A dipping platform where the pond path meets the water. */
   {
-    const px = -7.0
+    const px = -8.5
     const pz = 5.2
     const h = heightAt(px, pz)
     for (const s of [-1, 1]) {

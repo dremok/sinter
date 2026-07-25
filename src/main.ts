@@ -85,7 +85,7 @@ iso.viewSize = 13
  *
  * Range comes from `IsoCamera.fogRange()`, never from absolute numbers. (D9)
  */
-const HAZE = new THREE.Color(BAND0.sky).lerp(new THREE.Color(0xf7e6cc), 0.22)
+const HAZE = new THREE.Color(BAND0.sky).lerp(new THREE.Color(0xf7e6cc), 0.14)
 scene.background = HAZE
 const fogRange = iso.fogRange()
 scene.fog = new THREE.Fog(HAZE, fogRange.near, fogRange.far)
@@ -105,7 +105,7 @@ scene.fog = new THREE.Fog(HAZE, fogRange.near, fogRange.far)
  * split tone catches cast shadows, where the key is switched off entirely and
  * neither of the other two has anything to say.
  */
-scene.add(new THREE.HemisphereLight(BAND0.skyLight, BAND0.groundLight, 0.62))
+scene.add(new THREE.HemisphereLight(BAND0.skyLight, BAND0.groundLight, 0.78))
 
 // Sun azimuth must differ from the camera's, or shadows hide behind their own
 // casters and read as broken. `iso.sunOffset()` owns that now, at every camera

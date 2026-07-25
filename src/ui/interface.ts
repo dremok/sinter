@@ -46,6 +46,27 @@ const PIPS = 4
  */
 const TRAITS_PER_CARD = 3
 
+/**
+ * Notice boxes on screen at once. Past this the overflow collapses into one
+ * summary line, because a message that vanishes before it is read is worse
+ * than a count of the ones you missed.
+ */
+const MAX_NOTICES = 3
+
+/** How long a notice lives once nothing has refreshed it. */
+const NOTICE_MS = 5200
+
+/** A live notice box. `label` is kept so a repeat can be told from a sequel. */
+interface Notice {
+  node: HTMLElement
+  name: HTMLElement
+  body: HTMLElement
+  tally: HTMLElement
+  label: string
+  count: number
+  timer: ReturnType<typeof setTimeout>
+}
+
 /** Group headings for the filter drawer, in the order they are shown. */
 const GROUPS: { id: string; label: string }[] = [
   { id: 'material', label: 'Material' },
@@ -72,10 +93,9 @@ export class Ui {
   private open = false
 
   /** Live notices by group key, so repeats update in place instead of stacking. */
-  private notices = new Map<
-    string,
-    { node: HTMLElement; body: HTMLElement; tally: HTMLElement; count: number; timer: ReturnType<typeof setTimeout> }
-  >()
+  private notices = new Map<string, Notice>()
+  /** The one line standing in for everything that fell off the top of the stack. */
+  private overflow: { node: HTMLElement; count: number; timer: ReturnType<typeof setTimeout> } | null = null
   /** The pair whose refusal has already been toasted. See `announce`. */
   private announced: string | null = null
 
@@ -456,15 +476,22 @@ export class Ui {
   /**
    * Live notices.
    *
-   * The important behaviour here is that repeats COALESCE rather than stack.
-   * Chopping a tree fires once per swing and a spreading fire fires once per
-   * post, so the naive version buried the screen in boxes saying nearly the
-   * same thing. A notice with the same `group` updates the existing box in
-   * place, keeps its position so nothing jumps, counts the repeats, and
-   * restarts its own timer.
+   * Three behaviours, all of them about not burying the screen:
    *
-   * Position is deliberately NOT bumped to the end on an update. Reordering on
+   *   - Repeats COALESCE. A spreading fire calls this once per post and a chop
+   *     once per swing, so the same label arriving again updates the box that
+   *     is already there and counts itself, rather than adding another.
+   *   - One action keeps ONE box. Pass a `group` and every message about that
+   *     object shares a box: the chopping line becomes the felled line in
+   *     place. A new label in a group is a sequel, not a repeat, so the count
+   *     starts over rather than carrying the swings forward.
+   *   - Overflow is SUMMARISED. See `cap`.
+   *
+   * Position is deliberately NOT bumped on an update. Reordering the stack on
    * every swing is its own kind of noise.
+   *
+   * `group` defaults to the label, so call sites that pass nothing still get
+   * repeat coalescing for free.
    */
   toast(
     label: string,
@@ -474,54 +501,94 @@ export class Ui {
     // Third argument used to be a bare kind. Accept both so no call site lies.
     const o = typeof opts === 'string' ? { kind: opts } : opts
     const kind = o.kind ?? 'normal'
-
-    // Default grouping is by label, so identical labels merge without every
-    // call site having to remember to pass a key.
     const key = o.group ?? label
 
-    const host = $('toasts')
     const existing = this.notices.get(key)
 
     if (existing && existing.node.isConnected) {
-      existing.count++
+      if (label === existing.label) {
+        existing.count++
+        existing.tally.textContent = `x${existing.count}`
+      } else {
+        existing.label = label
+        existing.name.textContent = label
+        existing.count = 1
+        existing.tally.textContent = ''
+      }
       existing.body.textContent = text
-      existing.node.className = 'toast' + (kind === 'fire' ? ' fire' : '')
-      if (existing.count > 1) existing.tally.textContent = `x${existing.count}`
-      // Retrigger the entry animation so an update is still noticed.
-      existing.node.classList.remove('bump')
-      void existing.node.offsetWidth
-      existing.node.classList.add('bump')
-      clearTimeout(existing.timer)
-      existing.timer = setTimeout(() => {
-        existing.node.remove()
-        this.notices.delete(key)
-      }, 5200)
+      // Fire does not un-happen. A group that has caught keeps the hot accent
+      // even when an ordinary message lands in it afterwards.
+      if (kind === 'fire') existing.node.classList.add('fire')
+      this.pulse(existing.node)
+      existing.timer = this.countdown(key, existing.timer)
       return
     }
 
     const node = el('div', 'toast' + (kind === 'fire' ? ' fire' : ''))
-    const head = el('div', 'label', label)
+    const head = el('div', 'label')
+    const name = el('span', undefined, label)
     const tally = el('span', 'tally')
-    head.append(tally)
+    head.append(name, tally)
     const body = el('div', 'body', text)
     node.append(head, body)
-    host.append(node)
+    $('toasts').append(node)
 
-    // Headless runs never advance the wall clock, so these would pile up
-    // forever; cap the list instead of relying on the timer alone. Oldest goes,
-    // and its bookkeeping goes with it.
-    while (host.children.length > 4) {
-      const oldest = host.firstChild as HTMLElement
-      for (const [k, v] of this.notices) if (v.node === oldest) this.notices.delete(k)
-      host.removeChild(oldest)
-    }
+    this.notices.set(key, { node, name, body, tally, label, count: 1, timer: this.countdown(key) })
+    this.cap()
+  }
 
-    const timer = setTimeout(() => {
-      node.remove()
+  /** (Re)starts a notice's own expiry. Headless runs never reach it. */
+  private countdown(key: string, previous?: ReturnType<typeof setTimeout>): ReturnType<typeof setTimeout> {
+    if (previous !== undefined) clearTimeout(previous)
+    return setTimeout(() => {
+      this.notices.get(key)?.node.remove()
       this.notices.delete(key)
-    }, 5200)
+    }, NOTICE_MS)
+  }
 
-    this.notices.set(key, { node, body, tally, count: 1, timer })
+  /** Replays the entry animation, so an update to an existing box is noticed. */
+  private pulse(node: HTMLElement): void {
+    node.classList.remove('bump')
+    void node.offsetWidth // forces reflow; without it the animation does not restart
+    node.classList.add('bump')
+  }
+
+  /**
+   * Holds the stack to `MAX_NOTICES`. What falls off is added to one summary
+   * line instead of disappearing, because the old version dropped the oldest
+   * box in silence and a player never knew a message had been there.
+   *
+   * Map order is insertion order and updates deliberately do not reorder, so
+   * the first entry is always the oldest box on screen.
+   */
+  private cap(): void {
+    while (this.notices.size > MAX_NOTICES) {
+      const [key, oldest] = this.notices.entries().next().value!
+      clearTimeout(oldest.timer)
+      oldest.node.remove()
+      this.notices.delete(key)
+      this.summarise(oldest.count)
+    }
+  }
+
+  private summarise(dropped: number): void {
+    const node = this.overflow?.node ?? el('div', 'toast more')
+    const count = (this.overflow?.count ?? 0) + dropped
+    node.textContent = `And ${count} more.`
+
+    // The stack is column-reverse, so the first child sits at the bottom, which
+    // is exactly where the notices that fell off used to be.
+    $('toasts').prepend(node)
+
+    if (this.overflow) clearTimeout(this.overflow.timer)
+    this.overflow = {
+      node,
+      count,
+      timer: setTimeout(() => {
+        node.remove()
+        this.overflow = null
+      }, NOTICE_MS),
+    }
   }
 
   /**
