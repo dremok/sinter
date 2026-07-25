@@ -3,7 +3,8 @@
 Read this first every session. Update it immediately after any significant change.
 
 **Last updated:** 2026-07-25
-**Current milestone:** M0–M2 done, M3 partially done, art pass 2 in progress
+**Current milestone:** M0–M2 done, M3 partially done, art pass 3 done
+**Target:** playable vertical slice (Band 0 only, ~60 items, ~10 property interactions, 3 real obstacles)
 
 ## Latest pass: simplify and make it beautiful
 
@@ -18,8 +19,17 @@ Playtest feedback was blunt and correct: ugly, too big, too many items, movement
 - **Items now vanish when taken.** `scene.remove` was called on meshes parented to the region group, so it silently did nothing.
 - **Prompts say why nothing is available**, instead of showing nothing at all.
 
-Still to do from that feedback: proper Blender-authored models rather than code primitives (Blender 5.2 LTS is installed and scriptable headlessly; no Blender MCP is connected).
-**Target:** playable vertical slice (Band 0 only, ~60 items, ~10 property interactions, 3 real obstacles)
+## Pass 3: legibility, distinct results, targeting
+
+Second round of playtest feedback, all acted on:
+
+- **Resolution middle ground.** 240 lines made a held item ~10px tall and upscaled to blur. Now 400: under 3x upscale, silhouettes survive, pixel grid still visible. Items also render 1.9x rather than 1.55x.
+- **Every combination is now a distinct item, and proven so.** The old namer drew an adjective and a noun from two small pools, so unrelated merges kept landing on the same name and merging felt pointless. All 45 pairs of the starting ten are now hand-authored with real names and descriptions, and a test asserts no two pairs can share a name. The procedural fallback is a bijection over parent epithets and nouns, so it cannot collide either.
+- **Ten recognizable items** replace the previous obscure set: torch, flint, iron horseshoe, rope, plank, bucket of water, axe, straw bale, oil flask, apple. Nobody can reason about combining objects they cannot identify.
+- **Targeting bug fixed.** Felled posts stayed valid targets forever and, being nearest, kept stealing focus, so chopping reported 0% while standing in front of a standing post. Targeting now excludes spent and zero-hp structures, weights by facing direction, and ranks built structures above scenery so a tuft of grass cannot outrank the wall you are against.
+- **`npm run verify:movement`** drives the real build with real key presses: 13 checks covering direction, camera-relative controls, diagonal speed, sticking, and the targeting regression. A static screenshot could never have caught "left and right are reversed", which shipped once.
+
+Still to do: proper Blender-authored models rather than code primitives (Blender 5.2 LTS is installed and scriptable headlessly; no Blender MCP is connected).
 
 ---
 
@@ -28,7 +38,7 @@ Still to do from that feedback: proper Blender-authored models rather than code 
 There is a playable alpha. You can walk into a generated Band 0 region, pick things up, merge them irreversibly, and get through a palisade in more than one way without any of those ways having been authored as a solution.
 
 Stack, all of it verified by actually running it:
-- Vite + TypeScript + Three.js + Rapier, orthographic iso camera, seeded RNG, fixed timestep clock
+- Vite + TypeScript + Three.js, orthographic iso camera, seeded RNG, fixed timestep clock (Rapier is out of the runtime, see D13)
 - Headless screenshot harness (`npm run shot`), which caught two rendering bugs during the scaffold and three more during the alpha
 - Railway deploy config (`railway.json`, `docs/DEPLOY.md`)
 - Design, architecture, asset pipeline, deployment, and decisions all documented
@@ -36,17 +46,17 @@ Stack, all of it verified by actually running it:
 Game, added in the alpha pass:
 - **Property registry** (`src/props/registry.ts`): 27 properties as scalars, each with a combine rule
 - **Merge derivation** (`src/props/derive.ts`): commutative and deterministic, with emergent rules. An edge on a haft cuts, rope on a rigid span climbs, metal on stone sparks, water soaks and quenches
-- **Catalog** (`src/items/catalog.ts`): 24 hand-authored items, each a property bag plus a parametric kitbash recipe
+- **Catalog** (`src/items/catalog.ts`): 10 recognizable hand-authored items, each a property bag plus a parametric kitbash recipe
 - **Merging** (`src/items/merge.ts`): two in, one out, always yields; results inherit parts from both parents so they look like what made them
 - **miniplex ECS** (`src/ecs/world.ts`) with property-driven queries
 - **Spatial hash** (`src/sim/spatial.ts`), rebuilt per tick, carrying all gameplay proximity
 - **Fire** (`src/sim/fire.ts`): ignition, propagation, drying, burnout, structural failure
-- **Region** (`src/world/region.ts`): noise terrain, a carved river, 90 oaks, dry pasture, the palisade, seeded scatter
+- **Region** (`src/world/region.ts`): a 36x32 clearing, noise terrain, a pond, tree line, dry pasture, the palisade and its rock spurs
 - **Pack UI** (`src/ui/interface.ts`): property filter, merge bench, undiscovered results hidden behind a `?`
 
-Verified: `npm run typecheck` clean, `npm run test` 30/30 passing, screenshots confirm the palisade catching, cascading, and collapsing into a gap you can walk through.
+Verified: `npm run typecheck` clean, `npm run test` 33/33 passing, `npm run verify:movement` 13/13 passing against the live build, and screenshots confirm the palisade catching, cascading, and collapsing into a gap you can walk through.
 
-What does not exist: agents and disposition (so no bribery, distraction or disguise), gateways between regions, death and persistence, the codex UI, any item generation beyond the hand-authored 24, Blender kitbash parts (meshes are code primitives for now), and all audio.
+What does not exist: agents and disposition (so no bribery, distraction or disguise), gateways between regions, death and persistence, the codex UI, any item generation beyond the hand-authored 10, Blender kitbash parts (meshes are code primitives for now), and all audio.
 
 Deployed and verified: **https://sinter-production.up.railway.app**. Checked with `npm run verify:deploy`, which loads the live site in a real browser, confirms a canvas exists and the tick counter is advancing, and fails on any console or request error.
 
@@ -62,7 +72,7 @@ Prove Three.js, Rapier, orthographic iso, fixed timestep, and seeded determinism
 ### M1: Items exist and can be merged — DONE
 miniplex ECS. Property registry (`src/props/`). Item entities that can be picked up and dropped. Infinite inventory UI with the property filter, which is the query that matters most. Merge bench: two slots, one output, inputs destroyed. Hardcode 20 items by hand for now; no generation yet.
 
-Done when: you can pick up two items, merge them, and the result behaves as its properties say it should. **Met.** 24 items, and the merge guarantees are tested over all 625 pairs.
+Done when: you can pick up two items, merge them, and the result behaves as its properties say it should. **Met.** 10 items, all 45 pairs authored, and the merge guarantees including name-distinctness are tested over every pair.
 
 ### M2: The property simulation — DONE for fire
 The milestone that proves the whole design. Fire first: ignition, propagation through `FLAMMABLE` neighbors, burnout, byproducts. Then thermal transfer, then water and soaking (wet things resist fire), then electricity through `CONDUCTIVE` networks.

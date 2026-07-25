@@ -111,6 +111,51 @@ try {
   const escape = await press('s', 600)
   check('player can always back out again', escape.dy < -0.02, `dy ${escape.dy.toFixed(3)}`)
 
+  console.log('\ntargeting')
+  // Regression: a felled post stayed a valid target forever, and being the
+  // nearest thing it kept stealing focus, so chopping reported 0% while the
+  // player stood in front of a post that was still standing.
+  await page.goto(`${URL}?pack=axe`, { waitUntil: 'load', timeout: 60_000 })
+  await page.waitForFunction(() => window.__sinterReady === true, undefined, { timeout: 60_000 })
+  await page.keyboard.press('Tab')
+  await page.waitForTimeout(200)
+
+  // W alone runs diagonally north-west in world space, because "up the screen"
+  // on an isometric camera is not "north". W+D together is straight north,
+  // which is where the palisade is.
+  await page.keyboard.down('w')
+  await page.keyboard.down('d')
+  await page.waitForTimeout(5200)
+  await page.keyboard.up('w')
+  await page.keyboard.up('d')
+  await page.waitForTimeout(400)
+
+  const promptText = async () => page.evaluate(() => document.getElementById('prompt')?.textContent ?? '')
+
+  const atPalisade = await promptText()
+  check('palisade is targeted on approach', /Palisade/.test(atPalisade), JSON.stringify(atPalisade.slice(0, 60)))
+  check('chop is offered', /Chop with/.test(atPalisade), '')
+
+  // Fell one post outright.
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press('1')
+    await page.waitForTimeout(160)
+  }
+  await page.waitForTimeout(400)
+
+  const after = await promptText()
+  // Whatever is now targeted, it must not be a dead post reporting 0%.
+  check('does not target a felled post', !/at 0%/.test(after), JSON.stringify(after.slice(0, 60)))
+
+  await page.keyboard.press('1')
+  await page.waitForTimeout(250)
+  const afterChop = await promptText()
+  check(
+    'chopping still makes progress on a standing post',
+    !/at 0%/.test(afterChop),
+    JSON.stringify(afterChop.slice(0, 60)),
+  )
+
   // Finally, no NaNs. A single NaN in the position silently freezes movement.
   const finalPos = await page.evaluate(() => window.__sinter.pos())
   check(

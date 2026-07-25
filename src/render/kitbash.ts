@@ -104,7 +104,7 @@ function buildPart(spec: PartSpec): THREE.Mesh {
  * This is a legibility decision, not a physical one, so it lives in the render
  * layer and nothing in `sim/` sees it.
  */
-const DISPLAY_SCALE = 1.55
+const DISPLAY_SCALE = 1.9
 
 /** Assemble a whole item. The group's origin sits at the item's centre. */
 export function buildItemMesh(def: ItemDef): THREE.Group {

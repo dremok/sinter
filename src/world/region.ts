@@ -304,16 +304,16 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // Ten items, placed by hand. Between them they afford every route through the
   // palisade: burn it, chop it, climb it, or wet the ground to steer the fire.
   const layout: [string, number, number][] = [
-    ['branch', -3.5, 10.5],
-    ['flint', 3.2, 9.4],
-    ['nail', 5.6, 6.2],
-    ['straw', -1.4, 5.6],
-    ['rope', -6.8, 8.2],
-    ['plank', -8.4, 3.4],
-    ['oil', 6.8, 1.4],
-    ['rag', 2.4, 3.2],
-    ['bucket', -9.2, 11.4],
-    ['sickle', 9.4, 12.6],
+    ['torch', -3.2, 10.8],
+    ['flint', 2.8, 9.6],
+    ['horseshoe', 5.8, 6.4],
+    ['straw', -1.2, 5.4],
+    ['rope', -6.6, 8.4],
+    ['plank', -8.2, 3.6],
+    ['oil', 6.6, 1.6],
+    ['apple', 2.2, 3.0],
+    ['bucket', -9.0, 11.6],
+    ['axe', 9.2, 12.4],
   ]
 
   const itemRng = rng.fork('items')

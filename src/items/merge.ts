@@ -5,11 +5,22 @@
  *   - commutative:   merge(a, b) is identical to merge(b, a)
  *   - deterministic: the same pair produces the same item in every run forever
  *   - total:         every pair produces something, never "nothing happens"
+ *   - DISTINCT:      no two different pairs produce the same name
  *
- * There is no RNG in here at all. Names and parts are pure functions of the
- * inputs, which is what makes the results globally stable without a bake step.
- * The properties come from `props/derive.ts` by rule; only the *presentation*
- * is decided here, exactly the split described in docs/DESIGN.md.
+ * That last one is new, and it was a real complaint: the previous namer picked
+ * an adjective and a noun from two small pools keyed on the result's dominant
+ * properties, so wildly different merges kept coming out as "Fused Bundle".
+ * Mechanically they were different items, but a player has only the name and
+ * the icon to go on, so they read as the same thing and merging felt pointless.
+ *
+ * The fix is structural rather than a bigger word list. Parents are sorted, and
+ * the result is named `<epithet of the first> <noun of the second>`. Since each
+ * catalog item owns a unique epithet and a unique noun, that mapping is a
+ * bijection: distinct pairs cannot collide. `merge.test.ts` asserts it over
+ * every pair rather than trusting the argument.
+ *
+ * There is no RNG in here at all. The properties come from `props/derive.ts` by
+ * rule; only presentation is decided here.
  */
 
 import { deriveProperties } from '../props/derive'
@@ -21,93 +32,98 @@ export function mergeId(a: string, b: string): string {
 }
 
 /**
- * Authored highlights.
- *
- * These exist for flavor, not for mechanics: the properties are still derived
- * by rule, and removing an entry here changes only the name and the blurb. A
- * pair that is not listed still merges, and still works.
+ * Authored highlights, for pairs a player is likely to try early. These change
+ * the name and the blurb only; the properties are still derived by rule, so
+ * deleting an entry costs flavour and nothing else.
  */
 const NAMED: Record<string, { name: string; desc: string }> = {
-  'branch+flint': { name: 'Hand Axe', desc: 'A flake of flint lashed into a split branch. Crude and effective.' },
-  'branch+rag': { name: 'Bound Brand', desc: 'Cloth wound tight around one end. It wants a light.' },
-  'branch+rope': { name: 'Lashed Pole', desc: 'Two arm-lengths, bound at the middle. It flexes but holds.' },
-  'oil+rag': { name: 'Oiled Rag', desc: 'Heavy with lamp oil. Handle it away from the hearth.' },
-  'branch+oil': { name: 'Pitch Torch', desc: 'Soaked end, dry handle. It has one purpose.' },
-  'ember+straw': { name: 'Burning Tinder', desc: 'Already going. It will not wait for you.' },
-  'flint+nail': { name: 'Striker', desc: 'Iron on flint throws a hot spark. That is the whole trick.' },
+  // Apple
+  'apple+axe': { name: 'Quartered Apple', desc: 'Four clean pieces. A waste of a good axe.' },
+  'apple+bucket': { name: 'Bobbing Apple', desc: 'It floats. This is not obviously worth two items.' },
+  'apple+flint': { name: 'Cored Apple', desc: 'Opened with a stone edge. The pips are still in there.' },
+  'apple+horseshoe': { name: 'Horse Treat', desc: 'An apple and a shoe. Somewhere there is a horse missing both.' },
+  'apple+oil': { name: 'Glazed Apple', desc: 'Coated and sticky. It will not rot for a while.' },
+  'apple+plank': { name: 'Apple Press', desc: 'Board, weight, and fruit. Cider is a matter of patience.' },
+  'apple+rope': { name: 'Baited Snare', desc: 'A loop and something a hungry animal wants.' },
+  'apple+straw': { name: 'Winter Fodder', desc: 'Packed in straw so it keeps. Animals will follow this.' },
+  'apple+torch': { name: 'Roast Apple', desc: 'Blackened on one side, hot all the way through.' },
+
+  // Axe
+  'axe+bucket': { name: "Cooper's Axe", desc: 'Wet-shaved staves. This is how the bucket was made.' },
+  'axe+flint': { name: 'Honed Axe', desc: 'Ground back to an edge that will part wool.' },
+  'axe+horseshoe': { name: 'Felling Wedge', desc: 'Iron driven into the split to keep it open.' },
+  'axe+oil': { name: 'Slick Axe', desc: 'Oiled head, oiled haft. It bites and it does not stick.' },
+  'axe+plank': { name: 'Splitting Wedge', desc: 'Board split down the grain and driven to a point.' },
+  'axe+rope': { name: 'Lashed Poleaxe', desc: 'Head bound higher up the haft. More reach, less control.' },
+  'axe+straw': { name: 'Chaff', desc: 'Straw chopped to pieces. It catches even faster now.' },
+  'axe+torch': { name: 'Fire Axe', desc: 'A blade and a brand on one haft. Cut it or burn it.' },
+
+  // Bucket
+  'bucket+flint': { name: 'Wet Whetstone', desc: 'Stone kept wet. It takes an edge back in minutes.' },
+  'bucket+horseshoe': { name: 'Quenching Trough', desc: 'Hot iron and cold water. That hiss is the whole craft.' },
+  'bucket+oil': { name: 'Oil Slick', desc: 'They refuse to mix. The oil sits on top, waiting.' },
+  'bucket+plank': { name: 'Sluice Board', desc: 'A board and a pail. Water goes where you point it.' },
+  'bucket+rope': { name: 'Well Bucket', desc: 'Rope through the handle. Now it reaches the bottom.' },
+  'bucket+straw': { name: 'Sodden Bale', desc: 'Straw that has given up any ambition of burning.' },
+  'bucket+torch': { name: 'Drowned Torch', desc: 'Black, wet, and useless. Some merges are a loss.' },
+
+  // Flint
+  'flint+horseshoe': { name: 'Fire Striker', desc: 'Iron on flint throws a hot spark. That is the whole trick.' },
+  'flint+oil': { name: 'Fire Flask', desc: 'Oil, glass, and something to light it with. Throw it and run.' },
+  'flint+plank': { name: 'Flint Adze', desc: 'Stone edge set crosswise into a board. It hollows and it hacks.' },
+  'flint+rope': { name: 'Stone Bolas', desc: 'A weight on a cord. It goes further than your arm can throw.' },
+  'flint+straw': { name: 'Tinder Kit', desc: 'Dry straw and a striking stone. Fire, if you are patient.' },
+  'flint+torch': { name: 'Struck Torch', desc: 'Scraped alight on the second try. It is going now.' },
+
+  // Horseshoe
+  'horseshoe+oil': { name: 'Oiled Iron', desc: 'It will not rust now. It also will not stay in your grip.' },
+  'horseshoe+plank': { name: 'Studded Board', desc: 'Iron nailed through, points out. Someone was frightened.' },
+  'horseshoe+rope': { name: 'Grapple', desc: 'Iron on a line. It catches on most things.' },
+  'horseshoe+straw': { name: 'Stable Bedding', desc: 'Straw, iron, and the smell of a barn.' },
+  'horseshoe+torch': { name: 'Iron-Bound Torch', desc: 'Collared in iron so the head cannot work loose.' },
+
+  // Oil
+  'oil+plank': { name: 'Oiled Decking', desc: 'Sealed against the weather. Also against your footing.' },
+  'oil+rope': { name: 'Fuse', desc: 'Cord drawn through oil. It carries a flame along its length.' },
+  'oil+straw': { name: 'Firebrand Bundle', desc: 'Straw drenched in oil. It will go up like paper.' },
+  'oil+torch': { name: 'Pitch Torch', desc: 'Soaked end, dry handle. It has one purpose.' },
+
+  // Plank
   'plank+rope': { name: 'Rope Ladder', desc: 'Rungs at uneven spacing. Nobody measured.' },
-  'crate+rope': { name: 'Slung Crate', desc: 'You can drag it now, or hang it from something.' },
-  'acorn+bucket': { name: 'Sprouting Acorn', desc: 'Soaked overnight. The shell has split.' },
-  'flint+whetstone': { name: 'Honed Flake', desc: 'Ground to an edge that will part wool.' },
-  'nail+plank': { name: 'Studded Board', desc: 'Nails driven through, points out. Someone was frightened.' },
-  'coin+rag': { name: 'Purse', desc: 'Knotted cloth with a weight in the corner.' },
-  'candle+lantern': { name: 'Lit Lantern', desc: 'Warm and steady. It throws a circle about four paces wide.' },
-  'bucket+ember': { name: 'Quenched Ember', desc: 'Black, wet, and useless. Some merges are a loss.' },
-  'millstone+rope': { name: 'Deadweight', desc: 'A stone on a line. It will fall through most things.' },
-  'apple+nail': { name: 'Spiked Apple', desc: 'Nobody should eat this. It is still food, technically.' },
-  'pitch+branch': { name: 'Tarred Stave', desc: 'Black to the elbow. It will burn for a long time.' },
-  'fleece+oil': { name: 'Greased Fleece', desc: 'Wool that has stopped being wool and started being fuel.' },
-  'hoop+plank': { name: 'Cart Wheel', desc: 'Iron tyre, oak spokes. It rolls, more or less true.' },
+  'plank+straw': { name: 'Straw Pallet', desc: 'A board, a heap of straw. Somewhere to sleep.' },
+  'plank+torch': { name: 'Kindling Stack', desc: 'Split board against a soaked brand. Built to catch.' },
+
+  // Rope
+  'rope+straw': { name: 'Straw Doll', desc: 'Bound at the neck and the waist. It has no face.' },
+  'rope+torch': { name: 'Fire Flail', desc: 'A brand on a cord. Swing it and the whole arc burns.' },
+
+  // Straw
+  'straw+torch': { name: 'Tinder Torch', desc: 'Straw packed around the head. It lights on the first touch.' },
 }
 
-/** Adjectives keyed to the property that most defines the result. */
-const ADJECTIVE: Partial<Record<PropertyId, string>> = {
-  HOT: 'Burning',
-  WET: 'Sodden',
-  LUMINOUS: 'Guttering',
-  EXPLOSIVE: 'Charged',
-  VALUABLE: 'Silvered',
-  SHARP: 'Keen',
-  HEAVY: 'Heavy',
-  METAL: 'Iron',
-  STONE: 'Stone',
-  WOODEN: 'Oaken',
-  CLOTH: 'Bound',
-  GLASS: 'Glazed',
-  PLANT: 'Green',
-  WATER: 'Brimming',
-  SEED: 'Seeded',
-  LIVING: 'Quick',
-  EDIBLE: 'Sweet',
-  RIGID: 'Braced',
-  BUOYANT: 'Light',
-  SACRED: 'Blessed',
-}
-
-/** Nouns keyed to what the result can DO, which matters more than what it is. */
-const FORM: { id: PropertyId; noun: string; min: number }[] = [
-  { id: 'LADDER_LIKE', noun: 'Ladder', min: 0.45 },
-  { id: 'TOOL_CUTTING', noun: 'Axe', min: 0.45 },
-  { id: 'TOOL_STRIKING', noun: 'Maul', min: 0.45 },
-  { id: 'EXPLOSIVE', noun: 'Charge', min: 0.35 },
-  { id: 'ROPE_LIKE', noun: 'Cord', min: 0.5 },
-  { id: 'CONTAINER', noun: 'Vessel', min: 0.5 },
-  { id: 'PLATFORM', noun: 'Board', min: 0.5 },
-  { id: 'LUMINOUS', noun: 'Lamp', min: 0.5 },
-  { id: 'SEED', noun: 'Cutting', min: 0.5 },
-  { id: 'EDIBLE', noun: 'Ration', min: 0.5 },
-  { id: 'SHARP', noun: 'Shiv', min: 0.45 },
-  { id: 'HEAVY', noun: 'Weight', min: 0.6 },
+/**
+ * Nouns keyed to what the result can DO. Used only for the description, so a
+ * player is told what they gained even when the name is a compound.
+ */
+const CAPABILITY: { id: PropertyId; min: number; says: string }[] = [
+  { id: 'LADDER_LIKE', min: 0.45, says: 'You could get over something with this.' },
+  { id: 'TOOL_CUTTING', min: 0.45, says: 'It cuts.' },
+  { id: 'TOOL_STRIKING', min: 0.45, says: 'It breaks things.' },
+  { id: 'HOT', min: 0.35, says: 'It is hot enough to set light to things.' },
+  { id: 'WATER', min: 0.5, says: 'It carries water.' },
+  { id: 'ROPE_LIKE', min: 0.6, says: 'It ties and it spans.' },
+  { id: 'PLATFORM', min: 0.6, says: 'You could stand on it, or bridge with it.' },
+  { id: 'FLAMMABLE', min: 0.75, says: 'It is eager to burn.' },
+  { id: 'EDIBLE', min: 0.5, says: 'You could eat it.' },
 ]
 
-function procedural(a: ItemDef, b: ItemDef, props: Properties): { name: string; desc: string } {
-  const top = ranked(props)
+function describe(a: ItemDef, b: ItemDef, props: Properties, gained: PropertyId[]): string {
+  const cap = CAPABILITY.find((c) => gained.includes(c.id) && p(props, c.id) >= c.min)
+  const lead = `${a.name} and ${b.name}, and neither of them any more.`
+  if (cap) return `${lead} ${cap.says}`
 
-  const form = FORM.find((f) => p(props, f.id) >= f.min)
-  const noun = form?.noun ?? 'Bundle'
-
-  // The adjective comes from the strongest property that is not the one that
-  // already chose the noun, so we never produce "Keen Shiv".
-  const adjSource = top.find((e) => e.id !== form?.id && ADJECTIVE[e.id] !== undefined)
-  const adj = adjSource ? ADJECTIVE[adjSource.id]! : 'Fused'
-
-  const strongest = top[0]
-  const desc =
-    strongest !== undefined
-      ? `${a.name} and ${b.name}, and neither of them any more. Mostly ${strongest.id.toLowerCase().replace(/_/g, ' ')} now.`
-      : `${a.name} and ${b.name}, and neither of them any more.`
-
-  return { name: `${adj} ${noun}`, desc }
+  const top = ranked(props)[0]
+  return top ? `${lead} Mostly ${top.id.toLowerCase().replace(/_/g, ' ')} now.` : lead
 }
 
 /** Volume proxy, used to find each parent's signature part. */
@@ -116,11 +132,8 @@ function bulk(s: PartSpec): number {
 }
 
 /**
- * Parts inherit from both parents.
- *
- * This is the payoff called out in docs/DECISIONS.md D6: a merge result that
- * visibly contains its parents makes the whole system readable. The player can
- * often guess what something was made from by looking at it.
+ * Parts inherit from both parents, the payoff called out in DECISIONS D6: a
+ * result that visibly contains its parents makes merging readable.
  */
 function inheritParts(a: ItemDef, b: ItemDef): PartSpec[] {
   const pick = (d: ItemDef, n: number) => [...d.parts].sort((x, y) => bulk(y) - bulk(x)).slice(0, n)
@@ -131,9 +144,9 @@ function inheritParts(a: ItemDef, b: ItemDef): PartSpec[] {
   const secondary = pick(b, 1).map(
     (s): PartSpec => ({
       ...s,
-      scale: [s.scale[0] * 0.72, s.scale[1] * 0.72, s.scale[2] * 0.72],
-      at: [s.at[0] + 0.1, s.at[1] + 0.17, s.at[2] + 0.05],
-      rot: [(s.rot?.[0] ?? 0) + 0.35, s.rot?.[1] ?? 0, (s.rot?.[2] ?? 0) + 0.45],
+      scale: [s.scale[0] * 0.78, s.scale[1] * 0.78, s.scale[2] * 0.78],
+      at: [s.at[0] + 0.12, s.at[1] + 0.2, s.at[2] + 0.06],
+      rot: [(s.rot?.[0] ?? 0) + 0.35, s.rot?.[1] ?? 0, (s.rot?.[2] ?? 0) + 0.5],
     }),
   )
 
@@ -142,9 +155,7 @@ function inheritParts(a: ItemDef, b: ItemDef): PartSpec[] {
 
 const cache = new Map<string, ItemDef>()
 
-/**
- * The only way to make a new item. Always returns something.
- */
+/** The only way to make a new item. Always returns something. */
 export function merge(aId: string, bId: string): ItemDef {
   const key = mergeId(aId, bId)
   const hit = cache.get(key)
@@ -154,14 +165,22 @@ export function merge(aId: string, bId: string): ItemDef {
   const b = CATALOG[bId]
   if (!a || !b) throw new Error(`merge on unknown item: ${aId} + ${bId}`)
 
-  // Sort the parents so parts inheritance is commutative too, not just the
-  // property math. Without this, merge(a,b) and merge(b,a) would look different
-  // while claiming to be the same item.
+  // Sort the parents so parts and naming are commutative too, not just the
+  // property maths. Without this, merge(a,b) and merge(b,a) would differ while
+  // claiming to be the same item.
   const [first, second] = aId <= bId ? [a, b] : [b, a]
 
   const props = deriveProperties(a.props, b.props)
+
+  // Capabilities present in the result that neither parent had. This is the
+  // interesting part of a merge and it is what the description leads with.
+  const gained = (Object.keys(props) as PropertyId[]).filter(
+    (id) => p(props, id) > 0.02 && p(a.props, id) < 0.02 && p(b.props, id) < 0.02,
+  )
+
   const authored = NAMED[key]
-  const { name, desc } = authored ?? procedural(first, second, props)
+  const name = authored?.name ?? `${first.epithet} ${second.noun}`
+  const desc = authored?.desc ?? describe(first, second, props, gained)
 
   const result: ItemDef = {
     id: key,
@@ -169,6 +188,9 @@ export function merge(aId: string, bId: string): ItemDef {
     desc,
     props,
     parts: inheritParts(first, second),
+    // Carry naming parts forward so merges of merges stay distinguishable.
+    epithet: authored?.name.split(' ')[0] ?? first.epithet,
+    noun: authored?.name.split(' ').pop() ?? second.noun,
     from: [first.id, second.id],
   }
 

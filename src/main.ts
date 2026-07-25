@@ -312,18 +312,49 @@ function updateFocus(): void {
   let bestItem: Entity | null = null
   let bestItemDist = 1.9
   let bestTarget: Entity | null = null
-  let bestTargetDist = 2.6
+  let bestTargetScore = -Infinity
 
-  spatial.near(player.pos.x, player.pos.z, 3.2, nearby)
+  // Which way the character is actually looking. Targeting used to be purely
+  // nearest-wins, so a post you had already felled stayed the closest thing and
+  // kept stealing focus from the one you were standing in front of.
+  const face = player.heading
+  const fx = face === null ? 0 : Math.sin(face)
+  const fz = face === null ? 0 : Math.cos(face)
+
+  spatial.near(player.pos.x, player.pos.z, 3.4, nearby)
   for (const e of nearby) {
-    const d = Math.hypot(e.transform!.pos.x - player.pos.x, e.transform!.pos.z - player.pos.z)
+    const dx = e.transform!.pos.x - player.pos.x
+    const dz = e.transform!.pos.z - player.pos.z
+    const d = Math.hypot(dx, dz)
+
     if (e.item && d < bestItemDist) {
       bestItem = e
       bestItemDist = d
+      continue
     }
-    if (!e.item && (e.structure || e.blocker || p(e.props ?? {}, 'FLAMMABLE') > 0.15) && d < bestTargetDist) {
+
+    if (e.item) continue
+    // A felled or burnt-out thing is scenery. Targeting it is what produced
+    // "chop: 0%" while standing in front of a post that was still up.
+    if (e.spent) continue
+    if (e.structure && e.structure.hp <= 0) continue
+    if (!e.structure && !e.blocker && p(e.props ?? {}, 'FLAMMABLE') <= 0.15) continue
+    if (d > 2.8) continue
+
+    // Prefer what is in front. Alignment dominates, distance breaks ties, so
+    // turning to face a post is enough to select it even if another is nearer.
+    const align = d > 1e-4 && face !== null ? (dx / d) * fx + (dz / d) * fz : 0
+    if (align < -0.15) continue
+
+    // Built things outrank scenery. Without this a tuft of grass at your feet
+    // beats the wall you are standing against, purely because it is nearer,
+    // and the player cannot work out why the wall will not respond.
+    const weight = e.structure ? 1.4 : e.blocker ? 0.7 : 0
+    const score = align * 2.2 - d * 0.5 + weight
+
+    if (score > bestTargetScore) {
       bestTarget = e
-      bestTargetDist = d
+      bestTargetScore = score
     }
   }
 
