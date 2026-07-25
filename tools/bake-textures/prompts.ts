@@ -55,6 +55,55 @@ const STYLE =
   'Completely flat even ambient light, matte. ' +
   'Not photographic, no shadows, no highlights, no border.'
 
+/**
+ * ## The mistake in the line above, and what to do about it
+ *
+ * "No shadows, no highlights" is too strong, and the textures agent caught it in
+ * review. It reads the brief's "flat lighting with no baked shadows or
+ * highlights" as banning light at every scale, and only the *global* scale
+ * should be banned.
+ *
+ * Cel shading has no gradients. A three-band toon ramp cannot round a surface,
+ * so every cue that a shape is raised has to be a mark in the albedo: a lit edge
+ * on one side of a ridge, a dark edge on the other, a bevel above a joint, a
+ * dark underside on a leaf cluster. `textures.ts` does exactly this and it is
+ * most of why its props read as objects. Ask a model for a surface with no
+ * highlights anywhere and it returns a homogeneous material sample, which under
+ * a hard outline reads as dirt on the lens rather than as a surface.
+ *
+ * The distinction to hold: no *light source* (no gradient across the tile, no
+ * cast shadows, nothing that fixes where the sun is), but yes to *local form
+ * marks* at the scale of the features themselves. `flattenLighting` already
+ * enforces the first half and does not touch the second, since it only removes
+ * structure wider than about an eighth of the tile.
+ *
+ * `bark` is the one texture reworked against this and it is the template. Adding
+ * "each ridge is one solid shape with a clearly lighter edge down its left side
+ * and a clearly darker edge down its right, so it reads as raised and rounded"
+ * took its busyness from 0.041 to 0.035, produced the knots that four earlier
+ * attempts never yielded, and turned dense striation into broad ridges. Every
+ * other prop in this file still asks for the flat version and should be rewritten
+ * the same way before the next batch.
+ *
+ * ## One thing that is NOT the fix
+ *
+ * Telling the prompt the tile's world size. It sounds obviously right, it was
+ * suggested in review, and it was tried first: "the bark of a standing tree
+ * trunk, five metres of it" returned a painting of five separate tree trunks
+ * against a cream wall. A model reads a distance as a subject to depict. Convert
+ * the world size into a feature count instead, which is what the note above
+ * `SPECS` does and what actually works.
+ *
+ * ## And one that was tested and did not matter
+ *
+ * The 16:1 reduction was suspected of averaging painterly brushwork into
+ * high-frequency residue, and so of being why the props read photographic while
+ * the ground reads painted. Generating bark at 256px for a 4:1 reduction instead
+ * produced the same dense striation with the same character. The look comes from
+ * the prompt, not from the reducer, so there is no point spending resolution on
+ * it.
+ */
+
 export interface TextureSpec {
   /** Must match a key of `TextureSet` in `src/render/textures.ts`. */
   name: string
@@ -227,7 +276,11 @@ export const SPECS: readonly TextureSpec[] = [
     prompt:
       `${STYLE} Rough tree bark, close up, filling the frame. About fourteen long ` +
       'vertical ridges and deep grooves running the full height of the image, bending ' +
-      'around three or four dark round knots. Warm dark brown.',
+      'around three or four dark round knots. Each ridge is one solid shape with a ' +
+      'clearly lighter edge down its left side and a clearly darker edge down its ' +
+      'right, so it reads as raised and rounded; each knot has a light rim on one side ' +
+      'and a dark rim on the other. Broad flat areas between the marks, no fine ' +
+      'striation, no small scratches, no speckle. Warm dark brown.',
     palette: [...RAMP.bark],
     stretch: 0.9,
     gamma: 1,

@@ -110,14 +110,35 @@ const PAL_Z = -8
  * canopy hanging out over the trunk.
  */
 /**
- * Something tall and solid enough to hide a spot from the camera.
+ * A tall opaque thing that can stand between the camera and the player.
  *
- * Build-time only now: it decides where an item may be placed.
+ * `radius` and `top` are the horizontal half-extent and the height above the
+ * object's own origin. Both are known exactly at build time, which is cheaper
+ * and steadier than computing a bounding box from geometry that includes a
+ * canopy hanging out over the trunk.
  */
 interface Occluder {
   object: THREE.Object3D
   radius: number
   top: number
+  /**
+   * Never fade this, whatever it covers.
+   *
+   * For landmarks and buildings. D20 bans quest markers so that the world does
+   * the guiding, which makes a landmark that dissolves as you walk up to it
+   * actively harmful: the one thing you were aiming at stops being there.
+   * Buildings are pinned for a second reason as well — they are assemblies of
+   * thirty overlapping boxes with a lit interior behind the wall, and ghosting
+   * one shows you all of it at once, which reads as corrupted geometry rather
+   * than as transparency.
+   */
+  pinned?: boolean
+  /** Current opacity, eased toward the target. 1 means fully solid. */
+  opacity: number
+  /** Cloned, transparent-capable materials, made only when one is first needed. */
+  faded: { mesh: THREE.Mesh; solid: THREE.Material; ghost: THREE.MeshToonMaterial }[] | null
+  /** Outline shells, hidden while ghosting rather than faded. See fadeOccluders. */
+  hulls?: THREE.Mesh[] | null
 }
 
 export interface Region {
@@ -158,6 +179,18 @@ export interface Region {
    */
   places: Place[]
 }
+
+/**
+ * How see-through a tree gets when it is in the way.
+ *
+ * Not zero, on purpose: an invisible tree reads as a bug, a faint one reads as
+ * a tree you are behind. Nudged up from a quarter after looking at it, because
+ * once the outline pass stopped drawing over it the ghost was disappearing
+ * almost completely against bright ground.
+ */
+const FADE_TO = 0.34
+const FADE_IN_RATE = 1 / 0.15
+const FADE_OUT_RATE = 1 / 0.3
 
 export interface Place {
   id: string
@@ -270,11 +303,13 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   ): void => {
     world.add({ transform: { pos: at, ry: 0 }, mesh, label, props, blocker: { radius } })
   }
-  const occluder = (object: THREE.Object3D, radius: number, top: number): Occluder => ({
-    object,
-    radius,
-    top,
-  })
+  const occluder = (
+    object: THREE.Object3D,
+    radius: number,
+    top: number,
+    pinned = false,
+  ): Occluder => ({ object, radius, top, opacity: 1, faded: null, pinned })
+
 
   const tex = textures(rng)
 
@@ -1351,7 +1386,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.add(leaf)
     g.position.set(0, gateH, PAL_Z)
     group.add(g)
-    occluders.push(occluder(g, 1.8, 3.9))
+    occluders.push(occluder(g, 1.8, 3.9, true))
 
     world.add({
       transform: { pos: new THREE.Vector3(0, gateH + 1.3, PAL_Z), ry: 0 },
@@ -1739,7 +1774,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(x, h, z)
     g.rotation.y = turn
     group.add(g)
-    occluders.push(occluder(g, Math.max(w, dep) * 0.62, ridge + 0.9))
+    occluders.push(occluder(g, Math.max(w, dep) * 0.62, ridge + 0.9, true))
 
     world.add({
       transform: { pos: new THREE.Vector3(x, h + 0.9, z), ry: turn },
@@ -1830,7 +1865,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(x, h, z)
     g.rotation.y = turn
     group.add(g)
-    occluders.push(occluder(g, Math.max(w, dep) * 0.5, ridge + 0.3))
+    occluders.push(occluder(g, Math.max(w, dep) * 0.5, ridge + 0.3, true))
 
     world.add({
       transform: { pos: new THREE.Vector3(x, h + 0.8, z), ry: turn },
@@ -2552,7 +2587,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(sx, h, sz)
     g.rotation.y = -0.3
     group.add(g)
-    occluders.push(occluder(g, 1.2, 2.3))
+    occluders.push(occluder(g, 1.2, 2.3, true))
     solid(g, new THREE.Vector3(sx, h + 1, sz), 'The store', { WOODEN: 0.9, FLAMMABLE: 0.5, RIGID: 0.8 }, 1.05)
   }
 
@@ -2631,23 +2666,161 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * own clones, made the first time it actually needs to fade and kept
    * afterwards. Most never fade, so this stays close to free.
    */
+  // ------------------------------------------------------------ occlusion
   /**
-   * Retired, and deliberately left as a no-op rather than deleted.
+   * Ghost anything standing between the camera and the player.
    *
-   * The world used to ghost whatever covered the player. It was the wrong
-   * lever: the thing that must never be hidden is the PLAYER, not the tree, and
-   * fading the tree meant landmarks dissolved as you walked up to them and
-   * everything flickered as you crossed the threshold. The character is now
-   * drawn a second time with GreaterDepth instead, which paints exactly the
-   * pixels where something covers it and touches nothing else.
+   * Everything is done in camera space, where the test is exact and costs two
+   * vector transforms per candidate: an occluder hides the player when it is
+   * nearer the camera in view depth, overlaps him horizontally within its own
+   * radius, and its vertical span crosses his. The projection is orthographic,
+   * so world size maps to view size one to one and there is no perspective term
+   * to worry about. No raycast, no bounding-box rebuild, nothing per-frame that
+   * allocates.
    *
-   * What survives is the half that prevents rather than mitigates: the camera
-   * azimuth is fixed, so `hiddenFromCamera` decides at build time whether a
-   * spot can ever be seen, and items are placed accordingly.
-   *
-   * This stub stays only until main.ts drops its call; delete both together.
+   * Materials are shared through the toon cache, so writing opacity onto one
+   * tree's material would fade every tree in the region. Each occluder gets its
+   * own clones, made the first time it actually needs to fade and kept
+   * afterwards. Most never fade, so this stays close to free.
    */
-  function fadeOccluders(_playerPos: THREE.Vector3, _camera: THREE.Camera, _dt: number): void {}
+  const viewObject = new THREE.Vector3()
+  /**
+   * What must not be hidden: the player, plus the few items nearest him.
+   *
+   * The player alone is not enough, and the reason is structural rather than a
+   * tuning miss. An item never moves, and the player may simply never stand
+   * behind the one tree covering it, so a player-only test can leave a thing
+   * invisible for an entire run. Capped at three items so the number of things
+   * fading at once stays bounded, which matters now that outlines added a
+   * second pass and stacked transparency is the largest GPU cost here.
+   */
+  const viewTargets = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]
+  const REVEAL_RADIUS = 3
+  /**
+   * The first call snaps instead of easing. Two reasons: the player spawns
+   * already standing behind whatever is behind them, so easing in from solid on
+   * frame one is a visible pop; and the headless harness renders exactly one
+   * frame, so without this a screenshot would only ever catch the fade 11% of
+   * the way in and could never show the steady state.
+   */
+  let settled = false
+
+  function fadeOccluders(playerPos: THREE.Vector3, camera: THREE.Camera, dt: number): void {
+    viewTargets[0]!.copy(playerPos).applyMatrix4(camera.matrixWorldInverse)
+    // The player is about 1.7 tall. Items sit at knee height and bob.
+    const heights = [0.72, 0.3, 0.3]
+    let count = 1
+
+    for (const e of queries.items) {
+      if (count >= viewTargets.length) break
+      const at = e.transform.pos
+      const dx = at.x - playerPos.x
+      const dz = at.z - playerPos.z
+      if (dx * dx + dz * dz > REVEAL_RADIUS * REVEAL_RADIUS) continue
+      viewTargets[count]!.copy(at).applyMatrix4(camera.matrixWorldInverse)
+      count++
+    }
+
+    for (const o of occluders) {
+      if (o.pinned) continue
+      o.object.getWorldPosition(viewObject).applyMatrix4(camera.matrixWorldInverse)
+
+      let hiding = false
+      for (let i = 0; i < count && !hiding; i++) {
+        const t = viewTargets[i]!
+
+        // Which part of the occluder shares the target's row on screen.
+        //
+        // World up projects to (0, 0.816, 0.577) in view space: a point `u`
+        // metres up an object is 0.816u higher on screen AND 0.577u nearer the
+        // camera. The previous version tested "is it higher" and "is it nearer"
+        // as if they were independent, which handed every tall object a depth
+        // bonus it had not earned: the gate got a metre of slack and faded
+        // while the player stood in front of it. Solving for the one height
+        // that actually covers the target's row, and asking whether THAT point
+        // is nearer, is both exact and cheaper.
+        const u = (t.y + heights[i]! - viewObject.y) / 0.816
+        if (u < 0 || u > o.top) continue
+        if (viewObject.z + u * 0.577 <= t.z + 0.35) continue
+        // The target's centre has to be inside the silhouette, not merely
+        // touching it. Clipping someone's shoulder is not hiding them.
+        if (Math.abs(viewObject.x - t.x) >= o.radius) continue
+        hiding = true
+      }
+
+      const target = hiding ? FADE_TO : 1
+      if (o.opacity === target) continue
+
+      if (settled) {
+        const rate = hiding ? FADE_IN_RATE : FADE_OUT_RATE
+        const step = rate * dt
+        o.opacity =
+          Math.abs(target - o.opacity) <= step
+            ? target
+            : o.opacity + Math.sign(target - o.opacity) * step
+      } else {
+        o.opacity = target
+      }
+
+      if (!o.faded) {
+        o.faded = []
+        o.hulls = []
+        o.object.traverse((child) => {
+          const mesh = child as THREE.Mesh
+          if (!mesh.isMesh) return
+
+          // Outline hulls are collected separately and HIDDEN while ghosting
+          // rather than faded with everything else.
+          //
+          // An inverted hull is a slightly larger shell drawn with BackSide, so
+          // what you normally see of it is the rim poking past the body. The
+          // body being opaque is what hides the rest of it. Ghost the body with
+          // depthWrite off and the hull's interior back faces are suddenly
+          // visible, and they fill the entire silhouette with flat dark. The
+          // tree went transparent and the player still could not be seen
+          // through it, because they were behind the outline rather than
+          // behind the tree.
+          //
+          // Fading the hull too does not fix it; two translucent dark layers
+          // still read as a dark shape. An outline around something you are
+          // deliberately seeing through has no job to do, so it goes away.
+          if (mesh.userData.outlineHull === true) {
+            o.hulls!.push(mesh)
+            return
+          }
+
+          const solid = mesh.material as THREE.Material
+          const ghost = (solid as THREE.MeshToonMaterial).clone()
+          ghost.transparent = true
+          // Depth write stays ON. With it off, every overlapping part of the
+          // same object blends against every other in draw order, which on a
+          // stack of cones is muddy and on a building is the diagonal-streak
+          // mess that read as a screen tear. Writing depth makes an object
+          // ghost as one silhouette instead of as its own parts list.
+          ghost.depthWrite = true
+          ghost.alphaHash = false
+          ghost.alphaTest = 0
+          o.faded!.push({ mesh, solid, ghost })
+        })
+      }
+
+      // Hulls follow the body: gone the moment it starts ghosting, back the
+      // moment it is fully solid again.
+      if (o.hulls) for (const h of o.hulls) h.visible = o.opacity >= 0.999
+
+      const solid = o.opacity > 0.995
+      for (const f of o.faded) {
+        if (solid) {
+          f.mesh.material = f.solid
+        } else {
+          f.ghost.opacity = o.opacity
+          f.mesh.material = f.ghost
+        }
+      }
+    }
+
+    settled = true
+  }
 
   // ------------------------------------------------------------------ mill
   /**
@@ -2720,7 +2893,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(MILL.x, h, MILL.z - 3.0)
     g.rotation.y = -0.22
     group.add(g)
-    occluders.push(occluder(g, 2.4, ridge + 0.4))
+    occluders.push(occluder(g, 2.4, ridge + 0.4, true))
     solid(g, new THREE.Vector3(MILL.x, h + 1.5, MILL.z - 3.0), 'The mill', { WOODEN: 0.6, STONE: 0.5, FLAMMABLE: 0.35, RIGID: 0.9 }, 2.3)
 
     // The wheel, standing in the water where the brook actually runs.
@@ -2935,7 +3108,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(BARN.x, h, BARN.z)
     g.rotation.y = 0.34
     group.add(g)
-    occluders.push(occluder(g, 3.4, ridge + 0.4))
+    occluders.push(occluder(g, 3.4, ridge + 0.4, true))
     solid(g, new THREE.Vector3(BARN.x, h + 1.5, BARN.z), 'The barn', { WOODEN: 0.9, FLAMMABLE: 0.5, RIGID: 0.85 }, 3.1)
 
     // Bales stacked against the gable, and a cart shaft leaning on them.

@@ -26,8 +26,36 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 import { decodePng, encodeIndexedPng, type Bitmap } from './png'
-import { magnify, tile2x2 } from './image'
+import { inspectTiling, magnify, tile2x2 } from './image'
 import { SPECS } from './prompts'
+
+/**
+ * Mean neighbour luminance delta over 255, wrapped.
+ *
+ * A second noise metric, kept alongside the Oklab one in `inspectTiling`,
+ * because the two are not interchangeable and a comparison between them is
+ * meaningless. Oklab distance is chroma-weighted and perceptually scaled;
+ * this one is a plain luminance difference in display units. On the same tile
+ * they differ by a factor of several, so quoting one texture's Oklab busyness
+ * against another texture's luma busyness overstates the gap badly.
+ *
+ * Both are printed for both sets below, so whichever number a reviewer prefers,
+ * they are comparing like with like.
+ */
+function lumaBusyness(b: Bitmap): number {
+  const { width: w, height: h, data } = b
+  const lum = (x: number, y: number) => {
+    const i = ((((y % h) + h) % h) * w + ((((x % w) + w) % w))) * 4
+    return 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!
+  }
+  let sum = 0
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      sum += Math.abs(lum(x + 1, y) - lum(x, y)) + Math.abs(lum(x, y + 1) - lum(x, y))
+    }
+  }
+  return sum / (w * h * 2) / 255
+}
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const PORT = 5201
@@ -64,7 +92,17 @@ async function drawnTextures(): Promise<Map<string, Bitmap>> {
   const browser = await chromium.launch()
   try {
     const page = await browser.newPage()
-    // A blank page on the dev server's origin, so a module import is same-origin.
+
+    // Load index.html for its origin, but stop the game from booting on it.
+    //
+    // This tool only needs a same-origin document to import a module into; it
+    // has no interest in the game running. Letting it run makes the comparison
+    // hostage to whatever state `src/` happens to be in, and that is not
+    // hypothetical: a `ReferenceError` in region.ts tore down the execution
+    // context mid-evaluate and this tool started failing for a reason that had
+    // nothing to do with textures. Aborting the entry module keeps it working
+    // while the rest of the repo is halfway through something.
+    await page.route('**/src/main.ts', (route) => route.abort())
     await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'domcontentloaded' })
 
     const raw = await page.evaluate(async () => {
@@ -159,6 +197,7 @@ async function main(): Promise<void> {
 
   console.log('building the code-drawn set in a headless browser...')
   const drawn = await drawnTextures()
+  const rows: { name: string; drawn: Bitmap; baked: Bitmap }[] = []
 
   for (const spec of SPECS) {
     const bakedPath = resolve(ROOT, `assets/baked/textures/${spec.name}.png`)
@@ -181,10 +220,27 @@ async function main(): Promise<void> {
       pair(magnify(tile2x2(old), scale), magnify(tile2x2(baked), scale)),
     )
     writeFileSync(resolve(dir, `${spec.name}.png`), encodeIndexedPng(sheet))
-    console.log(`${spec.name}: drawn ${old.width}px vs baked ${baked.width}px`)
+    rows.push({ name: spec.name, drawn: old, baked })
   }
 
-  console.log(`\nwrote to ${dir}. Left is code-drawn, right is baked.`)
+  console.log(`\nwrote to ${dir}. Left is code-drawn, right is baked.\n`)
+
+  // "Is the bake noisier than the code?" is the question that decides whether a
+  // set ships, so answer it with numbers rather than with adjectives, and give
+  // both metrics so nobody has to trust the choice of one.
+  console.log('                 oklab busyness          luma busyness')
+  console.log('name        drawn   baked  ratio    drawn   baked  ratio')
+  for (const r of rows) {
+    const dO = inspectTiling(r.drawn).busyness
+    const bO = inspectTiling(r.baked).busyness
+    const dL = lumaBusyness(r.drawn)
+    const bL = lumaBusyness(r.baked)
+    const ratio = (a: number, b: number) => (a === 0 ? '  n/a' : `${(b / a).toFixed(1)}x`.padStart(5))
+    console.log(
+      `${r.name.padEnd(10)} ${dO.toFixed(4)}  ${bO.toFixed(4)}  ${ratio(dO, bO)}   ` +
+        `${dL.toFixed(4)}  ${bL.toFixed(4)}  ${ratio(dL, bL)}`,
+    )
+  }
 }
 
 main().catch((err: unknown) => {

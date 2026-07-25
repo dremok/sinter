@@ -318,7 +318,7 @@ void main() {
    * completely different problems. This lifts the second without touching the
    * first.
    */
-  c *= 1.28;
+  c *= 1.33;
 
   // Highlight shoulder, in linear light, driven by the brightest channel and
   // applied to all three equally.
@@ -352,8 +352,8 @@ void main() {
     // Then lift the black point off zero. p1 had reached 1: the darkest percent
   // of the frame was pure black, where the baseline sat at 23. Shadow with no
   // information in it is a hole, not a shadow.
-  c = ( c - 0.40 ) * 1.22 + 0.45;
-  c = clamp( c * 0.94 + 0.038, 0.0, 1.0 );
+  c = ( c - 0.40 ) * 1.30 + 0.45;
+  c = clamp( c * 0.94 + 0.05, 0.0, 1.0 );
   float g = dot( c, LUMA );
   c = clamp( mix( vec3( g ), c, mix( 0.82, 1.22, smoothstep( 0.04, 0.58, l ) ) ), 0.0, 1.0 );
 

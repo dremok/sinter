@@ -231,6 +231,22 @@ thatch course, two to a woven thread) is chosen for it.
 `TextureSet`, `loadedTextures()` and every call in `src/world/region.ts` stay
 exactly as they are.
 
+### 6. Swapping a set at runtime needs the clones, not the originals
+
+Not needed for a cold boot, but it will cost someone an afternoon otherwise, and
+it already cost one: this is the textures agent's finding from building an
+in-game A/B, and it produced byte-identical frames with no error to explain them.
+
+`tiled()` hands every material a `tex.clone()`. three.js gates re-upload on
+`textureProperties.__version !== texture.version` for the texture that is
+actually bound, which is the clone. So replacing the bitmap on the original from
+`loadedTextures()` and setting `needsUpdate` does nothing at all: the clones keep
+their own version and never re-upload.
+
+Cold boot is unaffected, because `tiled()` runs during region build, after the
+images are already in place. Anything that hot-reloads or A/Bs a set has to walk
+the clones, or rebuild the materials.
+
 ### This has been run, not just written
 
 `tiled()`'s arithmetic was executed in a real browser against these seventeen

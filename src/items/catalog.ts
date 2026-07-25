@@ -28,29 +28,54 @@ import type { Properties } from '../props/registry'
  * library does not have, which is deliberate.
  */
 export type PartKind =
+  // hafts, grips and blades
   | 'haft_short'
   | 'haft_long'
+  | 'grip_wrapped'
   | 'blade_axe'
   | 'blade_knife'
+  | 'blade_sword'
+  | 'guard_cross'
+  | 'pommel_round'
   | 'head_hammer'
+  | 'scabbard_long'
+  // vessels
   | 'bucket_body'
   | 'flask_body'
   | 'jar_body'
+  | 'bottle_body'
+  | 'phial_ribbed'
+  | 'stopper'
+  // structure and stock
   | 'plank_board'
   | 'crate_box'
   | 'ring_band'
   | 'horseshoe'
   | 'rope_coil'
-  | 'stone_shard'
-  | 'apple_body'
-  | 'straw_bale'
-  | 'rag_wrap'
-  | 'torch_head'
-  | 'leaf_cluster'
-  | 'stopper'
   | 'nail_spike'
   | 'disc_flat'
   | 'bar_stock'
+  | 'rag_wrap'
+  // stone
+  | 'stone_shard'
+  | 'stone_lump'
+  // growing things
+  | 'apple_body'
+  | 'chili_pod'
+  | 'stalk_short'
+  | 'stem_calyx'
+  | 'leaf_cluster'
+  | 'straw_bale'
+  | 'torch_head'
+  // small authored objects
+  | 'key_body'
+  | 'spectacles_frame'
+  | 'lens_round'
+  | 'book_closed'
+  // built and waiting for the Band 1 objects that need them
+  | 'stock_crossbow'
+  | 'prod_bow'
+  | 'fork_sling'
 
 export type MaterialKind =
   | 'wood'
@@ -208,10 +233,10 @@ add({
   name: 'Rock',
   desc: 'A rock. It has been here longer than the village.',
   props: { STONE: 1, HEAVY: 0.5 },
-  parts: [
-    { part: 'stone_shard', scale: [1.55, 1.3, 1.5], at: [0, -0.14, 0], material: 'stone' },
-    { part: 'stone_shard', scale: [0.7, 0.6, 0.75], at: [0.14, 0.02, -0.1], rot: [0.6, 1.1, 0.3], material: 'stone' },
-  ],
+  // Water-worn and flat-bottomed, against the flint's angular knapped wedge.
+  // These two were the same part in the same material, the worst pair in the
+  // catalog, and round-versus-bladed is the difference that reads at any size.
+  parts: [{ part: 'stone_lump', scale: [1, 1, 1], at: [0, -0.12, 0], material: 'stone', signature: true }],
 })
 
 add({
@@ -275,9 +300,12 @@ add({
   name: 'Knife',
   desc: 'A kitchen knife with a worn handle. Quick, and no use on a wall.',
   props: { METAL: 0.8, SHARP: 0.9, TOOL_CUTTING: 0.6, RIGID: 0.7, HEAVY: 0.12 },
+  // The blade was lying horizontal with a vertical haft crossing its middle,
+  // which is half of why it read as the same object as the sword. Upright now,
+  // and the two differ by crossguard, pommel and length.
   parts: [
-    { part: 'haft_short', scale: [0.62, 0.62, 0.62], at: [0, -0.2, 0], material: 'wood' },
-    { part: 'blade_knife', scale: [1.05, 1.05, 1.05], at: [0, 0.02, 0], material: 'steel' },
+    { part: 'grip_wrapped', scale: [0.62, 0.62, 0.62], at: [0, -0.3, 0], material: 'cloth' },
+    { part: 'blade_knife', scale: [1, 1, 1], at: [0, 0.1, 0], rot: [0, 0, 1.57], material: 'steel', signature: true },
   ],
 })
 
@@ -294,10 +322,15 @@ add({
     VALUABLE: 0.5,
     FRIGHTENING: 0.6,
   },
+  // Four real parts instead of a knife blade stretched to 2.35 times its
+  // length over a coin. Offsets are the models agent's verified assembly, so
+  // the pommel and grip share the butt anchor and the guard and blade share
+  // the shoulder. `pommel_round` is anchored at its TOP and hangs down.
   parts: [
-    { part: 'haft_short', scale: [0.55, 0.7, 0.55], at: [0, -0.34, 0], material: 'wood' },
-    { part: 'disc_flat', scale: [0.75, 0.55, 0.22], at: [0, -0.14, 0], material: 'steel' },
-    { part: 'blade_knife', scale: [1.1, 2.35, 1.1], at: [0, -0.1, 0], material: 'steel' },
+    { part: 'pommel_round', scale: [1, 1, 1], at: [0, -0.4, 0], material: 'steel' },
+    { part: 'grip_wrapped', scale: [1, 1, 1], at: [0, -0.4, 0], material: 'cloth' },
+    { part: 'guard_cross', scale: [1, 1, 1], at: [0, -0.14, 0], material: 'steel' },
+    { part: 'blade_sword', scale: [1, 1, 1], at: [0, -0.14, 0], material: 'steel', signature: true },
   ],
 })
 
@@ -358,9 +391,11 @@ add({
   // differ too. A green chili is just as recognisable as a red one and the
   // collision cannot come back. The woody stem is there for internal contrast,
   // since a green pod on a green cap reads as one flat blob.
+  // A real hooked pod now, not an apple squashed thin. `chili_pod` is anchored
+  // at its stem end and hangs downward, so it is placed high and grows down.
   parts: [
-    { part: 'apple_body', scale: [0.5, 1.45, 0.5], at: [0, -0.16, 0], material: 'leaf' },
-    { part: 'leaf_cluster', scale: [0.4, 0.4, 0.4], at: [0, 0.16, 0], material: 'wood' },
+    { part: 'chili_pod', scale: [1, 1, 1], at: [0, 0.13, 0], material: 'leaf', signature: true },
+    { part: 'stem_calyx', scale: [1, 1, 1], at: [0, 0.13, 0], material: 'wood' },
   ],
 })
 
@@ -384,12 +419,12 @@ add({
   // things do rather than doing anything themselves. Small print becomes
   // legible, and the sun becomes a way to start a fire.
   use: { mode: 'worn', slot: 'eyes' },
+  // A real frame with arms, plus two lenses, instead of five parts pretending.
+  // Split in two only so the frame can be steel and the lenses glass.
   parts: [
-    { part: 'ring_band', scale: [0.5, 0.5, 0.5], at: [-0.16, 0, 0], rot: [0, 1.57, 0], material: 'steel' },
-    { part: 'ring_band', scale: [0.5, 0.5, 0.5], at: [0.16, 0, 0], rot: [0, 1.57, 0], material: 'steel' },
-    { part: 'disc_flat', scale: [0.42, 0.1, 0.42], at: [-0.16, 0, 0], rot: [0, 0, 1.57], material: 'glass' },
-    { part: 'disc_flat', scale: [0.42, 0.1, 0.42], at: [0.16, 0, 0], rot: [0, 0, 1.57], material: 'glass' },
-    { part: 'bar_stock', scale: [0.5, 0.09, 0.09], at: [0, 0.02, 0], rot: [0, 0, 1.57], material: 'steel' },
+    { part: 'spectacles_frame', scale: [1, 1, 1], at: [0, 0, 0], material: 'steel', signature: true },
+    { part: 'lens_round', scale: [1, 1, 1], at: [-0.115, 0, 0], material: 'glass' },
+    { part: 'lens_round', scale: [1, 1, 1], at: [0.115, 0, 0], material: 'glass' },
   ],
 })
 
@@ -401,15 +436,15 @@ add({
  */
 add({
   id: 'key',
-  name: 'Iron Key',
-  desc: 'Long in the shaft, three wards. It fits one lock somewhere.',
+  name: 'Brass Key',
+  // Brass rather than iron, so it is the one warm metal object in a band full
+  // of steel, and because A2 called it a brass key in the first place.
+  desc: 'Long in the shank, two wards. It fits one lock somewhere.',
   props: { METAL: 0.7, VALUABLE: 0.15 },
   noMerge: 'The key stays a key. Whatever you made of it would open nothing.',
-  parts: [
-    { part: 'ring_band', scale: [0.62, 0.62, 0.62], at: [0, 0.2, 0], rot: [1.57, 0, 0], material: 'gold' },
-    { part: 'bar_stock', scale: [0.3, 0.9, 0.3], at: [0, -0.24, 0], material: 'gold' },
-    { part: 'nail_spike', scale: [0.55, 0.5, 0.55], at: [0.07, -0.28, 0], rot: [0, 0, 1.57], material: 'gold' },
-  ],
+  // One mesh with the bow, collar, shank and bit modelled together. It was
+  // three separate parts that did not touch each other.
+  parts: [{ part: 'key_body', scale: [1, 1, 1], at: [0, -0.22, 0], material: 'gold', signature: true }],
 })
 
 /**

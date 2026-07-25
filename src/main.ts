@@ -5,7 +5,7 @@ import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
 import { Grade, groundBlob, sizeToDisplay, toonUnique } from './render/toon'
 import { advanceSmoke, Flame, setFlameViewport } from './render/flame'
-import { applyOutlines } from './render/outline'
+import { applyOutlines, setOutlineViewport, syncOutlines } from './render/outline'
 import { loadParts } from './render/parts'
 import { Character } from './render/character'
 import { BOUNDS, buildRegion } from './world/region'
@@ -70,6 +70,7 @@ function syncBufferSize(): void {
   if (bufferSize.y === lastBufferHeight) return
   lastBufferHeight = bufferSize.y
   setFlameViewport(bufferSize.y)
+  setOutlineViewport(bufferSize.y)
 }
 syncBufferSize()
 
@@ -543,8 +544,8 @@ function groundEverything(): void {
   // Outlines. Thicker on the character than on the world, because the player
   // has to be findable in a frame that is otherwise all one hue, and a line
   // that reads at a glance on a 1.5m figure would be a black cage on a tree.
-  applyOutlines(region.group, 0.05, isGroundSurface)
-  applyOutlines(character.group, 0.075)
+  applyOutlines(region.group, isGroundSurface)
+  applyOutlines(character.group)
 
   for (const e of queries.meshed) sitOnGround(e)
   for (const [e, blob] of blobs) {
@@ -1013,6 +1014,8 @@ function syncMeshes(dt: number): void {
   syncBufferSize()
   // Every smoke column in the world, wherever region.ts put them.
   advanceSmoke(dt)
+  // Outlines follow their host's ghosting, so a faded building loses its line.
+  syncOutlines()
 }
 
 // ---------------------------------------------------------------- hud

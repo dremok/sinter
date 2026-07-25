@@ -48,6 +48,12 @@ function materialFor(kind: MaterialKind): THREE.MeshToonMaterial {
       gold: t.gold,
       straw: t.straw,
       clay: t.clay,
+      // Fruit has its own ramp rather than borrowing `ember`. The apple used to
+      // be `ember`, which carries emissiveIntensity 1.5, so it was not merely
+      // the wrong hue: it was a light source, and every merge inheriting
+      // apple_body inherited the glow. Roast Apple and Horse Treat lit the
+      // scene.
+      fruit: t.fruit,
     }[kind],
     0.55,
     0.55,

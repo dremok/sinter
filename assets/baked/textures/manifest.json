@@ -1,22 +1,22 @@
 {
   "bark": {
-    "hash": "ca451704ac2c2fdc",
+    "hash": "3d00508bfc75eb7c",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9043,
-    "bytes": 1138,
+    "bytes": 1085,
     "phase": [
-      6,
-      15
+      0,
+      10
     ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.785,
-      "seamY": 0.358,
-      "busyness": 0.0412,
+      "seamX": 0.664,
+      "seamY": 0.593,
+      "busyness": 0.035,
       "used": 6,
-      "dominance": 0.328
+      "dominance": 0.383
     }
   },
   "clay": {

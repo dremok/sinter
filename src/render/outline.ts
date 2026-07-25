@@ -86,15 +86,35 @@ function bakeSmoothNormals(geo: THREE.BufferGeometry): boolean {
   return true
 }
 
+/**
+ * Width is decided in PIXELS, per object, from how big that object is on screen.
+ *
+ * A fixed world-space width is wrong for the same reason a fixed font size is
+ * wrong: it does not care how big the thing it is drawn on appears. At 0.05
+ * world units the character got roughly 3px of hull on every edge of a 26x45px
+ * figure, which is about a quarter of its area, and it ate into the face and
+ * swallowed the legs. The same 3px on a hut is invisible.
+ *
+ * `projectionMatrix[1][1] * uHalfHeight` is pixels per world unit under an
+ * orthographic camera, so the shader can size itself from the object's own
+ * world height with no CPU-side knowledge of zoom or resolution. Small things
+ * clamp to a single pixel, which is a line, not a border.
+ */
 const VERT = /* glsl */ `
 attribute vec3 aSmoothNormal;
-uniform float uWidth;
+uniform float uHeight;
+uniform float uHalfHeight;
 #include <common>
 #include <fog_pars_vertex>
 
 void main() {
   vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
-  mvPosition.xyz += normalize( normalMatrix * aSmoothNormal ) * uWidth;
+
+  float pxPerWorld = projectionMatrix[1][1] * uHalfHeight;
+  float screenPx = uHeight * pxPerWorld;
+  float widthPx = clamp( screenPx * 0.017, 1.0, 3.0 );
+
+  mvPosition.xyz += normalize( normalMatrix * aSmoothNormal ) * ( widthPx / pxPerWorld );
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
 }
@@ -111,28 +131,73 @@ void main() {
 }
 `
 
-const materials = new Map<string, THREE.ShaderMaterial>()
+/** One material for every outline in the scene. `uHeight` is set per draw in
+ *  `onBeforeRender`, which is how each object gets its own width from a shared
+ *  material without a material per object. */
+const material = new THREE.ShaderMaterial({
+  uniforms: THREE.UniformsUtils.merge([
+    THREE.UniformsLib.fog,
+    { uHeight: { value: 1 }, uHalfHeight: { value: 360 }, uColor: { value: new THREE.Color(OUTLINE_COLOR) } },
+  ]),
+  vertexShader: VERT,
+  fragmentShader: FRAG,
+  side: THREE.BackSide,
+  // Fogged, so a distant outline fades into the haze with the thing it is
+  // drawn around. An unfogged outline stays jet black at the tree line and
+  // pins the far edge of the world to the front of the frame.
+  fog: true,
+})
 
-function outlineMaterial(width: number, color: number): THREE.ShaderMaterial {
-  const id = `${width}:${color}`
-  const hit = materials.get(id)
-  if (hit) return hit
+/** Drawing buffer height, so the shader can turn world units into pixels. Same
+ *  contract as `setFlameViewport`; call it whenever the renderer is resized. */
+export function setOutlineViewport(bufferHeight: number): void {
+  material.uniforms.uHalfHeight!.value = bufferHeight / 2
+}
 
-  const m = new THREE.ShaderMaterial({
-    uniforms: THREE.UniformsUtils.merge([
-      THREE.UniformsLib.fog,
-      { uWidth: { value: width }, uColor: { value: new THREE.Color(color) } },
-    ]),
-    vertexShader: VERT,
-    fragmentShader: FRAG,
-    side: THREE.BackSide,
-    // Fogged, so a distant outline fades into the haze with the thing it is
-    // drawn around. An unfogged outline stays jet black at the tree line and
-    // pins the far edge of the world to the front of the frame.
-    fog: true,
-  })
-  materials.set(id, m)
-  return m
+interface Hull {
+  hull: THREE.Mesh
+  host: THREE.Mesh
+  /** World-space height of the host, which is what sets the outline's weight. */
+  height: number
+}
+
+const hulls: Hull[] = []
+
+function hostMaterial(mesh: THREE.Mesh): THREE.Material | undefined {
+  return Array.isArray(mesh.material) ? mesh.material[0] : mesh.material
+}
+
+/**
+ * Hide the outline of anything that is being faded out.
+ *
+ * A hull is opaque and knows nothing about its host's material, so a building
+ * ghosted to let the player see behind it kept a hard black line floating in
+ * the middle of the transparency. Rather than have every system that fades
+ * something remember to hide its outline too, the outline checks for itself:
+ * there is exactly one place that can get this wrong, and it is here.
+ */
+export function syncOutlines(): void {
+  for (const h of hulls) {
+    const m = hostMaterial(h.host)
+    const ghosted = m !== undefined && m.transparent && m.opacity < 0.98
+    h.hull.visible = h.host.visible && !ghosted
+  }
+}
+
+/**
+ * Self-lit surfaces take no outline.
+ *
+ * A flame ringed in black reads as cut-out paper, and the same goes for coals,
+ * a glowing gate or anything else that is a light source rather than a lit
+ * object. An outline describes where a solid form ends against what is behind
+ * it, which is not a statement that applies to fire.
+ */
+function isSelfLit(mesh: THREE.Mesh): boolean {
+  const m = hostMaterial(mesh) as THREE.MeshStandardMaterial | undefined
+  if (!m) return false
+  if ((m as unknown as { isMeshBasicMaterial?: boolean }).isMeshBasicMaterial) return true
+  const e = m.emissive
+  return e !== undefined && e.r + e.g + e.b > 0.02 && (m.emissiveIntensity ?? 1) > 0
 }
 
 /** Set on both the source mesh and the hull, so a second pass never doubles up
@@ -143,24 +208,22 @@ function isOutlineHull(o: THREE.Object3D): boolean {
   return o.userData.outlineHull === true
 }
 
+const bounds = new THREE.Box3()
+
 /**
  * Give every mesh under `root` an outline.
  *
- * Skips anything already outlined, anything flagged `userData.noOutline`, and
- * anything the caller's `skip` rejects.
+ * Skips anything already outlined, anything self-lit, anything flagged
+ * `userData.noOutline`, and anything the caller's `skip` rejects.
  */
-export function applyOutlines(
-  root: THREE.Object3D,
-  width: number,
-  skip?: (mesh: THREE.Mesh) => boolean,
-): void {
+export function applyOutlines(root: THREE.Object3D, skip?: (mesh: THREE.Mesh) => boolean): void {
   const pending: THREE.Mesh[] = []
 
   root.traverse((o) => {
     const mesh = o as THREE.Mesh
     if (!mesh.isMesh) return
     if (isOutlineHull(mesh) || mesh.userData[MARK] || mesh.userData.noOutline) return
-    if (skip?.(mesh)) return
+    if (isSelfLit(mesh) || skip?.(mesh)) return
     pending.push(mesh)
   })
 
@@ -168,17 +231,30 @@ export function applyOutlines(
     mesh.userData[MARK] = true
     if (!bakeSmoothNormals(mesh.geometry)) continue
 
-    const hull = new THREE.Mesh(mesh.geometry, outlineMaterial(width, OUTLINE_COLOR))
+    // Measured from the geometry rather than with `Box3.setFromObject`, so a
+    // mesh is sized by itself and not by whatever happens to be parented under
+    // it. Once, at load: nothing here changes size afterwards.
+    mesh.updateWorldMatrix(true, false)
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox()
+    bounds.copy(mesh.geometry.boundingBox!).applyMatrix4(mesh.matrixWorld)
+    const height = Math.max(bounds.max.y - bounds.min.y, 1e-3)
+
+    const hull = new THREE.Mesh(mesh.geometry, material)
     hull.userData.outlineHull = true
     // It is a silhouette, not an object. It must not cast, receive, or be
     // picked up by anything that walks the scene looking for geometry.
     hull.userData.noShadow = true
+    hull.userData.noOutline = true
     hull.castShadow = false
     hull.receiveShadow = false
     hull.frustumCulled = mesh.frustumCulled
     // Drawn before the mesh it belongs to, so the mesh's own depth writes trim
     // it back to the rim rather than the other way round.
     hull.renderOrder = mesh.renderOrder - 1
+    hull.onBeforeRender = () => {
+      material.uniforms.uHeight!.value = height
+    }
     mesh.add(hull)
+    hulls.push({ hull, host: mesh, height })
   }
 }

@@ -217,8 +217,19 @@ export function initialState(def: NpcDef): NpcState {
   }
 }
 
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v
+/**
+ * Clamp into [0,1] and round to three places.
+ *
+ * The rounding is not cosmetic. Boredom starting at 0.8 and rising by 0.07
+ * twice gives 0.9400000000000001, which is greater than 0.94, so an option
+ * gated `max: 0.94` silently vanished and the patient route through the guard
+ * dead ended. Drift like that accumulates over a long conversation and is
+ * exactly the kind of thing that makes a state comparison unreliable. Same
+ * treatment `prune` gives properties in `props/registry.ts`.
+ */
+function scalar(v: number): number {
+  const clamped = v < 0 ? 0 : v > 1 ? 1 : v
+  return Math.round(clamped * 1000) / 1000
 }
 
 /** Strongest value of a property across everything carried. */
@@ -361,7 +372,7 @@ export function choose(
 
   const drives = { ...state.drives }
   for (const [id, delta] of Object.entries(outcome.drives ?? {})) {
-    drives[id as DriveId] = clamp01(drives[id as DriveId] + delta)
+    drives[id as DriveId] = scalar(drives[id as DriveId] + delta)
   }
 
   const said = new Set(state.said)
@@ -377,13 +388,29 @@ export function choose(
   }
 
   const ended = outcome.goto === 'end' || outcome.resolve !== undefined
-  const next: NpcState = {
+  const moved: NpcState = {
     ...state,
-    disposition: clamp01(state.disposition + (outcome.disposition ?? 0)),
+    disposition: scalar(state.disposition + (outcome.disposition ?? 0)),
     drives,
     said,
-    at: ended ? null : (outcome.goto ?? node.id),
+    at: null,
     resolved: outcome.resolve ?? state.resolved,
+  }
+
+  /**
+   * A gated node is a MOOD, not a place, so it takes precedence over wherever
+   * the option was pointing and it applies immediately.
+   *
+   * Without this, souring only happened when a conversation reopened, because
+   * entry gates were read once on the way in. You could stand there and tell
+   * the same guard the same lie five times running and he would keep answering
+   * as though nothing had happened, which is the opposite of disposition being
+   * a value that changes during a run.
+   */
+  const mood = def.nodes.find((n) => n.when !== undefined && allPass(n.when, moved, sit))
+  const next: NpcState = {
+    ...moved,
+    at: ended ? null : (mood?.id ?? outcome.goto ?? node.id),
   }
 
   const reply = outcome.suggest && suggestReply ? suggestReply(sit) : outcome.reply

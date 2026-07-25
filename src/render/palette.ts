@@ -207,4 +207,14 @@ export const MATERIAL_COLOR = {
   gold: 0xc9a03a,
   straw: 0x8a7a54,
   clay: 0x8d6146,
+  /**
+   * Step 3 of `RAMP.fruit`. Nothing reads this yet: kitbash only tints the
+   * transparent kinds, and `fruit` is opaque, so it falls through to the plain
+   * `toonUnique({ map })` branch and takes its colour from the bitmap.
+   *
+   * It exists because kitbash indexes this table by `MaterialKind`, so the key
+   * has to be here before `fruit` joins that union or the lookup is a type
+   * error. Safe to land ahead of the recipe change for the same reason.
+   */
+  fruit: 0xa03d31,
 } as const
