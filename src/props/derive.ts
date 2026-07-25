@@ -76,6 +76,17 @@ function emerge(out: Properties): void {
 
   // Water in the mix soaks whatever it was mixed with.
   set('WET', p(out, 'WATER'))
+
+  // Glass breaks. Anything mostly glass carries that with it, which is why a
+  // lens bound into an iron ring is still a thing you can sit on and ruin.
+  set('FRAGILE', p(out, 'GLASS') * 0.9)
+
+  // Fire frightens most living things.
+  set('FRIGHTENING', p(out, 'HOT') * 0.7)
+
+  // So does an edge with weight behind it. Note the `min`: a razor with no mass
+  // and a boulder with no edge are both unremarkable to stand in front of.
+  set('FRIGHTENING', Math.min(p(out, 'SHARP'), p(out, 'HEAVY')) * 1.1)
 }
 
 /**
@@ -105,6 +116,20 @@ function react(out: Properties): void {
   // A blade blunts when it is buried in mass.
   const heavy = p(out, 'HEAVY')
   if (heavy > 0.75) out.SHARP = clamp01(p(out, 'SHARP') * (1 - (heavy - 0.75)))
+
+  // Water thins poison and rinses it off whatever was carrying it. Same shape
+  // as the fire rules above: it reads a property, so it holds for any toxin.
+  if (water > 0) out.TOXIC = clamp01(p(out, 'TOXIC') * (1 - water * 0.7))
+
+  // Something that breaks under load is not a platform and not a tool, whatever
+  // else it is. Below 0.5 it is merely delicate and still works.
+  const fragile = p(out, 'FRAGILE')
+  if (fragile > 0.5) {
+    const keeps = 1 - (fragile - 0.5)
+    out.RIGID = clamp01(p(out, 'RIGID') * keeps)
+    out.PLATFORM = clamp01(p(out, 'PLATFORM') * keeps)
+    out.TOOL_STRIKING = clamp01(p(out, 'TOOL_STRIKING') * keeps)
+  }
 }
 
 /** The whole derivation, in the order the rules depend on each other. */

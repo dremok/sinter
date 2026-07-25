@@ -50,6 +50,10 @@ export const PROPERTIES = {
   RIGID: { group: 'physical', combine: 'max', color: '#b0a894', blurb: 'holds its shape under load' },
   BUOYANT: { group: 'physical', combine: 'max', color: '#8fc7e8', blurb: 'floats' },
   WET: { group: 'physical', combine: 'max', color: '#6fb2d8', blurb: 'resists fire until it dries' },
+  // Read by `props/derive.ts`: glass makes a thing fragile, and a fragile thing
+  // stops being something you can stand on or drive with. `max`, because the
+  // whole is as breakable as its most breakable part.
+  FRAGILE: { group: 'physical', combine: 'max', color: '#d3a7ae', blurb: 'breaks under load or a knock' },
 
   // --------------------------------------------------------------- energetic
   HOT: { group: 'energetic', combine: 'max', color: '#ff7a3d', blurb: 'ignites flammable things nearby' },
@@ -60,10 +64,19 @@ export const PROPERTIES = {
   EDIBLE: { group: 'biological', combine: 'blend', color: '#c9d67a', blurb: 'food' },
   SEED: { group: 'biological', combine: 'max', color: '#a8c46a', blurb: 'grows, given water and time' },
   LIVING: { group: 'biological', combine: 'blend', color: '#86c17a', blurb: 'alive, for now' },
+  // Read by `props/derive.ts` (water dilutes it) and named as the unauthored
+  // route past the granary rats in `items/interactions.ts`. `max`, because
+  // poison smeared on a blade is as strong as the poison was.
+  TOXIC: { group: 'biological', combine: 'max', color: '#7a5c9e', blurb: 'harms whatever eats or absorbs it' },
 
   // ------------------------------------------------------------------ social
   VALUABLE: { group: 'social', combine: 'sum', color: '#e6c35c', blurb: 'someone would want this' },
   SACRED: { group: 'social', combine: 'max', color: '#d8b3e8', blurb: 'means something to someone' },
+  // Written by `props/derive.ts` (fire, and a heavy edge) and read as the
+  // unauthored route past the gate guard and the yard dog in
+  // `items/interactions.ts`. The NPC layer in D19 is the other consumer and is
+  // not built yet, which is the one thing on this list still owed a reader.
+  FRIGHTENING: { group: 'social', combine: 'max', color: '#8c3b4a', blurb: 'living things want to be elsewhere' },
 
   // -------------------------------------------------------------- functional
   CONTAINER: { group: 'functional', combine: 'max', color: '#b8a67e', blurb: 'holds things' },

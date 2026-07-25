@@ -27,11 +27,31 @@ Conventions, and they matter. Assemblies go subtly wrong forever if these drift:
   - Everything is bevelled. Hard 90 degree edges read as untextured boxes under
     cel shading; a small bevel catches the light band and is most of why these
     look authored rather than primitive.
+
+How the shapes are made, and why not primitives:
+
+A deformed cube is not an axe. At the size these render, an item has to be
+identifiable from its outline, so silhouette is the whole budget and it has to
+be spent on real form: a bit that curves, a bucket that tapers over a rolled
+rim, a haft that swells where a hand would go. So the builders below sit on four
+generic modelling operators rather than on `primitive_cube_add`:
+
+  - `bm_lathe`   revolve a (radius, height) profile. Vessels, hafts, plugs.
+  - `bm_loft`    bridge a run of cross sections. Blades, bars, bales.
+  - `bm_sweep`   run a cross section along a path frame. Hoops, rope, shoes.
+  - `bm_box`     a box, for the handful of places a box is honestly right.
+
+The two section generators, `blade_section` and `box_section`, are what carry
+the secondary detail: per station thickness, so an axe is fat at the eye and
+razor at the edge, and a chamfer, so every long edge has a facet to catch the
+cel band.
+
+Proportions are deliberately exaggerated. Heads are chunkier and tapers stronger
+than a real object's, because accurate proportions read as generic at 30 pixels.
 """
 
 import math
 import os
-import sys
 
 import bpy
 import bmesh
@@ -130,257 +150,797 @@ class _Lcg:
         return self.s / 0x7FFFFFFF
 
 
+# ----------------------------------------------------------------- bmesh tools
+
+def _face(bm, verts):
+    """Add a face, dropping the degenerate ones a generated profile throws off.
+
+    A lathe profile that touches the axis, or a blade section pinched to nothing
+    at the cutting edge, both produce runs of coincident vertices. Filtering
+    here is what lets the profile tables read as shapes rather than as a list of
+    special cases.
+    """
+    uniq = []
+    for v in verts:
+        if not uniq or uniq[-1] is not v:
+            uniq.append(v)
+    if len(uniq) > 1 and uniq[0] is uniq[-1]:
+        uniq.pop()
+    if len(uniq) < 3:
+        return None
+    try:
+        return bm.faces.new(uniq)
+    except ValueError:
+        return None
+
+
+def bm_lathe(bm, profile, segments=12, phase=0.0):
+    """
+    Revolve a profile around Z.
+
+    `profile` runs bottom to top as `(radius, z)` or `(radius, z, stave)`.
+    A radius of zero closes the surface with a fan, so a profile that starts and
+    ends on the axis produces a solid. A vessel is written as one continuous
+    profile that climbs the outside, rolls over the rim and comes back down the
+    inside, which is what gives it a wall with real thickness rather than an
+    open shell that shows its own backfaces.
+
+    `stave` offsets alternating segments in or out, so a cooper's bucket gets
+    vertical staves for free without a second modelling pass.
+    """
+    rings = []
+    for entry in profile:
+        r, z = entry[0], entry[1]
+        stave = entry[2] if len(entry) > 2 else 0.0
+        if r <= 1e-6:
+            rings.append([bm.verts.new((0.0, 0.0, z))])
+            continue
+        ring = []
+        for i in range(segments):
+            a = phase + 2.0 * math.pi * i / segments
+            rr = r + (stave if i % 2 == 0 else -stave)
+            ring.append(bm.verts.new((rr * math.cos(a), rr * math.sin(a), z)))
+        rings.append(ring)
+
+    for lo, hi in zip(rings, rings[1:]):
+        if len(lo) == 1 and len(hi) == 1:
+            continue
+        if len(lo) == 1:
+            for i in range(segments):
+                _face(bm, [lo[0], hi[i], hi[(i + 1) % segments]])
+        elif len(hi) == 1:
+            for i in range(segments):
+                _face(bm, [lo[i], lo[(i + 1) % segments], hi[0]])
+        else:
+            for i in range(segments):
+                j = (i + 1) % segments
+                _face(bm, [lo[i], lo[j], hi[j], hi[i]])
+    return rings
+
+
+def bm_loft(bm, sections, cap_start=True, cap_end=True, closed=False):
+    """Bridge a run of equal-length cross sections. `sections` are lists of
+    `(x, y, z)`, ordered the same way around each loop."""
+    rings = [[bm.verts.new(p) for p in sec] for sec in sections]
+    n = len(rings[0])
+    pairs = list(zip(rings, rings[1:]))
+    if closed:
+        pairs.append((rings[-1], rings[0]))
+    for lo, hi in pairs:
+        for i in range(n):
+            j = (i + 1) % n
+            _face(bm, [lo[i], lo[j], hi[j], hi[i]])
+    if not closed:
+        if cap_start:
+            _face(bm, list(reversed(rings[0])))
+        if cap_end:
+            _face(bm, list(rings[-1]))
+    return rings
+
+
+def bm_sweep(bm, frames, section, closed=False):
+    """Run a 2D section along a path. `frames` are `(origin, u, v, t)`; `section`
+    is called per frame and returns points in that frame's `(u, v)` plane, so a
+    hoop can taper or a rope can twist along its length."""
+    secs = []
+    for i, (o, u, v, t) in enumerate(frames):
+        secs.append([tuple(o + u * su + v * sv) for (su, sv) in section(i, t)])
+    return bm_loft(bm, secs, closed=closed)
+
+
+def arc_frames(radius, a0, a1, steps, z=0.0, closed=False):
+    """Frames around a circular arc in the XY plane, u pointing outward."""
+    out = []
+    span = steps if closed else max(steps - 1, 1)
+    for i in range(steps):
+        t = i / span
+        a = a0 + (a1 - a0) * t
+        c, s = math.cos(a), math.sin(a)
+        out.append((Vector((radius * c, radius * s, z)),
+                    Vector((c, s, 0.0)), Vector((0.0, 0.0, 1.0)), t))
+    return out
+
+
+def bm_box(bm, lo, hi):
+    """An axis aligned box. Used where a box is honestly the right answer, which
+    is mostly crate framing."""
+    x0, y0, z0 = lo
+    x1, y1, z1 = hi
+    v = [bm.verts.new(p) for p in (
+        (x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
+        (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1),
+    )]
+    for q in ((0, 1, 2, 3), (7, 6, 5, 4), (0, 4, 5, 1),
+              (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)):
+        _face(bm, [v[i] for i in q])
+
+
+def emit(bm, name, anchor_mode="base", smooth=False, bevel_width=0.008):
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh)
+    bm.free()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    return finish(obj, name, anchor_mode, smooth, bevel_width)
+
+
+# -------------------------------------------------------------------- sections
+
+def blade_section(x, z0, z1, half_t, fullness=0.0, bow=0.0, floor=0.0016):
+    """
+    A ten point cross section for anything with an edge, in the YZ plane.
+
+    `fullness` runs 0 to 1 and decides what the section is: 0 gives a lens that
+    comes to nothing top and bottom, which is a cutting edge; 1 gives a squared
+    off bar, which is the eye of an axe or the spine of a knife. Varying it
+    along the length is the whole trick, because it is what makes the cheek of
+    an axe a real surface with a light band on it instead of a flat plate.
+
+    `bow` pushes the middle of the section forward, so a run of sections can
+    close on a convex cutting edge rather than a straight chisel.
+    """
+    h = z1 - z0
+    zm = 0.5 * (z0 + z1)
+    te = max(half_t * fullness, floor)
+    tq = max(half_t * (0.48 + 0.52 * fullness), floor)
+
+    def bx(z):
+        u = (z - zm) / (0.5 * h) if abs(h) > 1e-9 else 0.0
+        return x + bow * max(0.0, 1.0 - u * u)
+
+    zq_hi = z1 - h * 0.26
+    zq_lo = z0 + h * 0.26
+    return [
+        (bx(z1), -te, z1),
+        (bx(zq_hi), -tq, zq_hi),
+        (bx(zm), -half_t, zm),
+        (bx(zq_lo), -tq, zq_lo),
+        (bx(z0), -te, z0),
+        (bx(z0), te, z0),
+        (bx(zq_lo), tq, zq_lo),
+        (bx(zm), half_t, zm),
+        (bx(zq_hi), tq, zq_hi),
+        (bx(z1), te, z1),
+    ]
+
+
+def box_section(x, half_y, z0, z1, chamfer=0.28):
+    """An eight point chamfered rectangle in the YZ plane. The chamfer is the
+    point: a square section reads as an untextured box, a chamfered one has four
+    extra facets that each take the light differently."""
+    h = z1 - z0
+    c = chamfer * min(2.0 * half_y, h) * 0.5
+    return [
+        (x, -half_y, z0 + c),
+        (x, -half_y + c, z0),
+        (x, half_y - c, z0),
+        (x, half_y, z0 + c),
+        (x, half_y, z1 - c),
+        (x, half_y - c, z1),
+        (x, -half_y + c, z1),
+        (x, -half_y, z1 - c),
+    ]
+
+
 # ----------------------------------------------------------------------- parts
 
-def haft(name, length, r_top, r_bot, verts=10):
-    bpy.ops.mesh.primitive_cone_add(vertices=verts, radius1=r_bot, radius2=r_top, depth=length)
-    o = bpy.context.object
-    return finish(o, name, "base", bevel_width=0.004)
+def haft(name, length, r_butt, r_grip, r_waist, r_top, segments=10):
+    """
+    A tool handle with a hand in mind.
+
+    A cone reads as a stick. What makes a haft look like a haft is the swell:
+    a flare at the butt so it cannot slip out of a grip, a fuller section where
+    the hand sits, a waist above it, and a shoulder just under the head. Four
+    radius changes over half a metre, and the outline stops being a taper.
+    """
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, 0.0),
+        (r_butt * 0.80, 0.0),
+        (r_butt, length * 0.020),
+        (r_butt * 0.86, length * 0.055),
+        (r_grip, length * 0.150),
+        (r_grip * 0.97, length * 0.300),
+        (r_waist, length * 0.620),
+        (r_waist * 1.02, length * 0.800),
+        (r_top * 1.14, length * 0.930),
+        (r_top, length * 0.985),
+        (r_top * 0.72, length),
+        (0.0, length),
+    ], segments=segments)
+    return emit(bm, name, "base", bevel_width=0.004)
 
 
 def make_haft_short():
-    o = haft("haft_short", 0.52, 0.021, 0.026)
+    o = haft("haft_short", 0.52, 0.030, 0.029, 0.0245, 0.026)
     socket(o, "socket_tip", (0, 0, 0.52))
     socket(o, "socket_mid", (0, 0, 0.26))
 
 
 def make_haft_long():
-    o = haft("haft_long", 0.92, 0.019, 0.026)
+    o = haft("haft_long", 0.92, 0.031, 0.030, 0.0235, 0.026)
     socket(o, "socket_tip", (0, 0, 0.92))
     socket(o, "socket_mid", (0, 0, 0.46))
 
 
 def make_blade_axe():
-    """A proper axe head: eye, cheek, and a flared bit with a curved edge."""
+    """
+    A felling axe head: poll, eye, cheek, beard, and a bit that curves.
+
+    Built as a run of cross sections from the poll forward. The eye stations are
+    full and fat, the cheeks thin out, and the last two bow forward so the
+    cutting edge is a convex arc with a toe and a heel rather than a straight
+    chisel. The beard is the bottom edge dropping away and back under the eye,
+    which is the single detail that stops an axe silhouette reading as a
+    hatchet-shaped rectangle.
+
+    The eye sits at x = -0.078 rather than at the origin because that is where
+    the recipe in `items/catalog.ts` puts the haft. Move this and the axe head
+    slides off its handle.
+    """
     bm = bmesh.new()
-    # Slab, then shaped by moving the front face outward and tapering the edge.
-    bmesh.ops.create_cube(bm, size=1.0)
-    for v in bm.verts:
-        v.co.x *= 0.30
-        v.co.y *= 0.085
-        v.co.z *= 0.20
-    # Flare the cutting edge (+x) vertically and thin it.
-    for v in bm.verts:
-        if v.co.x > 0:
-            v.co.z *= 1.75
-            v.co.y *= 0.30
-            v.co.x += 0.05
-    mesh = bpy.data.meshes.new("blade_axe")
-    bm.to_mesh(mesh)
-    bm.free()
-    o = bpy.data.objects.new("blade_axe", mesh)
-    bpy.context.collection.objects.link(o)
-    finish(o, "blade_axe", "none", bevel_width=0.006)
-    socket(o, "socket_mid", (0, 0, 0))
+    #        x,      z0,     z1,    half_t, fullness, bow
+    stations = [
+        (-0.176, -0.052, 0.052, 0.030, 0.90, 0.0),   # poll, rounded off
+        (-0.158, -0.070, 0.072, 0.038, 0.92, 0.0),   # poll face
+        (-0.116, -0.082, 0.086, 0.043, 0.94, 0.0),   # eye, back lug
+        (-0.040, -0.084, 0.088, 0.044, 0.94, 0.0),   # eye, front lug
+        (-0.008, -0.086, 0.078, 0.033, 0.62, 0.0),   # neck, waisted
+        (0.046, -0.116, 0.076, 0.026, 0.34, 0.0),    # beard begins to fall
+        (0.118, -0.168, 0.092, 0.019, 0.18, 0.006),  # cheek
+        (0.186, -0.196, 0.108, 0.011, 0.10, 0.022),  # shoulder of the bit
+        (0.222, -0.190, 0.106, 0.0040, 0.55, 0.040),  # bevel behind the edge
+        (0.236, -0.176, 0.099, 0.0016, 1.00, 0.047),  # the edge itself
+    ]
+    bm_loft(bm, [blade_section(*s) for s in stations])
+    o = emit(bm, "blade_axe", "none", bevel_width=0.005)
+    socket(o, "socket_mid", (-0.078, 0, 0))
 
 
 def make_blade_knife():
+    """Tang, bolster, then a blade with a straight spine and a bellied edge that
+    sweeps up to the point. The bolster is a single fat station and it is what
+    makes the knife read as two objects joined rather than as one wedge."""
     bm = bmesh.new()
-    bmesh.ops.create_cube(bm, size=1.0)
-    for v in bm.verts:
-        v.co.x *= 0.26
-        v.co.y *= 0.035
-        v.co.z *= 0.07
-    for v in bm.verts:
-        if v.co.x > 0:
-            v.co.y *= 0.25
-            v.co.z *= 0.55
-    mesh = bpy.data.meshes.new("blade_knife")
-    bm.to_mesh(mesh)
-    bm.free()
-    o = bpy.data.objects.new("blade_knife", mesh)
-    bpy.context.collection.objects.link(o)
-    finish(o, "blade_knife", "none", bevel_width=0.004)
+    stations = [
+        (-0.262, -0.020, 0.020, 0.009, 0.85, 0.0),   # tang butt
+        (-0.170, -0.023, 0.023, 0.010, 0.85, 0.0),   # tang
+        (-0.116, -0.026, 0.026, 0.012, 0.88, 0.0),   # tang shoulder
+        (-0.100, -0.040, 0.040, 0.021, 0.92, 0.0),   # bolster
+        (-0.082, -0.038, 0.038, 0.014, 0.55, 0.0),   # ricasso
+        (-0.040, -0.040, 0.038, 0.010, 0.30, 0.0),
+        (0.060, -0.043, 0.036, 0.009, 0.24, 0.0),    # belly at its deepest
+        (0.150, -0.034, 0.032, 0.007, 0.20, 0.004),
+        (0.216, -0.014, 0.026, 0.004, 0.22, 0.008),  # edge sweeps up
+        (0.256, 0.008, 0.017, 0.0016, 0.90, 0.006),  # point
+    ]
+    bm_loft(bm, [blade_section(*s) for s in stations])
+    o = emit(bm, "blade_knife", "none", bevel_width=0.003)
+    socket(o, "socket_mid", (-0.10, 0, 0))
 
 
 def make_head_hammer():
-    bpy.ops.mesh.primitive_cube_add(size=1)
-    o = bpy.context.object
-    for v in o.data.vertices:
-        v.co.x *= 0.20
-        v.co.y *= 0.10
-        v.co.z *= 0.10
-    finish(o, "head_hammer", "none", bevel_width=0.012)
+    """
+    A blacksmith's hammer head: swollen eye in the middle, a face that is
+    slightly domed and chamfered on one end, a tapered cross peen on the other.
+
+    Straight box sections would give a brick. The eye station being taller and
+    wider than its neighbours is what puts a waist either side of it, and the
+    waist is the whole silhouette.
+    """
+    bm = bmesh.new()
+    stations = [
+        (-0.104, 0.026, -0.026, 0.026, 0.55),   # peen, nearly a wedge
+        (-0.092, 0.030, -0.032, 0.032, 0.42),
+        (-0.058, 0.038, -0.040, 0.040, 0.30),   # peen root
+        (-0.028, 0.050, -0.052, 0.052, 0.26),   # eye, front lug
+        (0.014, 0.052, -0.054, 0.054, 0.26),    # eye, back lug
+        (0.034, 0.042, -0.044, 0.044, 0.30),    # waist
+        (0.074, 0.045, -0.047, 0.047, 0.28),    # face flares back out
+        (0.098, 0.044, -0.046, 0.046, 0.60),    # chamfered face
+        (0.106, 0.038, -0.040, 0.040, 0.85),    # struck face, domed off
+    ]
+    bm_loft(bm, [box_section(*s) for s in stations])
+    o = emit(bm, "head_hammer", "none", bevel_width=0.005)
+    socket(o, "socket_mid", (-0.008, 0, 0))
 
 
 def make_bucket():
-    """Staved pail: tapered body, open top, with a rim."""
-    bpy.ops.mesh.primitive_cone_add(vertices=14, radius1=0.15, radius2=0.19, depth=0.28)
-    body = bpy.context.object
-    body.name = "bucket_body"
-    # Hollow it so the open top reads from an isometric angle.
+    """
+    A cooper's pail: staved body, two iron hoops, a rolled rim and a floor.
+
+    The old one was a cone with its top faces deleted, which showed its own
+    backfaces from a low camera and read as a paper cup. This is a single
+    continuous lathe profile that goes up the outside, over the rim and back
+    down the inside to a floor, so it is a real vessel with wall thickness. The
+    hoops are two radius steps in that profile; the staves are the alternating
+    offset on the body points. Both exist to break the taper into bands, since
+    an unbroken taper is exactly what read as a cone.
+    """
     bm = bmesh.new()
-    bm.from_mesh(body.data)
-    top_faces = [f for f in bm.faces if f.calc_center_median().z > 0.12]
-    if top_faces:
-        bmesh.ops.delete(bm, geom=top_faces, context="FACES")
-    bm.to_mesh(body.data)
-    bm.free()
-    body.data.update()
-    finish(body, "bucket_body", "base", bevel_width=0.006)
-    socket(body, "socket_tip", (0, 0, 0.28))
+    st = 0.0045                      # stave offset, alternating segments
+    bm_lathe(bm, [
+        (0.0, 0.0),
+        (0.104, 0.0),                # outer floor
+        (0.112, 0.014),
+        (0.121, 0.052, st),
+        (0.133, 0.070),              # lower hoop, proud of the staves
+        (0.133, 0.092),
+        (0.126, 0.104, st),
+        (0.138, 0.170, st),
+        (0.152, 0.188),              # upper hoop
+        (0.152, 0.210),
+        (0.145, 0.222, st),
+        (0.153, 0.256, st),
+        (0.166, 0.268),              # rim rolls out
+        (0.168, 0.280),
+        (0.157, 0.288),              # over the top
+        (0.143, 0.279),
+        (0.138, 0.256),              # and back down the inside
+        (0.122, 0.100),
+        (0.104, 0.044),
+        (0.092, 0.034),
+        (0.0, 0.032),                # inner floor
+    ], segments=14)
+
+    # Ears for the bail. Two small lugs at the rim, on the axis the recipe
+    # swings the handle around.
+    for sx in (-1.0, 1.0):
+        bm_box(bm, (sx * 0.142, -0.020, 0.226), (sx * 0.176, 0.020, 0.268))
+
+    o = emit(bm, "bucket_body", "base", bevel_width=0.005)
+    socket(o, "socket_tip", (0, 0, 0.288))
+    socket(o, "socket_mid", (0, 0, 0.14))
 
 
 def make_flask():
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=14, ring_count=8, radius=0.13)
-    o = bpy.context.object
-    for v in o.data.vertices:
-        v.co.z *= 1.25
-        # Pinch toward a neck at the top.
-        if v.co.z > 0.06:
-            f = 1.0 - (v.co.z - 0.06) * 3.4
-            v.co.x *= max(f, 0.28)
-            v.co.y *= max(f, 0.28)
-    finish(o, "flask_body", "base", smooth=True, bevel_width=0.003)
+    """A bellied flask with a real shoulder, a neck the stopper can seat in, and
+    a footed base so it stands. The old sphere-with-a-pinch read as a bauble
+    because there was no straight run anywhere on it for the light to sit."""
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, 0.0),
+        (0.070, 0.0),                # foot
+        (0.078, 0.012),
+        (0.068, 0.030),              # undercut above the foot
+        (0.104, 0.070),
+        (0.124, 0.128),              # widest point, low, so it looks heavy
+        (0.121, 0.170),
+        (0.098, 0.216),              # shoulder
+        (0.062, 0.250),
+        (0.043, 0.266),              # neck root
+        (0.041, 0.300),
+        (0.048, 0.312),              # lip
+        (0.046, 0.322),
+        (0.034, 0.324),
+        (0.0, 0.318),
+    ], segments=16)
+    o = emit(bm, "flask_body", "base", smooth=True, bevel_width=0.003)
     socket(o, "socket_tip", (0, 0, 0.30))
+    socket(o, "socket_mid", (0, 0, 0.13))
 
 
 def make_jar():
-    bpy.ops.mesh.primitive_cone_add(vertices=14, radius1=0.13, radius2=0.10, depth=0.22)
-    o = bpy.context.object
-    finish(o, "jar_body", "base", bevel_width=0.008)
+    """Fired clay: a wide belly, a pinched neck, and a lip thick enough to see
+    from across the room."""
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, 0.0),
+        (0.088, 0.0),
+        (0.096, 0.010),
+        (0.120, 0.048),
+        (0.132, 0.096),              # belly
+        (0.124, 0.146),
+        (0.100, 0.178),              # shoulder
+        (0.086, 0.194),
+        (0.100, 0.206),              # lip flares back out
+        (0.098, 0.220),
+        (0.082, 0.216),
+        (0.076, 0.190),              # inside of the neck
+        (0.090, 0.120),
+        (0.070, 0.030),
+        (0.0, 0.028),
+    ], segments=14)
+    o = emit(bm, "jar_body", "base", bevel_width=0.005)
     socket(o, "socket_tip", (0, 0, 0.22))
+    socket(o, "socket_mid", (0, 0, 0.10))
 
 
 def make_plank():
-    bpy.ops.mesh.primitive_cube_add(size=1)
-    o = bpy.context.object
-    for v in o.data.vertices:
-        v.co.x *= 0.62
-        v.co.y *= 0.13
-        v.co.z *= 0.032
-    finish(o, "plank_board", "none", bevel_width=0.006)
-    socket(o, "socket_tip", (0.62, 0, 0))
+    """Sawn board. Chamfered along its length, slightly narrower at one end, and
+    the ends left rough so it does not read as extruded plastic."""
+    bm = bmesh.new()
+    stations = [
+        (-0.310, 0.058, -0.018, 0.016, 0.30),
+        (-0.288, 0.064, -0.017, 0.017, 0.22),
+        (-0.120, 0.065, -0.016, 0.016, 0.22),
+        (0.110, 0.064, -0.016, 0.017, 0.22),
+        (0.284, 0.062, -0.015, 0.018, 0.22),
+        (0.310, 0.056, -0.013, 0.017, 0.34),
+    ]
+    bm_loft(bm, [box_section(*s) for s in stations])
+    o = emit(bm, "plank_board", "none", bevel_width=0.004)
+    socket(o, "socket_tip", (0.31, 0, 0))
+    socket(o, "socket_mid", (0, 0, 0))
 
 
 def make_crate():
-    bpy.ops.mesh.primitive_cube_add(size=1)
-    o = bpy.context.object
-    for v in o.data.vertices:
-        v.co.x *= 0.22
-        v.co.y *= 0.22
-        v.co.z *= 0.22
-    finish(o, "crate_box", "base", bevel_width=0.016)
-    socket(o, "socket_tip", (0, 0, 0.44))
+    """
+    A framed crate: thin panels set back behind corner posts and rails.
+
+    A bevelled cube is a bevelled cube whatever you texture it with. Insetting
+    the panel by twelve millimetres and running posts and rails proud of it
+    gives twelve extra silhouette breaks and a shadow line all the way round,
+    which is the entire difference between "crate" and "box".
+    """
+    bm = bmesh.new()
+    h = 0.11        # half extent
+    p = 0.028       # post section
+    r = 0.030       # rail height
+
+    bm_box(bm, (-h + 0.014, -h + 0.014, 0.012), (h - 0.014, h - 0.014, 0.208))
+
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            bm_box(bm, (min(sx * h, sx * (h - p)), min(sy * h, sy * (h - p)), 0.0),
+                   (max(sx * h, sx * (h - p)), max(sy * h, sy * (h - p)), 0.220))
+
+    for z0 in (0.010, 0.180):
+        for sy in (-1.0, 1.0):
+            bm_box(bm, (-h, min(sy * h, sy * (h - 0.018)), z0),
+                   (h, max(sy * h, sy * (h - 0.018)), z0 + r))
+        for sx in (-1.0, 1.0):
+            bm_box(bm, (min(sx * h, sx * (h - 0.018)), -h, z0),
+                   (max(sx * h, sx * (h - 0.018)), h, z0 + r))
+
+    o = emit(bm, "crate_box", "base", bevel_width=0.004)
+    socket(o, "socket_tip", (0, 0, 0.22))
+    socket(o, "socket_mid", (0, 0, 0.11))
 
 
 def make_ring():
-    bpy.ops.mesh.primitive_torus_add(major_radius=0.14, minor_radius=0.028,
-                                     major_segments=18, minor_segments=7)
-    o = bpy.context.object
-    finish(o, "ring_band", "none", smooth=False, bevel_width=0.003)
+    """Forged hoop, D section: flat on the inside where it would bear, rounded
+    outside. Doubles as the bucket's bail and as twine round a bale, so it stays
+    plain."""
+    bm = bmesh.new()
+    sec = [(0.026, 0.0), (0.020, 0.019), (-0.012, 0.024),
+           (-0.021, 0.0), (-0.012, -0.024), (0.020, -0.019)]
+    bm_sweep(bm, arc_frames(0.140, 0.0, 2.0 * math.pi, 20, closed=True),
+             lambda i, t: sec, closed=True)
+    emit(bm, "ring_band", "none", bevel_width=0.003)
 
 
 def make_horseshoe():
-    """A torus with the heel opened up, which is what makes it read as a shoe
-    rather than as a ring."""
-    bpy.ops.mesh.primitive_torus_add(major_radius=0.14, minor_radius=0.032,
-                                     major_segments=20, minor_segments=7)
-    o = bpy.context.object
+    """
+    Shoe stock bent round a last: rectangular section, tapering from toe to
+    heel, with a fuller groove on the upper face and calkins turned down at the
+    heels.
+
+    The groove matters more than it sounds. A flat ring of metal viewed from
+    above is a flat ring of metal; a groove running round it splits the top face
+    into two bands and gives the cel shader something to do.
+    """
     bm = bmesh.new()
-    bm.from_mesh(o.data)
-    gap = [f for f in bm.faces
-           if f.calc_center_median().y < -0.075 and abs(f.calc_center_median().x) < 0.075]
-    if gap:
-        bmesh.ops.delete(bm, geom=gap, context="FACES")
-    bm.to_mesh(o.data)
-    bm.free()
-    o.data.update()
-    # Flatten slightly: a shoe is not round stock.
-    for v in o.data.vertices:
-        v.co.z *= 0.6
-    finish(o, "horseshoe", "none", bevel_width=0.004)
+    steps = 22
+
+    def sec(i, t):
+        # t runs heel to toe to heel. Widest and thickest at the toe.
+        k = 1.0 - abs(2.0 * t - 1.0)                  # 0 at the heels, 1 at toe
+        w = 0.030 + 0.012 * k                         # radial half width
+        hh = 0.017 + 0.004 * k                        # half thickness
+        g = 0.012 + 0.004 * k                         # fuller half width
+        c = 0.009
+        return [
+            (-w, -hh + c), (-w + c, -hh), (w - c, -hh), (w, -hh + c),
+            (w, hh - c), (w - c * 0.8, hh),
+            (g, hh), (0.0, hh - 0.007), (-g, hh),     # the fuller
+            (-w + c * 0.8, hh), (-w, hh - c),
+        ]
+
+    frames = arc_frames(0.132, math.radians(-150.0), math.radians(150.0), steps)
+    bm_sweep(bm, frames, sec)
+
+    # Calkins: the heel ends turned down, so the shoe has two feet and its
+    # outline is not a plain broken ring.
+    for a in (math.radians(-150.0), math.radians(150.0)):
+        c, s = math.cos(a), math.sin(a)
+        bm_box(bm, (0.132 * c - 0.030 * abs(c) - 0.018, 0.132 * s - 0.030, -0.040),
+               (0.132 * c + 0.030 * abs(c) + 0.018, 0.132 * s + 0.030, 0.012))
+
+    emit(bm, "horseshoe", "none", bevel_width=0.004)
 
 
 def make_rope_coil():
-    bpy.ops.mesh.primitive_torus_add(major_radius=0.15, minor_radius=0.038,
-                                     major_segments=16, minor_segments=7)
-    o = bpy.context.object
-    jitter(o, 0.012, 7)
-    finish(o, "rope_coil", "none", smooth=True, bevel_width=0.003)
+    """
+    A coil with a lay to it.
+
+    A smooth torus is a doughnut. Rotating a lobed section as it travels round
+    the loop gives the diagonal ridging that says rope at any size, and it costs
+    the same triangles. Nine twists per turn closes exactly, so there is no seam
+    where the sweep meets itself.
+    """
+    bm = bmesh.new()
+    lobes, twists, sides = 3, 9, 8
+
+    def sec(i, t):
+        pts = []
+        for k in range(sides):
+            a = 2.0 * math.pi * k / sides
+            rr = 0.036 * (1.0 + 0.26 * math.cos(lobes * a + twists * 2.0 * math.pi * t))
+            pts.append((rr * math.cos(a), rr * math.sin(a)))
+        return pts
+
+    bm_sweep(bm, arc_frames(0.148, 0.0, 2.0 * math.pi, 30, closed=True), sec, closed=True)
+    o = emit(bm, "rope_coil", "none", bevel_width=0.002)
+    return o
 
 
 def make_stone_shard():
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.12)
-    o = bpy.context.object
-    jitter(o, 0.055, 11)
-    finish(o, "stone_shard", "base", bevel_width=0.004)
+    """
+    A struck flake, not a lumpy ball.
+
+    Built as the convex hull of a deterministic point cloud squeezed into a
+    wedge. A hull gives genuinely flat facets meeting at hard edges, which is
+    what flint does and what a jittered sphere cannot fake: the sphere keeps its
+    round silhouette no matter how much noise is added to it.
+    """
+    bm = bmesh.new()
+    rng = _Lcg(11)
+    for _ in range(13):
+        u = rng.next() * 2.0 - 1.0
+        v = rng.next() * 2.0 - 1.0
+        w = rng.next() * 2.0 - 1.0
+        # Squeeze toward +x so one end is a thin keen edge and the other a butt.
+        taper = 0.36 + 0.64 * (0.5 - 0.5 * u)
+        bm.verts.new((u * 0.115, v * 0.088 * taper, w * 0.082 * taper))
+    bmesh.ops.convex_hull(bm, input=bm.verts)
+    emit(bm, "stone_shard", "base", bevel_width=0.003)
 
 
 def make_apple():
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=14, ring_count=9, radius=0.115)
-    o = bpy.context.object
-    for v in o.data.vertices:
-        v.co.z *= 0.92
-        # Dimple the top and bottom, which is what makes it an apple.
-        d = 1.0 - 0.35 * max(0.0, 1.0 - (v.co.x ** 2 + v.co.y ** 2) / 0.004)
-        if abs(v.co.z) > 0.08:
-            v.co.z *= d
-    finish(o, "apple_body", "base", smooth=True, bevel_width=0.002)
-    socket(o, "socket_tip", (0, 0, 0.21))
+    """Apple with a real crown well, so the stem the recipe plants in it has
+    somewhere to come from, and a calyx pucker underneath."""
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, 0.006),
+        (0.032, 0.0),                # calyx, slightly puckered in
+        (0.066, 0.012),
+        (0.102, 0.046),
+        (0.116, 0.098),              # widest, above centre
+        (0.108, 0.150),
+        (0.082, 0.184),
+        (0.046, 0.198),
+        (0.024, 0.196),              # rim of the crown well
+        (0.016, 0.176),              # and down into it
+        (0.0, 0.174),
+    ], segments=16)
+    o = emit(bm, "apple_body", "base", smooth=True, bevel_width=0.002)
+    socket(o, "socket_tip", (0, 0, 0.19))
 
 
 def make_straw_bale():
-    bpy.ops.mesh.primitive_cube_add(size=1)
-    o = bpy.context.object
-    for v in o.data.vertices:
-        v.co.x *= 0.20
-        v.co.y *= 0.15
-        v.co.z *= 0.15
-    jitter(o, 0.022, 23)
-    finish(o, "straw_bale", "base", bevel_width=0.014)
+    """
+    A bound bale: bulged in the middle, pinched where the twine bites, and rough
+    at the cut ends.
+
+    The pinch is the point. Two waisted stations make the twine grooves, so when
+    the recipe wraps a band round the middle it sits in a groove instead of
+    floating on a flat side.
+    """
+    bm = bmesh.new()
+
+    def st(x, sy, sz, ch=0.30):
+        return box_section(x, sy, -sz, sz, ch)
+
+    stations = [
+        st(-0.200, 0.132, 0.132, 0.42),
+        st(-0.186, 0.145, 0.145, 0.30),
+        st(-0.130, 0.150, 0.150),
+        st(-0.104, 0.140, 0.141),   # twine groove
+        st(-0.076, 0.152, 0.152),
+        st(0.000, 0.156, 0.155),    # bulge
+        st(0.076, 0.152, 0.152),
+        st(0.104, 0.140, 0.141),    # twine groove
+        st(0.130, 0.150, 0.150),
+        st(0.186, 0.145, 0.145, 0.30),
+        st(0.200, 0.132, 0.132, 0.42),
+    ]
+    bm_loft(bm, stations)
+    o = emit(bm, "straw_bale", "base", bevel_width=0.008)
+    jitter(o, 0.011, 23)
+    socket(o, "socket_tip", (0, 0, 0.31))
 
 
 def make_rag_wrap():
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=12, ring_count=7, radius=0.1)
-    o = bpy.context.object
-    for v in o.data.vertices:
-        v.co.z *= 0.62
-    jitter(o, 0.03, 31)
-    finish(o, "rag_wrap", "none", smooth=True, bevel_width=0.003)
+    """A bundled cloth. Lobed rather than round, because a smooth squashed
+    sphere is a pebble; the lobes are folds and they are what makes it soft."""
+    bm = bmesh.new()
+    f = 0.010
+    bm_lathe(bm, [
+        (0.0, 0.0),
+        (0.052, -0.004),
+        (0.088, 0.010, f),
+        (0.104, 0.038, f),
+        (0.096, 0.066, f),
+        (0.064, 0.086, f),
+        (0.030, 0.094),
+        (0.026, 0.108),              # a small knot on top
+        (0.014, 0.114),
+        (0.0, 0.110),
+    ], segments=12)
+    o = emit(bm, "rag_wrap", "none", smooth=False, bevel_width=0.004)
+    jitter(o, 0.018, 31)
 
 
 def make_torch_head():
-    bpy.ops.mesh.primitive_cone_add(vertices=10, radius1=0.062, radius2=0.05, depth=0.16)
-    o = bpy.context.object
-    jitter(o, 0.014, 41)
-    finish(o, "torch_head", "base", bevel_width=0.005)
-    socket(o, "socket_tip", (0, 0, 0.16))
+    """
+    Pitch soaked rag bound to the shaft: narrow where it grips, flaring out and
+    up, torn off at the top, with two cords biting into it near the base.
+
+    The old head was a cylinder the same width as the haft, which is why the
+    torch read as a lollipop. Flaring to nearly three times the haft radius is
+    what makes the silhouette read at icon size.
+    """
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, -0.008),
+        (0.030, -0.010),
+        (0.033, 0.006),
+        (0.030, 0.016),              # cord groove
+        (0.040, 0.026),
+        (0.036, 0.038),              # cord groove
+        (0.056, 0.054),
+        (0.074, 0.086),
+        (0.081, 0.118),              # widest, high up, so it looks top heavy
+        (0.072, 0.146),
+        (0.048, 0.162),
+        (0.022, 0.166),
+        (0.0, 0.158),                # dished, as if burnt down
+    ], segments=12)
+
+    for z, rad in ((0.017, 0.036), (0.039, 0.042)):
+        bm_sweep(bm, arc_frames(rad, 0.0, 2.0 * math.pi, 12, z=z, closed=True),
+                 lambda i, t: [(0.006, 0.0), (0.0, 0.008), (-0.006, 0.0), (0.0, -0.008)],
+                 closed=True)
+
+    o = emit(bm, "torch_head", "base", bevel_width=0.004)
+    jitter(o, 0.009, 41)
+    socket(o, "socket_tip", (0, 0, 0.17))
 
 
 def make_leaf_cluster():
-    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.14)
-    o = bpy.context.object
-    jitter(o, 0.05, 53)
-    finish(o, "leaf_cluster", "base", bevel_width=0.004)
+    """
+    Actual leaves in a rosette, rather than a noisy ball.
+
+    Six pointed blades, each a thin lofted section with a raised midrib, splayed
+    out and tipped up at different angles. This is the one part where the
+    silhouette has to be spiky or it reads as a stone, and no amount of noise on
+    a sphere gets there.
+    """
+    bm = bmesh.new()
+    rng = _Lcg(53)
+    blades = 6
+    for k in range(blades):
+        yaw = 2.0 * math.pi * k / blades + 0.12 * (rng.next() - 0.5)
+        pitch = 0.34 + 0.44 * rng.next()
+        length = 0.115 + 0.045 * rng.next()
+        ca, sa = math.cos(yaw), math.sin(yaw)
+        cp, sp = math.cos(pitch), math.sin(pitch)
+
+        # Blade outline as (along, across, rib height) at several stations.
+        outline = [
+            (0.00, 0.006, 0.004),
+            (0.16, 0.028, 0.009),
+            (0.38, 0.046, 0.010),
+            (0.62, 0.042, 0.008),
+            (0.84, 0.026, 0.005),
+            (1.00, 0.003, 0.002),
+        ]
+        secs = []
+        for (u, half, rib) in outline:
+            d = u * length
+            # Leaves curl: lift the tip, and droop the outer edges.
+            lift = 0.055 * u * u
+            pts = []
+            for (across, up) in ((0.0, rib), (half, 0.0), (0.0, -rib * 0.5), (-half, 0.0)):
+                x = d * cp - (up + lift) * sp
+                z = d * sp + (up + lift) * cp
+                pts.append((x * ca - across * sa, x * sa + across * ca, z + 0.028))
+            secs.append(pts)
+        bm_loft(bm, secs)
+
+    emit(bm, "leaf_cluster", "base", bevel_width=0.002)
 
 
 def make_stopper():
-    bpy.ops.mesh.primitive_cone_add(vertices=9, radius1=0.038, radius2=0.028, depth=0.07)
-    o = bpy.context.object
-    finish(o, "stopper", "base", bevel_width=0.004)
+    """Cork: tapered plug, a flange where it seats, and a flat top a thumb could
+    push on."""
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, 0.0),
+        (0.026, 0.0),
+        (0.030, 0.010),
+        (0.034, 0.034),              # taper up to the flange
+        (0.042, 0.046),
+        (0.044, 0.058),              # flange
+        (0.038, 0.064),
+        (0.030, 0.070),
+        (0.0, 0.068),
+    ], segments=12)
+    emit(bm, "stopper", "base", bevel_width=0.003)
 
 
 def make_nail_spike():
-    bpy.ops.mesh.primitive_cone_add(vertices=7, radius1=0.014, radius2=0.002, depth=0.17)
-    o = bpy.context.object
-    finish(o, "nail_spike", "base", bevel_width=0.002)
+    """Forged nail: flat struck head, a shank that tapers all the way, and a
+    point. Also serves as an apple stem, where the head ends up buried."""
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, 0.0),
+        (0.020, 0.0),
+        (0.021, 0.007),
+        (0.013, 0.013),              # under the head
+        (0.011, 0.040),
+        (0.0085, 0.090),
+        (0.0055, 0.136),
+        (0.0022, 0.164),
+        (0.0, 0.170),
+    ], segments=8)
+    emit(bm, "nail_spike", "base", bevel_width=0.0015)
 
 
 def make_disc():
-    bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=0.11, depth=0.022)
-    o = bpy.context.object
-    finish(o, "disc_flat", "none", bevel_width=0.004)
+    """A shallow dish. Used as the water surface in a pail, so it is domed
+    slightly and has a lip, which reads as a meniscus rather than as a lid."""
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, -0.010),
+        (0.096, -0.011),
+        (0.110, -0.004),
+        (0.110, 0.004),
+        (0.100, 0.010),
+        (0.062, 0.013),
+        (0.0, 0.014),
+    ], segments=18)
+    emit(bm, "disc_flat", "none", bevel_width=0.003)
 
 
 def make_bar():
-    bpy.ops.mesh.primitive_cube_add(size=1)
-    o = bpy.context.object
-    for v in o.data.vertices:
-        v.co.x *= 0.30
-        v.co.y *= 0.045
-        v.co.z *= 0.045
-    finish(o, "bar_stock", "none", bevel_width=0.006)
+    """Forged bar stock: chamfered along its length, drawn down at both ends
+    where a hammer would have left it, and slightly fuller in the middle."""
+    bm = bmesh.new()
+    stations = [
+        (-0.150, 0.014, -0.014, 0.014, 0.60),
+        (-0.136, 0.021, -0.021, 0.021, 0.34),
+        (-0.060, 0.023, -0.023, 0.023, 0.30),
+        (0.060, 0.023, -0.023, 0.023, 0.30),
+        (0.136, 0.021, -0.021, 0.021, 0.34),
+        (0.150, 0.014, -0.014, 0.014, 0.60),
+    ]
+    bm_loft(bm, [box_section(*s) for s in stations])
+    o = emit(bm, "bar_stock", "none", bevel_width=0.004)
+    socket(o, "socket_tip", (0.15, 0, 0))
 
 
 BUILDERS = [
@@ -403,8 +963,13 @@ def main():
 
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    meshes = sorted(o.name for o in bpy.data.objects if o.type == "MESH")
-    print(f"[parts] built {len(meshes)} parts: {', '.join(meshes)}")
+    meshes = sorted((o.name, len(o.data.loop_triangles) or sum(
+        max(len(p.vertices) - 2, 0) for p in o.data.polygons))
+        for o in bpy.data.objects if o.type == "MESH")
+    total = sum(t for _, t in meshes)
+    print(f"[parts] built {len(meshes)} parts, {total} tris")
+    for name, tris in meshes:
+        print(f"[parts]   {name:<14} {tris:>5}")
 
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.export_scene.gltf(
