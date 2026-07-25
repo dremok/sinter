@@ -116,8 +116,15 @@ const ISO_SX = Math.SQRT1_2
 const ISO_SY_GROUND = 0.4082
 const ISO_SY_UP = 0.8165
 
-/** How see-through a tree gets when it is in the way. Not zero, on purpose. */
-const FADE_TO = 0.26
+/**
+ * How see-through a tree gets when it is in the way.
+ *
+ * Not zero, on purpose: an invisible tree reads as a bug, a faint one reads as
+ * a tree you are behind. Nudged up from a quarter after looking at it, because
+ * once the outline pass stopped drawing over it the ghost was disappearing
+ * almost completely against bright ground.
+ */
+const FADE_TO = 0.34
 const FADE_IN_RATE = 1 / 0.15
 const FADE_OUT_RATE = 1 / 0.3
 

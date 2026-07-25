@@ -830,6 +830,48 @@ let crossed = false
  *  docs/PERFORMANCE.md asks for no allocation in the loop. */
 const wish = new THREE.Vector3()
 
+/**
+ * How high you can step up in one go. Anything taller is a wall to walk around,
+ * not a thing to walk onto, and nothing decides that per prop: it falls out of
+ * the height difference.
+ */
+const STEP_HEIGHT = 0.55
+
+/**
+ * The surface the player is standing on, which is not always the terrain.
+ *
+ * Max reported walking THROUGH the fallen trunk and the jetty at the pond
+ * rather than onto them. Making them solid would have closed the report and
+ * been wrong: a log lying at the water's edge is something you walk along.
+ *
+ * So `region.standables` lists what can be stood on, and the rule here is
+ * height alone. A surface within STEP_HEIGHT of where you already are becomes
+ * the ground; anything higher is out of reach and you keep whatever you were
+ * on. Walk off the end of the jetty and no footprint contains you any more, so
+ * you are back on terrain and you drop.
+ *
+ * Nothing in this function knows what a jetty is, which is the point. The
+ * plank in your pack carries PLATFORM 0.8, so once dropped planks register as
+ * standables, a plank thrown down becomes a step and nobody will have written
+ * that down.
+ */
+function surfaceUnder(x: number, z: number, from: number): number {
+  let best = region.heightAt(x, z)
+
+  for (const s of region.standables) {
+    const dx = x - s.x
+    const dz = z - s.z
+    if (dx * dx + dz * dz > s.radius * s.radius) continue
+    if (s.top <= best) continue
+    // Reachable from where the player currently is, not from the terrain, so
+    // walking along a raised deck does not fall off it every frame.
+    if (s.top - from > STEP_HEIGHT) continue
+    best = s.top
+  }
+
+  return best
+}
+
 function movePlayer(): void {
   const { forward, right } = iso.screenBasis()
   wish.set(0, 0, 0)
@@ -866,7 +908,7 @@ function movePlayer(): void {
 
   player.pos.x = Math.min(BOUNDS.maxX, Math.max(BOUNDS.minX, player.pos.x))
   player.pos.z = Math.min(BOUNDS.maxZ, Math.max(BOUNDS.minZ, player.pos.z))
-  player.pos.y = region.heightAt(player.pos.x, player.pos.z)
+  player.pos.y = surfaceUnder(player.pos.x, player.pos.z, player.pos.y)
 }
 
 function stepSimulation(): void {
