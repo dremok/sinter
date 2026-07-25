@@ -139,3 +139,29 @@ This follows the existing split in `docs/ARCHITECTURE.md`: Rapier is for contact
 The alternative, an authored `firestarter` item with `HOT` baked in, was rejected because it makes fire a key rather than a consequence, which is rule 1 inverted.
 
 A "hot things with no fuel cool down" reaction was deleted while doing this rather than retuned. Fuel depletion is already modelled properly in `sim/fire.ts`, and the second cruder copy in the merge rules pushed both the sparker and the live ember (each `HOT` with no `FLAMMABLE` of its own) below the ignition threshold. The items whose whole purpose is starting fires could not start one. Two models of the same thing, and the worse one was winning.
+
+---
+
+## D13: the player moves analytically, not through Rapier
+**Date:** 2026-07-25
+
+Max's report was that the character "gets stuck everywhere without any reason". The cause was Rapier's character controller resolving against a terrain trimesh: at triangle seams on sloped ground it would catch, and autostep and snap-to-ground made it worse rather than better.
+
+Movement is now: sample the ground height, integrate, then push out of circular blockers over two passes, then clamp to the region bounds. It is simpler, it is exactly reproducible from a seed, and the class of bug is gone rather than tuned down.
+
+This does not overturn D2. Rapier stays the physics choice for the things it is actually good at, which is crates that fall and stack, rope as joint chains, and the vehicle controller. It was simply never buying anything for a walking character on bounded, gentle ground, and it was costing the single most-felt bug in the build. It is not currently imported by the runtime, which also removes its WASM payload from the bundle.
+
+Bring it back when something needs real dynamics, not before.
+
+---
+
+## D14: textures are drawn in code, for now
+**Date:** 2026-07-25
+
+Max's read on the first art pass was exact: "the missing part is nice textures, not just punching in 2D effects on top of a vector world." Every surface was a single flat colour, and no amount of palette work, cel shading or pixel-buffer downsampling fixes untextured geometry. It looked like vector art with a filter because that is what it was.
+
+`render/textures.ts` now draws small tiling bitmaps pixel by pixel: grass blades, wood grain with knots, mottled stone, woven cloth, banded water. Drawn in code rather than authored or generated, because the game ships offline with no keys, everything must be reproducible from a seed, and there is no art pipeline yet.
+
+This is explicitly a placeholder for the fal.ai material bake in `docs/ASSET_PIPELINE.md`. The seam is `textures()` and `tiled()`, so the bake can replace the insides of that file without touching a call site.
+
+Two constraints worth keeping whatever generates them: `NearestFilter` always, since linear filtering turns a 32px tile to porridge; and roughly constant texel density per world unit, since mismatched density is what makes textured 3D read as wallpaper.

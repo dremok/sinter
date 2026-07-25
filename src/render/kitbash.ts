@@ -14,6 +14,8 @@
 import * as THREE from 'three'
 import type { ItemDef, MaterialKind, PartKind, PartSpec } from '../items/catalog'
 import { MATERIAL_COLOR } from './palette'
+import { toonUnique } from './toon'
+import { loadedTextures, tiled } from './textures'
 
 const geometries: Record<PartKind, THREE.BufferGeometry> = {
   rod: new THREE.CylinderGeometry(0.5, 0.5, 1, 8),
@@ -40,47 +42,47 @@ const geometries: Record<PartKind, THREE.BufferGeometry> = {
   g.computeVertexNormals()
 }
 
-const materials = new Map<MaterialKind, THREE.MeshStandardMaterial>()
+const materials = new Map<MaterialKind, THREE.MeshToonMaterial>()
 
-function materialFor(kind: MaterialKind): THREE.MeshStandardMaterial {
+/**
+ * Cel-shaded to match everything else. These were MeshStandardMaterial with
+ * roughness and metalness, which is invisible at 240p: physically based
+ * shading spends all its detail on gradients that the pixel buffer throws away.
+ * Flat banded colour is what actually survives downsampling.
+ */
+function materialFor(kind: MaterialKind): THREE.MeshToonMaterial {
   const hit = materials.get(kind)
   if (hit) return hit
 
+  const t = loadedTextures()
   const color = MATERIAL_COLOR[kind]
-  const m = new THREE.MeshStandardMaterial({ color, flatShading: true })
 
-  switch (kind) {
-    case 'steel':
-      m.roughness = 0.35
-      m.metalness = 0.85
-      break
-    case 'gold':
-      m.roughness = 0.3
-      m.metalness = 0.9
-      break
-    case 'glass':
-      m.roughness = 0.15
-      m.metalness = 0.1
-      m.transparent = true
-      m.opacity = 0.72
-      break
-    case 'water':
-      m.roughness = 0.12
-      m.transparent = true
-      m.opacity = 0.85
-      break
-    case 'ember':
-      m.roughness = 0.9
-      m.emissive = new THREE.Color(0xff4d1a)
-      m.emissiveIntensity = 1.4
-      break
-    case 'cloth':
-    case 'straw':
-      m.roughness = 1
-      break
-    default:
-      m.roughness = 0.88
-  }
+  // Items are small, so they need a much finer tiling than terrain does or a
+  // single texel covers the whole flask.
+  const map = tiled(
+    {
+      wood: t.plank,
+      steel: t.steel,
+      stone: t.stone,
+      cloth: t.cloth,
+      glass: t.glass,
+      leaf: t.foliage,
+      water: t.water,
+      ember: t.ember,
+      gold: t.gold,
+      straw: t.straw,
+      clay: t.clay,
+    }[kind],
+    0.55,
+    0.55,
+  )
+
+  const m =
+    kind === 'ember'
+      ? toonUnique({ map, emissive: new THREE.Color(0xff4d1a), emissiveIntensity: 1.5 })
+      : kind === 'glass' || kind === 'water'
+        ? toonUnique({ map, color, transparent: true, opacity: 0.82 })
+        : toonUnique({ map })
 
   materials.set(kind, m)
   return m

@@ -1,43 +1,57 @@
 /**
  * Band 0: Hearth.
  *
- * Palette, fog and light color carry most of the tonal work for a band, which
- * is why they live in one small file per docs/ARCHITECTURE.md. Late afternoon,
- * warm, a little hazy. Nothing here is threatening yet.
+ * Tuned for a 16-bit console look rather than a naturalistic one. That means
+ * high saturation, few hues, and clear separation between neighbouring
+ * surfaces, because the frame is rendered at 240p and then upscaled with hard
+ * pixel edges. Muddy, closely related colours turn to noise at that size; the
+ * previous olive-and-tan palette read as sludge once pixellated.
+ *
+ * Rule of thumb when adding a colour here: if you cannot tell it apart from its
+ * neighbour in a 16x16 thumbnail, it is wrong.
  */
 
 export const BAND0 = {
-  sky: 0xbcd2d8,
-  fogNear: 22,
-  fogFar: 108,
+  sky: 0x7ec8e3,
+  fogNear: 34,
+  fogFar: 96,
 
-  grass: [0x6d8c4a, 0x789a52, 0x648347, 0x82a259],
-  dirt: 0x9a8560,
-  rock: 0x8d8b86,
-  water: 0x4e8fb8,
+  grass: [0x7ab648, 0x6aa63e, 0x8cc456, 0x5f9c38],
+  dirt: 0xc9a06b,
+  sand: 0xdcc48e,
+  rock: 0x9a9a96,
+  water: 0x3f9ed6,
+  waterDeep: 0x2e7cb0,
 
-  barkDark: 0x5a4633,
-  bark: 0x6f573f,
-  leaf: [0x4f7a35, 0x5c8a3d, 0x456b2e],
+  bark: 0x8b5a2b,
+  barkDark: 0x6d4520,
+  leaf: [0x4fa03f, 0x3f8a33, 0x66b84d],
 
-  sun: 0xfff0d4,
-  skyLight: 0xc6dae6,
-  groundLight: 0x54492f,
+  sun: 0xfff4dc,
+  skyLight: 0xa8d8ee,
+  groundLight: 0x4a5c30,
 
   ember: 0xff7a2f,
-  flame: 0xffb347,
+  flame: 0xffc247,
+
+  // The player. A saturated tunic against saturated grass needs a hue that is
+  // nowhere else in the scene, or the character vanishes into the field.
+  tunic: 0xc8443c,
+  trouser: 0x3c4a7a,
+  skin: 0xe8b98a,
+  hair: 0x4a3220,
 } as const
 
 export const MATERIAL_COLOR = {
-  wood: 0xa9784a,
-  steel: 0x9aa7b4,
-  stone: 0x8d8b86,
-  cloth: 0xcbb191,
-  glass: 0xa8d4da,
-  leaf: 0x5c8a3d,
-  water: 0x4e8fb8,
-  ember: 0xff6a2a,
-  gold: 0xd9c26a,
-  straw: 0xc9a95f,
-  clay: 0xa97355,
+  wood: 0xb07840,
+  steel: 0xb8c4d0,
+  stone: 0x9a9a96,
+  cloth: 0xe0c9a6,
+  glass: 0x9fdce6,
+  leaf: 0x4fa03f,
+  water: 0x3f9ed6,
+  ember: 0xff7a2f,
+  gold: 0xf0d264,
+  straw: 0xdcc06a,
+  clay: 0xc07a52,
 } as const

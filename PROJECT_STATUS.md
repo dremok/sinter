@@ -3,7 +3,22 @@
 Read this first every session. Update it immediately after any significant change.
 
 **Last updated:** 2026-07-25
-**Current milestone:** M0–M2 done, M3 partially done
+**Current milestone:** M0–M2 done, M3 partially done, art pass 2 in progress
+
+## Latest pass: simplify and make it beautiful
+
+Playtest feedback was blunt and correct: ugly, too big, too many items, movement bad, character looked like nothing, unclear how to use anything, and the player got stuck constantly. What changed:
+
+- **Map cut from 120x120 to a 36x32 clearing**, with 10 hand-placed items instead of 52 scattered ones. Every item now affords a route through the palisade.
+- **Real textures.** `render/textures.ts` draws tiling pixel-art bitmaps in code (grass, bark, stone, cloth, water, plank). Flat colours plus a pixel filter read as vector art with an effect on it; the missing thing was always texture. See D14.
+- **Cel shading and a 240-line pixel buffer** upscaled with hard edges, plus a much more saturated palette.
+- **A character instead of a capsule**: blocky humanoid with a walk cycle, opposed limb swing, bob, and facing.
+- **Movement rewritten analytically** and Rapier dropped from the runtime. This was the cause of getting stuck. See D13. Side effect: bundle went from 2.8 MB to 587 kB.
+- **Left/right were genuinely reversed.** `screenBasis` negated the camera right vector.
+- **Items now vanish when taken.** `scene.remove` was called on meshes parented to the region group, so it silently did nothing.
+- **Prompts say why nothing is available**, instead of showing nothing at all.
+
+Still to do from that feedback: proper Blender-authored models rather than code primitives (Blender 5.2 LTS is installed and scriptable headlessly; no Blender MCP is connected).
 **Target:** playable vertical slice (Band 0 only, ~60 items, ~10 property interactions, 3 real obstacles)
 
 ---

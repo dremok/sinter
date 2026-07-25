@@ -53,12 +53,20 @@ export class IsoCamera {
     this.azimuthIndex = (this.azimuthIndex + steps + AZIMUTHS.length * 4) % AZIMUTHS.length
   }
 
-  /** Camera-relative movement basis, so W is always "up the screen". */
+  /**
+   * Camera-relative movement basis, so W is always "up the screen" and D is
+   * always right.
+   *
+   * `cross(forward, up)` already IS the camera's right vector in world space.
+   * There used to be a `.multiplyScalar(-1)` on the end of this, which flipped
+   * it, so A and D were swapped on every one of the four camera angles. Do not
+   * reintroduce it: if strafing feels mirrored, the bug is elsewhere.
+   */
   screenBasis(): { forward: THREE.Vector3; right: THREE.Vector3 } {
     const dir = AZIMUTHS[this.azimuthIndex]!
     const forward = new THREE.Vector3(-dir.x, 0, -dir.z).normalize()
     const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize()
-    return { forward, right: right.multiplyScalar(-1) }
+    return { forward, right }
   }
 
   update(): void {

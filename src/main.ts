@@ -1,89 +1,76 @@
 import * as THREE from 'three'
-import RAPIER from '@dimforge/rapier3d-compat'
 import { createRng } from './core/rng'
 import { Clock, TICK_DT } from './core/clock'
 import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
-import { buildRegion } from './world/region'
+import { sizeToPixelBuffer, toonUnique } from './render/toon'
+import { Character } from './render/character'
+import { BOUNDS, buildRegion } from './world/region'
 import { queries, world, type Entity } from './ecs/world'
 import { fail, ignite, stepFire } from './sim/fire'
 import { spatial } from './sim/spatial'
 import { applyReactions } from './props/derive'
-import { p, type PropertyId } from './props/registry'
+import { p } from './props/registry'
 import { buildItemMesh } from './render/kitbash'
-import { CATALOG } from './items/catalog'
+import { CATALOG, type ItemDef } from './items/catalog'
 import { Ui } from './ui/interface'
 
 /**
  * SINTER, alpha slice.
  *
- * Band 0 only: a clearing, a river, an oak wood, and a palisade with no
- * authored solution. Items are property bags, merges are irreversible, and fire
- * reads FLAMMABLE. Everything below is glue; the game is in `sim/`, `props/`
- * and `items/`.
+ * One small Band 0 clearing with ten items and a palisade that has no authored
+ * solution. Items are property bags, merges are irreversible, fire reads
+ * FLAMMABLE. Everything here is glue; the game is in `sim/`, `props/`, `items/`.
  *
- * The headless contract that `tools/shot.ts` depends on lives at the bottom of
- * this file: `?seed=&ticks=` runs the sim with no wall clock and then sets
+ * The headless contract that `tools/shot.ts` depends on lives at the bottom:
+ * `?seed=&ticks=` runs the sim with no wall clock and then sets
  * `window.__sinterReady`. Do not break either branch.
  */
 
 const params = new URLSearchParams(location.search)
 const SEED = params.get('seed') ?? 'hearth-0'
 const HEADLESS_TICKS = params.has('ticks') ? Number(params.get('ticks')) : 0
-/** `?ignite=x,z` lights a fire at world (x,z) on boot, for before/after shots. */
 const IGNITE_AT = params.get('ignite')
-/** `?at=x,z` starts the player somewhere specific, so a shot can frame a place. */
 const START_AT = params.get('at')
-/** `?pack=branch,flint` fills the pack and opens it. A dev aid for UI shots. */
 const PACK = params.get('pack')
 
 const rng = createRng(SEED)
 const clock = new Clock()
 
-await RAPIER.init()
-
 // ---------------------------------------------------------------- rendering
 
-const renderer = new THREE.WebGLRenderer({ antialias: true })
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
-renderer.setSize(innerWidth, innerHeight)
+const renderer = new THREE.WebGLRenderer({ antialias: false })
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFShadowMap
-renderer.toneMapping = THREE.ACESFilmicToneMapping
-renderer.toneMappingExposure = 1.05
 document.body.appendChild(renderer.domElement)
+
+// Antialiasing is off and the buffer is tiny on purpose: crisp pixel edges are
+// the entire look, and AA would smear them back into mush.
+sizeToPixelBuffer(renderer, innerWidth, innerHeight)
 
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(BAND0.sky)
 
 const iso = new IsoCamera(innerWidth / innerHeight)
-iso.viewSize = 21
+iso.viewSize = 13
 
-// Fog MUST be derived from the camera distance, never hardcoded. With an
-// orthographic rig everything sits ~`distance` deep, so absolute fog values
-// silently drown the whole scene instead of just the far edge. (DECISIONS D9)
+// Fog derived from camera distance, never hardcoded. (DECISIONS D9)
 scene.fog = new THREE.Fog(BAND0.sky, iso.distance + BAND0.fogNear, iso.distance + BAND0.fogFar)
 
-scene.add(new THREE.HemisphereLight(BAND0.skyLight, BAND0.groundLight, 1.15))
+scene.add(new THREE.HemisphereLight(BAND0.skyLight, BAND0.groundLight, 1.5))
 
-// The sun's azimuth must differ from the camera's, or every shadow falls
-// directly behind its own caster and is invisible from this angle. (DECISIONS D9)
-const sun = new THREE.DirectionalLight(BAND0.sun, 2.5)
-sun.position.set(42, 46, -34)
+// Sun azimuth must differ from the camera's, or shadows hide behind their own
+// casters and read as broken. (DECISIONS D9)
+const sun = new THREE.DirectionalLight(BAND0.sun, 2.1)
+sun.position.set(24, 30, -20)
 sun.castShadow = true
-sun.shadow.mapSize.set(2048, 2048)
-sun.shadow.bias = -0.0006
-sun.shadow.normalBias = 0.03
+sun.shadow.mapSize.set(1024, 1024)
+sun.shadow.bias = -0.0012
+sun.shadow.normalBias = 0.04
 const sc = sun.shadow.camera
-sc.left = -42; sc.right = 42; sc.top = 42; sc.bottom = -42; sc.near = 1; sc.far = 190
+sc.left = -24; sc.right = 24; sc.top = 24; sc.bottom = -24; sc.near = 1; sc.far = 90
 sc.updateProjectionMatrix()
-scene.add(sun)
-scene.add(sun.target)
-
-// ---------------------------------------------------------------- physics
-
-const physics = new RAPIER.World({ x: 0, y: -9.81, z: 0 })
-physics.timestep = TICK_DT
+scene.add(sun, sun.target)
 
 // ---------------------------------------------------------------- region
 
@@ -91,85 +78,43 @@ const region = buildRegion(rng, scene)
 
 if (START_AT) {
   const [sx, sz] = START_AT.split(',').map(Number)
-  region.playerStart.set(sx ?? 0, region.heightAt(sx ?? 0, sz ?? 0) + 2, sz ?? 0)
-}
-
-// A trimesh built from the exact terrain geometry, so what the player walks on
-// is what the player sees. A heightfield would be cheaper but reintroduces the
-// risk of physics and visuals disagreeing about which way the grid runs.
-{
-  const terrain = region.group.children[0] as THREE.Mesh
-  const pos = terrain.geometry.attributes.position!
-  const idx = terrain.geometry.index!
-  physics.createCollider(
-    RAPIER.ColliderDesc.trimesh(
-      new Float32Array(pos.array),
-      new Uint32Array(idx.array),
-    ),
-    physics.createRigidBody(RAPIER.RigidBodyDesc.fixed()),
-  )
+  region.playerStart.set(sx ?? 0, region.heightAt(sx ?? 0, sz ?? 0), sz ?? 0)
 }
 
 // ---------------------------------------------------------------- player
 
+/**
+ * Movement is analytic: sample the ground height, move, then push out of
+ * blockers. Rapier's character controller on a terrain trimesh was what made
+ * the player "get stuck everywhere for no reason", and for a bounded clearing
+ * with a dozen circular obstacles a physics engine was never buying anything.
+ * Recorded as D13. Rapier comes back when crates, ropes and vehicles need it.
+ */
 const PLAYER_RADIUS = 0.34
-const PLAYER_HALF_HEIGHT = 0.5
-const MOVE_SPEED = 8.5
+const MOVE_SPEED = 6.5
 
-const playerMesh = new THREE.Group()
-{
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(PLAYER_RADIUS, PLAYER_HALF_HEIGHT * 2, 6, 12),
-    new THREE.MeshStandardMaterial({ color: 0xe4dcc8, roughness: 0.7, flatShading: true }),
-  )
-  body.castShadow = true
-  const cloak = new THREE.Mesh(
-    new THREE.ConeGeometry(0.46, 0.85, 8),
-    new THREE.MeshStandardMaterial({ color: 0x7d5f45, roughness: 1, flatShading: true }),
-  )
-  cloak.position.y = -0.2
-  cloak.castShadow = true
-  playerMesh.add(body, cloak)
+const character = new Character()
+scene.add(character.group)
+
+const player = {
+  pos: region.playerStart.clone(),
+  speed01: 0,
+  heading: null as number | null,
 }
-scene.add(playerMesh)
 
-// Start the camera already on the player. The follow is a lerp, so without this
-// the headless path (which renders a single frame) shoots the world origin.
-iso.target.copy(region.playerStart)
+iso.target.copy(player.pos)
 iso.update()
-
-const playerBody = physics.createRigidBody(
-  RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
-    region.playerStart.x,
-    region.playerStart.y,
-    region.playerStart.z,
-  ),
-)
-const playerCollider = physics.createCollider(
-  RAPIER.ColliderDesc.capsule(PLAYER_HALF_HEIGHT, PLAYER_RADIUS),
-  playerBody,
-)
-
-const controller = physics.createCharacterController(0.02)
-controller.enableAutostep(0.6, 0.25, true)
-controller.enableSnapToGround(0.6)
-controller.setMaxSlopeClimbAngle((55 * Math.PI) / 180)
-
-let verticalVelocity = 0
 
 // ---------------------------------------------------------------- ui
 
 const ui = new Ui({
-  onMerged: (result, a, b) => {
-    ui.toast('Merged', `${a.name} + ${b.name} → ${result.name}`)
-  },
+  onMerged: (result, a, b) => ui.toast('Merged', `${a.name} + ${b.name} → ${result.name}`),
   onDropped: (def) => ui.toast('Dropped', def.name),
 })
 
 // ---------------------------------------------------------------- input
 
 const keys = new Set<string>()
-/** Edge-triggered keys, consumed once per tick by the interaction system. */
 const pressed = new Set<string>()
 
 addEventListener('keydown', (e) => {
@@ -186,7 +131,7 @@ addEventListener('keydown', (e) => {
 })
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()))
 addEventListener('resize', () => {
-  renderer.setSize(innerWidth, innerHeight)
+  sizeToPixelBuffer(renderer, innerWidth, innerHeight)
   iso.setAspect(innerWidth / innerHeight)
 })
 
@@ -198,12 +143,11 @@ interface Affordance {
 }
 
 /**
- * What the player can do to a thing, given what they are carrying.
+ * What the player can do to a thing, given what they carry.
  *
- * Read this list and note that the palisade is never mentioned. Each entry asks
- * a question about properties, so every one of them works on a tree, a crate, a
- * hut wall, or anything generated years from now. That is rule 1: obstacles are
- * facts, and anything that changes the facts gets you past them.
+ * The palisade is never mentioned. Every entry asks a question about
+ * properties, so all of them work on an oak, a rock, or anything generated
+ * years from now. That is rule 1: obstacles are facts.
  */
 function affordances(target: Entity): Affordance[] {
   const out: Affordance[] = []
@@ -214,10 +158,11 @@ function affordances(target: Entity): Affordance[] {
     out.push({
       label: `Chop with ${cut.name}`,
       run: () => {
-        const damage = 34 * (cut.props.TOOL_CUTTING ?? 0.5)
+        const damage = 30 * (cut.props.TOOL_CUTTING ?? 0.5)
         target.structure!.hp -= damage
-        ui.toast('Chopped', `${target.structure!.label} takes ${Math.round(damage)}`)
-        if (target.structure!.hp <= 0) collapse(target)
+        const left = Math.max(0, Math.round((target.structure!.hp / target.structure!.maxHp) * 100))
+        ui.toast('Chopped', `${target.structure!.label} at ${left}%`)
+        if (target.structure!.hp <= 0) fail(target, { onStructureFail: onFail })
       },
     })
   }
@@ -253,12 +198,11 @@ function affordances(target: Entity): Affordance[] {
       label: `Climb using ${ladder.name}`,
       run: () => {
         const t = target.transform!
-        // Over, not through. Leaves the ladder behind in the world.
-        const side = playerPos().z > t.pos.z ? -1 : 1
+        const side = player.pos.z > t.pos.z ? -1 : 1
         placeInWorld(ladder, t.pos.x, t.pos.z - side * 0.9)
         ui.consume(ladder)
-        teleport(t.pos.x, t.pos.z + side * 2.4)
-        ui.toast('Climbed', `Over the ${target.structure?.label ?? 'obstacle'}`)
+        player.pos.set(t.pos.x, region.heightAt(t.pos.x, t.pos.z + side * 2.2), t.pos.z + side * 2.2)
+        ui.toast('Climbed', `Over the ${target.label ?? 'obstacle'}`)
       },
     })
   }
@@ -268,10 +212,9 @@ function affordances(target: Entity): Affordance[] {
     out.push({
       label: `Batter with ${maul.name}`,
       run: () => {
-        const damage = 26 * (maul.props.TOOL_STRIKING ?? 0.5)
-        target.structure!.hp -= damage
-        ui.toast('Struck', `${target.structure!.label} takes ${Math.round(damage)}`)
-        if (target.structure!.hp <= 0) collapse(target)
+        target.structure!.hp -= 24 * (maul.props.TOOL_STRIKING ?? 0.5)
+        ui.toast('Struck', `${target.structure!.label} shudders`)
+        if (target.structure!.hp <= 0) fail(target, { onStructureFail: onFail })
       },
     })
   }
@@ -279,93 +222,82 @@ function affordances(target: Entity): Affordance[] {
   return out
 }
 
-function collapse(e: Entity): void {
-  fail(e, { onStructureFail: onFail })
+function onFail(e: Entity): void {
+  ui.toast('Fell', `${e.label ?? 'It'} came down`)
+  if (e.mesh) {
+    e.mesh.rotation.z += 1.3
+    e.mesh.position.y -= (e.structure?.height ?? 2) * 0.3
+    darken(e.mesh, 0.4)
+  }
 }
 
-function onFail(e: Entity): void {
-  const label = e.structure?.label ?? 'It'
-  ui.toast('Fell', `${label} came down`)
-  if (e.mesh) {
-    e.mesh.rotation.z += 1.25
-    e.mesh.position.y -= (e.structure?.height ?? 2) * 0.34
-    e.mesh.traverse((o) => {
-      const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined
-      if (m && 'color' in m) {
-        const dark = m.clone()
-        dark.color.multiplyScalar(0.35)
-        ;(o as THREE.Mesh).material = dark
-      }
-    })
-  }
+function darken(root: THREE.Object3D, factor: number): void {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    const m = mesh.material as THREE.MeshToonMaterial | undefined
+    if (m && 'color' in m) {
+      const dark = m.clone()
+      dark.color.multiplyScalar(factor)
+      mesh.material = dark
+    }
+  })
 }
 
 // ---------------------------------------------------------------- world ops
 
-function playerPos(): THREE.Vector3 {
-  const t = playerBody.translation()
-  return new THREE.Vector3(t.x, t.y, t.z)
-}
-
-function teleport(x: number, z: number): void {
-  playerBody.setTranslation({ x, y: region.heightAt(x, z) + 1.6, z }, true)
-  verticalVelocity = 0
-}
-
-function placeInWorld(def: { id: string; name: string; props: Record<string, number | undefined>; parts: unknown }, x: number, z: number): void {
-  const full = def as unknown as Parameters<typeof buildItemMesh>[0]
-  const y = region.heightAt(x, z) + 0.42
-  const mesh = buildItemMesh(full)
+function placeInWorld(def: ItemDef, x: number, z: number): void {
+  const y = region.heightAt(x, z) + 0.45
+  const mesh = buildItemMesh(def)
   mesh.position.set(x, y, z)
-  scene.add(mesh)
+  region.group.add(mesh)
   world.add({
     transform: { pos: new THREE.Vector3(x, y, z), ry: 0 },
     mesh,
-    props: { ...full.props },
-    item: { def: full },
+    props: { ...def.props },
+    item: { def },
     bob: { phase: 0, baseY: y },
   })
 }
 
 // ---------------------------------------------------------------- fire visuals
 
-const flameGeo = new THREE.ConeGeometry(0.42, 1.25, 7)
-const flameMat = new THREE.MeshBasicMaterial({ color: BAND0.flame, transparent: true, opacity: 0.85 })
+const flameGeo = new THREE.ConeGeometry(0.34, 1.05, 5)
+const flameMat = new THREE.MeshBasicMaterial({ color: BAND0.flame })
+const emberMat = new THREE.MeshBasicMaterial({ color: BAND0.ember })
 
 function syncFireVisuals(): void {
   for (const e of queries.burning) {
     if (!e.flame) {
-      const sprite = new THREE.Mesh(flameGeo, flameMat)
-      const light = new THREE.PointLight(BAND0.ember, 0, 11, 2)
+      const sprite = new THREE.Group()
+      const outer = new THREE.Mesh(flameGeo, emberMat)
+      const inner = new THREE.Mesh(flameGeo, flameMat)
+      inner.scale.setScalar(0.58)
+      inner.position.y = 0.12
+      sprite.add(outer, inner)
+
+      const light = new THREE.PointLight(BAND0.ember, 0, 9, 2)
       const at = e.transform.pos
-      sprite.position.set(at.x, at.y + 0.7, at.z)
+      sprite.position.set(at.x, at.y + 0.6, at.z)
       light.position.copy(sprite.position)
       scene.add(sprite, light)
       world.addComponent(e, 'flame', { light, sprite })
     }
     const f = e.flame!
     const heat = e.burning.heat
-    const flicker = 0.82 + Math.sin(e.burning.age * 17) * 0.18
-    f.sprite.scale.setScalar(heat * flicker * 1.5)
-    f.light.intensity = heat * 22 * flicker
-    ;(f.sprite as THREE.Mesh).visible = true
+    // Quantised flicker. A smooth sine reads as a pulsing blob at this
+    // resolution; stepping it makes the flame look hand-animated.
+    const step = Math.floor(e.burning.age * 12) % 3
+    const flicker = 0.8 + step * 0.12
+    f.sprite.scale.setScalar(heat * flicker * 1.35)
+    f.sprite.rotation.y = step * 1.1
+    f.light.intensity = heat * 16 * flicker
   }
 
-  // Anything that stopped burning loses its flame.
   for (const e of world.entities) {
     if (e.flame && !e.burning) {
       scene.remove(e.flame.sprite, e.flame.light)
       world.removeComponent(e, 'flame')
-      if (e.mesh) {
-        e.mesh.traverse((o) => {
-          const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined
-          if (m && 'color' in m) {
-            const charred = m.clone()
-            charred.color.multiplyScalar(0.28)
-            ;(o as THREE.Mesh).material = charred
-          }
-        })
-      }
+      if (e.mesh) darken(e.mesh, 0.32)
     }
   }
 }
@@ -377,27 +309,24 @@ let focusAffordances: Affordance[] = []
 const nearby: Entity[] = []
 
 function updateFocus(): void {
-  const at = playerPos()
-
   let bestItem: Entity | null = null
-  let bestItemDist = 2.3
+  let bestItemDist = 1.9
   let bestTarget: Entity | null = null
-  let bestTargetDist = 3.4
+  let bestTargetDist = 2.6
 
-  spatial.near(at.x, at.z, 4, nearby)
+  spatial.near(player.pos.x, player.pos.z, 3.2, nearby)
   for (const e of nearby) {
-    const d = Math.hypot(e.transform!.pos.x - at.x, e.transform!.pos.z - at.z)
+    const d = Math.hypot(e.transform!.pos.x - player.pos.x, e.transform!.pos.z - player.pos.z)
     if (e.item && d < bestItemDist) {
       bestItem = e
       bestItemDist = d
     }
-    if (!e.item && (e.structure || p(e.props ?? {}, 'FLAMMABLE') > 0.15) && d < bestTargetDist) {
+    if (!e.item && (e.structure || e.blocker || p(e.props ?? {}, 'FLAMMABLE') > 0.15) && d < bestTargetDist) {
       bestTarget = e
       bestTargetDist = d
     }
   }
 
-  // Picking something up beats acting on scenery when both are in range.
   if (bestItem) {
     focus = bestItem
     focusAffordances = []
@@ -408,14 +337,18 @@ function updateFocus(): void {
   if (bestTarget) {
     focus = bestTarget
     focusAffordances = affordances(bestTarget)
+    const label = bestTarget.label ?? 'It'
     if (focusAffordances.length > 0) {
-      const label = bestTarget.label ?? bestTarget.structure?.label ?? 'It'
       const lines = focusAffordances
         .map((a, i) => `<span class="key">${i + 1}</span> ${a.label}`)
         .join('&nbsp;&nbsp; ')
-      ui.prompt(`${label}&nbsp;&nbsp;${lines}`)
-      return
+      ui.prompt(`<b>${label}</b>&nbsp;&nbsp;${lines}`)
+    } else {
+      // Say why nothing is on offer. Silence here is what made it unclear how
+      // to use anything: the player could not tell "no options" from "no UI".
+      ui.prompt(`<b>${label}</b>&nbsp;&nbsp;<span class="muted">nothing you carry acts on this</span>`)
     }
+    return
   }
 
   focus = null
@@ -426,7 +359,11 @@ function updateFocus(): void {
 function handleInput(): void {
   if (pressed.has('f') && focus?.item) {
     ui.add(focus.item.def)
-    if (focus.mesh) scene.remove(focus.mesh)
+    ui.toast('Took', focus.item.def.name)
+    // removeFromParent, not scene.remove: world items are children of the
+    // region group, so scene.remove silently did nothing and the mesh stayed on
+    // the ground after being picked up.
+    focus.mesh?.removeFromParent()
     world.remove(focus)
     focus = null
   }
@@ -434,9 +371,8 @@ function handleInput(): void {
   if (pressed.has('g')) {
     const def = ui.takeLast()
     if (def) {
-      const at = playerPos()
       const basis = iso.screenBasis()
-      placeInWorld(def, at.x + basis.forward.x * 1.4, at.z + basis.forward.z * 1.4)
+      placeInWorld(def, player.pos.x + basis.forward.x * 1.3, player.pos.z + basis.forward.z * 1.3)
       ui.toast('Dropped', def.name)
     }
   }
@@ -455,51 +391,48 @@ function handleInput(): void {
 
 let crossed = false
 
-function stepSimulation(): void {
-  // ------------------------------------------------------------- player move
+function movePlayer(): void {
   const { forward, right } = iso.screenBasis()
   const wish = new THREE.Vector3()
   if (keys.has('w')) wish.add(forward)
   if (keys.has('s')) wish.sub(forward)
   if (keys.has('d')) wish.add(right)
   if (keys.has('a')) wish.sub(right)
-  if (wish.lengthSq() > 0) wish.normalize().multiplyScalar(MOVE_SPEED * TICK_DT)
 
-  // Blockers are resolved in code, not in physics, so that a structure failing
-  // is a single component removal rather than a collider teardown.
-  const at = playerPos()
-  for (const b of queries.blockers) {
-    const dx = at.x + wish.x - b.transform.pos.x
-    const dz = at.z + wish.z - b.transform.pos.z
-    const r = b.blocker.radius + PLAYER_RADIUS
-    const d = Math.hypot(dx, dz)
-    if (d < r && d > 1e-4) {
-      const push = (r - d) / d
-      wish.x += dx * push
-      wish.z += dz * push
+  const moving = wish.lengthSq() > 0
+  if (moving) {
+    wish.normalize()
+    player.heading = Math.atan2(wish.x, wish.z)
+    player.pos.x += wish.x * MOVE_SPEED * TICK_DT
+    player.pos.z += wish.z * MOVE_SPEED * TICK_DT
+  }
+  player.speed01 = moving ? 1 : 0
+
+  // Two resolution passes, so a player pressed into the corner between two
+  // blockers gets pushed clear instead of wedging.
+  for (let pass = 0; pass < 2; pass++) {
+    spatial.near(player.pos.x, player.pos.z, 3, nearby)
+    for (const b of nearby) {
+      if (!b.blocker) continue
+      const dx = player.pos.x - b.transform!.pos.x
+      const dz = player.pos.z - b.transform!.pos.z
+      const r = b.blocker.radius + PLAYER_RADIUS
+      const d = Math.hypot(dx, dz)
+      if (d < r && d > 1e-4) {
+        player.pos.x += (dx / d) * (r - d)
+        player.pos.z += (dz / d) * (r - d)
+      }
     }
   }
 
-  verticalVelocity += -9.81 * TICK_DT
-  if (controller.computedGrounded()) verticalVelocity = Math.min(verticalVelocity, 0)
+  player.pos.x = Math.min(BOUNDS.maxX, Math.max(BOUNDS.minX, player.pos.x))
+  player.pos.z = Math.min(BOUNDS.maxZ, Math.max(BOUNDS.minZ, player.pos.z))
+  player.pos.y = region.heightAt(player.pos.x, player.pos.z)
+}
 
-  controller.computeColliderMovement(playerCollider, {
-    x: wish.x,
-    y: verticalVelocity * TICK_DT,
-    z: wish.z,
-  })
+function stepSimulation(): void {
+  movePlayer()
 
-  const moved = controller.computedMovement()
-  const now = playerBody.translation()
-  playerBody.setNextKinematicTranslation({
-    x: now.x + moved.x,
-    y: now.y + moved.y,
-    z: now.z + moved.z,
-  })
-
-  physics.step()
-
-  // ---------------------------------------------------------------- systems
   stepFire(rng.fork(`fire:${clock.tick}`), {
     onIgnite: (e) => {
       if (e.structure) ui.toast('Caught', `${e.structure.label} is alight`, 'fire')
@@ -507,30 +440,29 @@ function stepSimulation(): void {
     onStructureFail: onFail,
   })
 
-  // ------------------------------------------------------------- win check
-  if (!crossed && playerBody.translation().z < -17.5) {
+  if (!crossed && player.pos.z < -10) {
     crossed = true
     ui.objective('Through.', 'The wood on the far side is older. Keep going.')
     ui.toast('Onward', 'You are past the palisade')
   }
 }
 
-function syncMeshes(): void {
-  const at = playerPos()
-  playerMesh.position.set(at.x, at.y, at.z)
+function syncMeshes(dt: number): void {
+  character.group.position.copy(player.pos)
+  character.update(dt, player.speed01, player.heading)
 
   for (const e of queries.bobbing) {
-    e.bob.phase += TICK_DT * 1.6
-    e.mesh.position.y = e.bob.baseY + Math.sin(e.bob.phase) * 0.07
-    e.mesh.rotation.y += TICK_DT * 0.4
+    e.bob.phase += dt * 2
+    e.mesh.position.y = e.bob.baseY + Math.sin(e.bob.phase) * 0.08
+    e.mesh.rotation.y += dt * 0.6
   }
 
   syncFireVisuals()
 
-  iso.target.lerp(playerMesh.position, 0.16)
+  iso.target.lerp(player.pos, 0.2)
   iso.update()
   sun.target.position.copy(iso.target)
-  sun.position.set(iso.target.x + 42, iso.target.y + 46, iso.target.z - 34)
+  sun.position.set(iso.target.x + 24, iso.target.y + 30, iso.target.z - 20)
 }
 
 // ---------------------------------------------------------------- hud
@@ -538,7 +470,6 @@ function syncMeshes(): void {
 const hud = document.getElementById('hud')!
 
 function updateHud(fps: number): void {
-  const at = playerPos()
   let burning = 0
   for (const _ of queries.burning) burning++
 
@@ -547,7 +478,6 @@ function updateHud(fps: number): void {
     `seed     ${SEED}`,
     `tick     ${clock.tick}`,
     `fps      ${fps.toFixed(0)}`,
-    `pos      ${at.x.toFixed(1)} ${at.z.toFixed(1)}`,
     `carried  ${ui.count}`,
     `codex    ${ui.codex.size} merges known`,
     burning > 0 ? `<b style="color:#ff8244">burning  ${burning}</b>` : `burning  0`,
@@ -573,18 +503,16 @@ if (PACK) {
 if (IGNITE_AT) {
   const [ix, iz] = IGNITE_AT.split(',').map(Number)
   spatial.rebuild(queries.simulated)
-  const found = spatial.near(ix ?? 0, iz ?? 0, 3.5)
-  const fuel = found.filter((e) => p(e.props ?? {}, 'FLAMMABLE') > 0.3)
+  const fuel = spatial.near(ix ?? 0, iz ?? 0, 3).filter((e) => p(e.props ?? {}, 'FLAMMABLE') > 0.3)
   if (fuel[0]) ignite(fuel[0])
 }
 
 if (HEADLESS_TICKS > 0) {
-  // Deterministic path for the screenshot harness: no wall clock at all.
   for (let i = 0; i < HEADLESS_TICKS; i++) {
     stepSimulation()
     clock.forceTicks(1)
   }
-  syncMeshes()
+  syncMeshes(TICK_DT)
   updateFocus()
   updateHud(0)
   iso.update()
@@ -594,14 +522,18 @@ if (HEADLESS_TICKS > 0) {
   let lastFpsSample = performance.now()
   let framesSinceSample = 0
   let fps = 0
+  let lastFrame = performance.now()
 
   renderer.setAnimationLoop((nowMs) => {
     const { ticks } = clock.advance(nowMs)
     for (let i = 0; i < ticks; i++) stepSimulation()
 
+    const dt = Math.min((nowMs - lastFrame) / 1000, 0.1)
+    lastFrame = nowMs
+
     updateFocus()
     handleInput()
-    syncMeshes()
+    syncMeshes(dt)
 
     framesSinceSample++
     if (nowMs - lastFpsSample > 500) {

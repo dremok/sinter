@@ -16,7 +16,21 @@
       }
 
       html, body { margin: 0; padding: 0; height: 100%; background: #0b0d10; overflow: hidden; }
-      canvas { display: block; }
+
+      /*
+       * The scene renders into a buffer about 240 lines tall and the browser
+       * blows it up to fill the window. `pixelated` is what keeps the upscale
+       * hard-edged; without it the browser smooths it and the whole look dies.
+       */
+      canvas {
+        display: block;
+        width: 100vw !important;
+        height: 100vh !important;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+
+      .muted { color: var(--dim); }
 
       body {
         font-family: var(--mono);
