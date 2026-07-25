@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.shots/
+.env
+.env.local
+.DS_Store
+*.log
+.vite/
+coverage/
+
+# Blender working files. Only exported glTF parts belong in assets/parts/.
+*.blend
+*.blend1
