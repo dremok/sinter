@@ -309,12 +309,22 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     ash: flatMat(tex.stone, 0x6a5949),
     parched: flatMat(tex.grass, 0xd9c67e),
     wheat: flatMat(tex.straw, 0xe7d296),
-    tilled: flatMat(tex.sand, 0x6f5237),
+    tilled: flatMat(tex.sand, 0xa07d55),
     shore: flatMat(tex.sand, 0xd9bf8e),
+    // Darker than the mud it sits in. Water lighter than its own bank inverts
+    // the natural relationship and reads as a hole punched in the render.
     water: toonUnique({
+      color: 0x8fb6c4,
       map: tiled(tex.water, 3.2, 3.2),
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.78,
+      side: THREE.DoubleSide,
+    }),
+    deep: toonUnique({
+      color: 0x5d8496,
+      map: tiled(tex.water, 3.2, 3.2),
+      transparent: true,
+      opacity: 0.82,
       side: THREE.DoubleSide,
     }),
 
@@ -336,12 +346,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // does not, because at this pitch the real one lands on the ground.
     doorway: toonUnique({ color: 0x140f0b }),
     eaveShade: toonUnique({ color: 0x4a3423 }),
-    thatch: toonUnique({ color: 0xf2dda6, map: tiled(tex.straw, 2.2, 2.2) }),
-    thatchOld: toonUnique({ color: 0xd9be82, map: tiled(tex.straw, 2.2, 2.2) }),
+    thatch: toonUnique({ color: 0xd7bd8a, map: tiled(tex.straw, 2.2, 2.2) }),
+    thatchOld: toonUnique({ color: 0xbca471, map: tiled(tex.straw, 2.2, 2.2) }),
+    moss: toonUnique({ color: 0x6f8a4a, map: tiled(tex.foliage, 1.2, 1.2) }),
+    sooted: toonUnique({ color: 0x6d6152, map: tiled(tex.straw, 2.2, 2.2) }),
     straw: toonUnique({ map: tiled(tex.straw, 0.7, 0.7) }),
     reed: toonUnique({ color: 0xa2b27a, map: tiled(tex.straw, 0.6, 0.6) }),
-    tuft: toonUnique({ color: 0x8a9354, map: tiled(tex.straw, 0.7, 0.7) }),
-    tuftPale: toonUnique({ color: 0xa9a271, map: tiled(tex.straw, 0.7, 0.7) }),
+    tuft: toonUnique({ color: 0xa8b268, vertexColors: true }),
+    tuftPale: toonUnique({ color: 0xc0bd83, vertexColors: true }),
     wheatStalk: toonUnique({ color: 0xecd68c, map: tiled(tex.straw, 0.6, 0.6) }),
     cloth: toonUnique({ map: tiled(tex.cloth, 1.2, 1.2) }),
     clothBlue: toonUnique({ color: 0x8fa8c4, map: tiled(tex.cloth, 1.2, 1.2) }),
@@ -1026,7 +1038,24 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   // ------------------------------------------------------------ ground cover
   const grassRng = rng.fork('grass')
-  const tuftGeo = new THREE.ConeGeometry(0.26, 1, 4)
+  /**
+   * One blade. Thin, three-sided, and vertex-coloured dark at the root to light
+   * at the tip, which is the read the critic wanted and the only way to get it
+   * without an alpha-cut texture. The old version was a squat four-sided cone
+   * that outlined into a solid pyramid: caltrops, not grass.
+   */
+  const tuftGeo = new THREE.ConeGeometry(0.055, 1, 3)
+  {
+    const pos = tuftGeo.attributes.position!
+    const shade = new Float32Array(pos.count * 3)
+    for (let i = 0; i < pos.count; i++) {
+      const t = pos.getY(i) + 0.5
+      shade[i * 3] = 0.45 + t * 0.6
+      shade[i * 3 + 1] = 0.5 + t * 0.6
+      shade[i * 3 + 2] = 0.38 + t * 0.55
+    }
+    tuftGeo.setAttribute('color', new THREE.BufferAttribute(shade, 3))
+  }
 
   /** Dry grass, in clumps. FLAMMABLE, so this is also the fire's road. */
   for (let c = 0; c < 20; c++) {
@@ -1044,15 +1073,16 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       // Two to five blades, leaning different ways, in two dulled greens rather
       // than one saturated tan. These were the only warm high-value thing on a
       // green field, so they pulled the eye harder than dressing ever should.
-      for (let t = 0; t < grassRng.int(2, 5); t++) {
+      for (let t = 0; t < grassRng.int(4, 9); t++) {
         const tuft = new THREE.Mesh(tuftGeo, grassRng.chance(0.6) ? M.tuft : M.tuftPale)
-        const s = grassRng.range(0.42, 0.95)
-        tuft.scale.set(s * grassRng.range(0.7, 1.1), s * grassRng.range(1.1, 2.0), s)
-        tuft.position.set(grassRng.range(-0.5, 0.5), s * 0.5, grassRng.range(-0.5, 0.5))
+        const len = grassRng.range(0.5, 1.25)
+        tuft.scale.set(grassRng.range(0.7, 1.4), len, grassRng.range(0.7, 1.4))
+        tuft.position.set(grassRng.range(-0.42, 0.42), len * 0.46, grassRng.range(-0.42, 0.42))
+        // Splayed, not upright. A clump of parallel blades is a hairbrush.
         tuft.rotation.set(
-          grassRng.range(-0.28, 0.28),
+          grassRng.range(-0.5, 0.5),
           grassRng.range(0, Math.PI * 2),
-          grassRng.range(-0.28, 0.28),
+          grassRng.range(-0.5, 0.5),
         )
         tuft.castShadow = true
         clump.add(tuft)
@@ -1071,11 +1101,18 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   // Flowers, pebbles, fallen sticks and mushrooms. None of them are entities;
   // they exist because a field with nothing at texel scale reads as a lawn.
-  const petalGeo = new THREE.SphereGeometry(0.09, 5, 4)
-  const stemGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.3, 4)
+  // A flat five-lobed head rather than a ball, plus a pair of leaves. A sphere
+  // on a stick is a lollipop, and lollipops were pulling more attention than
+  // ground dressing has any business pulling.
+  const petalGeo = new THREE.ConeGeometry(0.11, 0.05, 5).rotateX(Math.PI)
+  const eyeGeo = new THREE.SphereGeometry(0.035, 5, 4)
+  const leafGeo = new THREE.ConeGeometry(0.045, 0.16, 3)
+  const stemGeo = new THREE.CylinderGeometry(0.016, 0.02, 0.3, 4)
   const stickGeo = new THREE.CylinderGeometry(0.05, 0.07, 1, 5)
   const capGeo = new THREE.SphereGeometry(0.12, 6, 4, 0, Math.PI * 2, 0, Math.PI / 2)
-  const flowerMats = [0xf0e08a, 0xe8e4ee, 0xd7a3c4, 0xf2b45c].map((c) => toonUnique({ color: c }))
+  // Pulled down from near-white. These are the brightest small things in the
+  // frame and they should whisper.
+  const flowerMats = [0xd9cd86, 0xd8d2c6, 0xc09cb0, 0xd3a469].map((c) => toonUnique({ color: c }))
   const stemMat = toonUnique({ color: 0x5f9c38 })
 
   for (let c = 0; c < 38; c++) {
@@ -1093,9 +1130,19 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         const stem = new THREE.Mesh(stemGeo, stemMat)
         stem.position.set(x, h + 0.15, z)
         const head = new THREE.Mesh(petalGeo, mat)
-        head.position.set(x, h + 0.32, z)
-        head.scale.setScalar(grassRng.range(0.7, 1.2))
-        group.add(stem, head)
+        head.position.set(x, h + 0.31, z)
+        head.rotation.set(grassRng.range(-0.4, 0.4), grassRng.range(0, 2), grassRng.range(-0.4, 0.4))
+        head.scale.setScalar(grassRng.range(0.65, 1.15))
+        const eye = new THREE.Mesh(eyeGeo, stemMat)
+        eye.position.set(x, h + 0.335, z)
+        for (let l = 0; l < 2; l++) {
+          const leaf = new THREE.Mesh(leafGeo, stemMat)
+          leaf.position.set(x, h + 0.11, z)
+          leaf.rotation.set(1.1, l * 2.4 + grassRng.range(0, 1), 0)
+          leaf.translateY(0.07)
+          group.add(leaf)
+        }
+        group.add(stem, head, eye)
       } else if (kind < 0.72) {
         const s = grassRng.range(0.1, 0.26)
         const pebble = new THREE.Mesh(grassRng.chance(0.5) ? boulderGeo : rubbleGeo, M.stoneDark)
@@ -1599,6 +1646,35 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     cap.position.y = ridge + 0.02
     cap.castShadow = true
     g.add(cap)
+
+    // Break the roof up. It was the largest bright plane in the frame and it
+    // was out-competing the fire, the well and the player for attention, which
+    // is the wrong thing for a roof to win. Moss where it stays damp, a patch
+    // of newer thatch where it was mended, and a soot stain off the chimney.
+    for (const [mx, mz, mw, md] of [
+      [-w * 0.28, 0.62, 1.05, 0.7],
+      [w * 0.18, -0.5, 0.75, 0.55],
+      [w * 0.36, 0.75, 0.6, 0.45],
+    ] as const) {
+      const sz = mz > 0 ? 1 : -1
+      const t = Math.abs(mz)
+      const patch = new THREE.Mesh(new THREE.BoxGeometry(mw, 0.06, md), M.moss)
+      patch.position.set(
+        mx,
+        eave + (ridge - eave) * (1 - t) + 0.12 * Math.cos(pitch),
+        sz * (run * t + 0.1 * Math.sin(pitch)),
+      )
+      patch.rotation.x = sz * pitch
+      g.add(patch)
+    }
+    const mend = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 1.0), M.thatchOld)
+    mend.position.set(w * 0.06, eave + (ridge - eave) * 0.55 + 0.12, run * 0.45)
+    mend.rotation.x = pitch
+    g.add(mend)
+    const stain = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.07, 1.5), M.sooted)
+    stain.position.set(-w / 2 + 0.42, eave + (ridge - eave) * 0.5 + 0.13, run * 0.5)
+    stain.rotation.x = pitch
+    g.add(stain)
 
     // The doorway. Near black, with one warm plane behind it: somebody is in.
     const doorX = -w * 0.24
@@ -3150,7 +3226,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     if (!def) continue
     const [x, z] = findVisible(ax, az)
 
-    const y = heightAt(x, z) + 0.45
+    const y = heightAt(x, z) + 0.3
     const mesh = buildItemMesh(def)
     mesh.position.set(x, y, z)
     mesh.rotation.y = itemRng.range(0, Math.PI * 2)

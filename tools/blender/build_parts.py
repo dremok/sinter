@@ -61,6 +61,50 @@ OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "
 OUT_FILE = os.path.join(OUT_DIR, "parts.glb")
 
 
+# ------------------------------------------------ how these are meant to fit
+#
+# Recipes live in `src/items/catalog.ts` and this file cannot touch them, so the
+# intended assemblies are recorded here instead. Every one below was rendered
+# through `render/kitbash.ts` and checked at play size before being written down.
+#
+# This exists because the parts and the recipes are owned by different people
+# and drifted apart: the library gained a real sword blade, a real key and real
+# spectacles while the catalog was still composing those items out of a knife
+# blade, a hoop and a bar. An item made of the wrong parts reads as a different
+# object, and in a pack list where the player picks merge inputs and the merge
+# is irreversible, two items that share a silhouette is a correctness bug rather
+# than an art one. If a recipe below disagrees with the catalog, the catalog is
+# out of date.
+#
+#   sword    pommel_round     [0, -0.40, 0]                        steel
+#            grip_wrapped     [0, -0.40, 0]                        cloth
+#            guard_cross      [0, -0.14, 0]                        steel
+#            blade_sword      [0, -0.14, 0]                        steel
+#
+#   knife    grip_wrapped     [0, -0.30, 0]  scale 0.62            wood
+#            blade_knife      [0,  0.10, 0]  rot [0, 0, 1.57]      steel
+#
+#   key      key_body         [0, -0.22, 0]                        gold
+#
+#   glasses  spectacles_frame [0, 0, 0]                            steel
+#            lens_round       [-0.115, 0, 0]                       glass
+#            lens_round       [ 0.115, 0, 0]                       glass
+#
+#   chili    chili_pod        [0,  0.14, 0]                        ember
+#            stem_calyx       [0,  0.12, 0]                        leaf
+#
+#   rock     stone_lump       [0, -0.13, 0]  scale [1.25,1.1,1.2]  stone
+#            stone_lump       [0.14, -0.02, -0.09] scale [.55,.5,.58]
+#                                            rot [0.5, 1.0, 0.3]   stone
+#
+#   poison   phial_ribbed     [0, -0.15, 0]                        glass
+#            stopper          [0,  0.11, 0]  scale [1, 0.9, 1]     wood
+#
+# Two anchors below are not base anchored and will sit wrong if placed like the
+# rest: `pommel_round` and `chili_pod` are anchored at their TOP, because that
+# is where each attaches, and both therefore hang downward from their offset.
+
+
 # --------------------------------------------------------------------- helpers
 
 def reset_scene():
@@ -1500,6 +1544,40 @@ def make_stem_calyx():
     socket(o, "socket_tip", (0, 0, 0.100))
 
 
+def make_stalk_short():
+    """
+    A fruit stalk: woody, slightly curved, swollen where it left the branch.
+
+    For the apple, which has been wearing a `nail_spike` as a stem. A nail is
+    straight, perfectly round and has a flat struck head, and all three of those
+    are wrong: a stalk bends, tapers unevenly, and ends in a knuckle. Twelve
+    pixels of it show above the crown, which is enough for the bend to read.
+
+    Not the same job as `stem_calyx`. That is a five pointed cap for a fruit
+    that has one, a chili or a pepper; an apple has a bare stalk in a well and
+    would look like a tomato with a calyx on it.
+    """
+    bm = bmesh.new()
+    radii = [0.017, 0.013, 0.0105, 0.0095, 0.0105, 0.008]
+    heights = [0.0, 0.022, 0.048, 0.076, 0.094, 0.106]
+    bend = [0.0, 0.004, 0.012, 0.024, 0.033, 0.039]
+
+    frames = []
+    for i in range(len(radii)):
+        t = i / (len(radii) - 1)
+        frames.append((Vector((bend[i], 0.0, heights[i])),
+                       Vector((1.0, 0.0, 0.0)), Vector((0.0, 1.0, 0.0)), t))
+
+    def sec(i, t):
+        r = radii[i]
+        return [(r * math.cos(2.0 * math.pi * k / 6),
+                 r * math.sin(2.0 * math.pi * k / 6)) for k in range(6)]
+
+    bm_sweep(bm, frames, sec)
+    o = emit(bm, "stalk_short", "base", bevel_width=0.002)
+    socket(o, "socket_tip", (0.039, 0, 0.106))
+
+
 def make_stone_lump():
     """
     A boulder, as opposed to `stone_shard`, which is a struck flake.
@@ -1756,7 +1834,7 @@ BUILDERS = [
     make_disc, make_bar,
     make_blade_sword, make_guard_cross, make_grip_wrapped, make_pommel_round,
     make_spectacles_frame, make_lens_round, make_key_body,
-    make_chili_pod, make_stem_calyx, make_stone_lump, make_phial_ribbed,
+    make_chili_pod, make_stem_calyx, make_stalk_short, make_stone_lump, make_phial_ribbed,
     make_stock_crossbow, make_prod_bow, make_fork_sling,
     make_scabbard_long, make_bottle_body, make_book_closed,
 ]

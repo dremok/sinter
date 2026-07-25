@@ -1,6 +1,6 @@
 {
   "bark": {
-    "hash": "a50c2bbf0473a947",
+    "hash": "aa447ad63e561490",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
@@ -20,7 +20,7 @@
     }
   },
   "clay": {
-    "hash": "454f366c777a6a62",
+    "hash": "b265780ddf7f0fc4",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
@@ -40,7 +40,7 @@
     }
   },
   "cloth": {
-    "hash": "76105d3751fb5744",
+    "hash": "8495794018dbafce",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
@@ -60,27 +60,27 @@
     }
   },
   "ember": {
-    "hash": "24b51886484600da",
+    "hash": "c436be0f63f8ff6a",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 1172,
+    "bytes": 1200,
     "phase": [
       14,
       1
     ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.741,
-      "seamY": 1.344,
-      "busyness": 0.1023,
+      "seamX": 0.841,
+      "seamY": 1.034,
+      "busyness": 0.1055,
       "used": 6,
-      "dominance": 0.528
+      "dominance": 0.598
     }
   },
   "foliage": {
-    "hash": "21d7aea760b6ab7d",
+    "hash": "d1238977e7d1750f",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
@@ -100,7 +100,7 @@
     }
   },
   "glass": {
-    "hash": "9b40b162cb213bc1",
+    "hash": "8a7fff91573e5e81",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
@@ -120,7 +120,7 @@
     }
   },
   "gold": {
-    "hash": "3451ecc2fcf6238c",
+    "hash": "996d91e4cf465ff5",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
@@ -140,7 +140,7 @@
     }
   },
   "grass": {
-    "hash": "864145611c54c524",
+    "hash": "64fbe78c2edb136b",
     "size": 1024,
     "worldUnits": 85.3,
     "model": "fal-ai/patina/material",
@@ -160,7 +160,7 @@
     }
   },
   "plank": {
-    "hash": "de2d90dbdebae5fb",
+    "hash": "56a989377b6e619b",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
@@ -180,7 +180,7 @@
     }
   },
   "sand": {
-    "hash": "3b2ddfd89b3e66c6",
+    "hash": "e69bf9edf51bcf28",
     "size": 256,
     "worldUnits": 21.3,
     "model": "fal-ai/patina/material",
@@ -200,7 +200,7 @@
     }
   },
   "steel": {
-    "hash": "ae52aac74f6f7d1b",
+    "hash": "929918cda30895c3",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
@@ -220,27 +220,27 @@
     }
   },
   "stone": {
-    "hash": "f0f740772723a20c",
+    "hash": "8e421b501665981a",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
     "seed": 9074,
-    "bytes": 884,
+    "bytes": 1026,
     "phase": [
       15,
-      6
+      2
     ],
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.584,
-      "seamY": 0.078,
-      "busyness": 0.0344,
-      "used": 6,
-      "dominance": 0.224
+      "seamX": 0.359,
+      "seamY": 1.578,
+      "busyness": 0.0468,
+      "used": 5,
+      "dominance": 0.349
     }
   },
   "straw": {
-    "hash": "ec061f94b462da59",
+    "hash": "3a41fec2dc69a6dc",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
@@ -260,7 +260,7 @@
     }
   },
   "water": {
-    "hash": "f8cef5292a8537a2",
+    "hash": "2582bca63fb7c6e0",
     "size": 128,
     "worldUnits": 10.7,
     "model": "fal-ai/patina/material",

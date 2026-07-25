@@ -5,29 +5,65 @@ static files. Nothing in `src/` ever calls fal.ai, ElevenLabs or anything else.
 That is D8 and it is the constraint the whole deploy story rests on: no keys in
 the client bundle, no network at runtime, playable offline.
 
-Regenerate with `npm run bake:textures`. See `tools/bake-textures/`.
+```bash
+npm run bake:textures                 # anything missing or stale
+npm run bake:textures -- --plan       # what it would spend, calls nothing
+npm run bake:verify                   # check the committed files, calls nothing
+```
+
+See `tools/bake-textures/`.
 
 ## textures/
 
 Fourteen tiling albedo maps, one per entry of `TextureSet` in
 `src/render/textures.ts`. Indexed (8-bit palette) PNG, sRGB, no alpha.
+**110 kB for the set**, of which the ground is 93 kB.
 
-| File | Size | Covers | What uses it |
-|---|---|---|---|
-| `grass.png` | 1024 | 85.3 units | the ground plane, one tile across the whole region |
-| `sand.png` | 256 | 21.3 units | the shore ring, and tinted for tracks, yards and tilled ground |
-| `water.png` | 128 | 10.7 units | the pond surface |
-| `bark.png` | 64 | 5.3 units | trunks, palisade posts, logs |
-| `foliage.png` | 64 | 5.3 units | canopy cones, lily pads |
-| `stone.png` | 64 | 5.3 units | boulders, rubble walls |
-| `plank.png` | 64 | 5.3 units | hut walls, fences |
-| `straw.png` | 64 | 5.3 units | thatch, reeds, dry pasture |
-| `steel.png` | 64 | 5.3 units | tools, fittings |
-| `cloth.png` | 64 | 5.3 units | sacking, rope, awnings |
-| `clay.png` | 64 | 5.3 units | pots |
-| `glass.png` | 64 | 5.3 units | bottles, lenses |
-| `gold.png` | 64 | 5.3 units | item material |
-| `ember.png` | 64 | 5.3 units | the hearth |
+| File | Size | Covers | On disk | What uses it |
+|---|---|---|---|---|
+| `grass.png` | 1024 | 85.3 units | 92.7 kB | the ground plane, one tile across the whole region |
+| `sand.png` | 256 | 21.3 units | 5.7 kB | the shore ring, and tinted for tracks, yards and tilled ground |
+| `water.png` | 128 | 10.7 units | 1.4 kB | the pond surface |
+| `cloth.png` | 64 | 5.3 units | 1.4 kB | sacking, rope, awnings |
+| `foliage.png` | 64 | 5.3 units | 1.3 kB | canopy cones, lily pads |
+| `ember.png` | 64 | 5.3 units | 1.2 kB | the hearth |
+| `bark.png` | 64 | 5.3 units | 1.1 kB | trunks, palisade posts, logs |
+| `stone.png` | 64 | 5.3 units | 1.0 kB | boulders, rubble walls |
+| `straw.png` | 64 | 5.3 units | 1.0 kB | thatch, reeds, dry pasture |
+| `glass.png` | 64 | 5.3 units | 0.9 kB | bottles, lenses |
+| `plank.png` | 64 | 5.3 units | 0.7 kB | hut walls, fences |
+| `gold.png` | 64 | 5.3 units | 0.7 kB | item material |
+| `steel.png` | 64 | 5.3 units | 0.6 kB | tools, fittings |
+| `clay.png` | 64 | 5.3 units | 0.6 kB | pots |
+
+Thirteen of the fourteen are under 1.5 kB, which is not a typo. Each is at most
+ten colours, all of them steps of a ramp in `src/render/palette.ts`, so an
+indexed PNG of a 64px tile is mostly header. The whole set costs less than a
+fiftieth of the 400 kB the parts library is budgeted in `docs/PERFORMANCE.md`,
+and it removes the largest boot cost that file lists: the 1024x1024 ground tile
+is no longer drawn texel by texel at startup.
+
+### Two of these should probably not be adopted
+
+`stone.png` and `ember.png` are worse than what `src/render/textures.ts` already
+draws, and the reason is the same for both.
+
+Each is a cellular pattern whose cell size is the entire design: a granite block
+wants to be about nine texels, an ember crust plate about four. `textures.ts`
+does both with a Voronoi diagram, which sets cell size directly by choosing a
+seed count, and gets hard joints and a directional bevel for free. A diffusion
+model has no such control. Asked for seven blocks across, it returns fourteen
+small ones with soft joints; asked for five or six with strong tone separation,
+it returns a chessboard of light and dark squares with no joints at all. The
+ember tile is worse still: the model paints an accurate bed of coals, a dark
+crust with fissures one texel wide, and a hearth renders at about twelve texels,
+where an accurate bed of coals reads as a patch of dirt with orange specks on it.
+
+The files are committed anyway, because they are on-palette and seamless and
+having them is free at 2 kB, and because the comparison is worth being able to
+re-run. But the recommendation is to load twelve of the fourteen and leave those
+two drawn. `tools/bake-textures/compare.ts` renders both side by side if you want
+to disagree.
 
 `manifest.json` records the prompt hash, model, seed, byte count and measured
 quality metrics for each. It is provenance and cache state for the bake, and the

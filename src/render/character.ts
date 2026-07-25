@@ -90,10 +90,15 @@ const TAU = Math.PI * 2
  * individually good ideas, collectively a smear.
  */
 const HUE = {
-  /** Head. The lightest thing on the character by a wide margin. */
-  head: 0xe8dcc0,
+  /**
+   * Head. The lightest thing on the character by a wide margin, but held back
+   * from white on purpose: the frame's exposure is being lifted about a quarter
+   * and a hood already sitting at 220 would clip to flat white and lose its
+   * form. At 202 there is still an 80 point step down to the torso.
+   */
+  head: 0xd8c9a6,
   /** A plane change on the hood brow. Still firmly inside the light band. */
-  headShade: 0xcdbf9e,
+  headShade: 0xc0b28f,
   /** Torso, mantle and sleeves. Mid, and where the red identity now lives. */
   torso: 0xc16a48,
   /** The trailing cloak panel, a step under the torso so it reads as behind. */

@@ -458,7 +458,7 @@ function ground(look: Ground) {
       // has the same feature size in world units, not half of it.
       const k = n / GROUND
       const low = normalized(fbm(r, Math.max(2, Math.round(4 * k))))
-      const mid = normalized(fbm(r, Math.max(4, Math.round(14 * k)), 3))
+      const mid = normalized(fbm(r, Math.max(4, Math.round(13 * k))))
       const patch = normalized(fbm(r, Math.max(3, Math.round(9 * k)), 3))
 
       for (let y = 0; y < n; y++) {
@@ -466,7 +466,11 @@ function ground(look: Ground) {
         for (let x = 0; x < n; x++) {
           const u = x / n
           // Low carries most of the swing; mid adds about one step on top.
-          const idx = clamp(look.base + low(u, v) * look.span + (mid(u, v) - 0.5) * 1.15, 0, 4.9)
+          // The mid band needs real amplitude, not a nudge. Ramp steps are
+          // snapped, so a swing of half a step mostly rounds away and does
+          // nothing; at 1.8 it reliably moves the field a step and the patches
+          // it makes are the thing that reads as texture inside one view.
+          const idx = clamp(look.base + low(u, v) * look.span + (mid(u, v) - 0.5) * 1.8, 0, 4.9)
           // A second ramp dithered in at the *same* index, so what changes is
           // hue and not value. Confined to a narrow band: a 50/50 stipple of
           // two hues over a whole region is invisible in greyscale, which is

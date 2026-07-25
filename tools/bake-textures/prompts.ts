@@ -221,20 +221,26 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 5.3,
     prompt:
-      `${STYLE} A wall of only five or six very large rough hewn granite boulders ` +
-      'across the image and five or six down, each one filling a big area. Thin dark ' +
-      'joints between them, every block a strongly different flat tone from its ' +
-      'neighbours, some near black and some almost white, one or two chipped corners, ' +
-      'one crack. Nearly neutral warm grey.',
+      `${STYLE} A wall of rough hewn granite blocks seen flat on, about seven large ` +
+      'blocks across the image and seven down. Thin dark joints between the blocks, ' +
+      'each block a distinctly different flat tone from its neighbours, one or two ' +
+      'chipped corners, one crack. Nearly neutral warm grey.',
     palette: [...RAMP.stone],
-    stretch: 0.95,
+    stretch: 0.8,
     gamma: 1,
-    sharpen: 0.5,
+    sharpen: 0.6,
     flatten: 1,
     notes:
       'Blocks rather than a rock face, because the joints are what survives reduction ' +
       'to 64px. A mottled boulder becomes grey soup; a block pattern keeps a readable ' +
-      'grid of hard edges at any size.',
+      'grid of hard edges at any size. ' +
+      'This is the one material in the set where the code-drawn version is better and ' +
+      'the bake should probably not be adopted. A granite block wants to be about nine ' +
+      'texels here, and asking for seven blocks across reliably returns fourteen small ' +
+      'ones with soft joints. Asking for five or six with strong tone separation ' +
+      'returned a chessboard of light and dark squares with no joints at all. The ' +
+      'Voronoi in textures.ts gets block size, hard joints and a directional bevel ' +
+      'exactly right by construction, and nothing in a prompt competes with that.',
   },
   {
     name: 'plank',
@@ -388,13 +394,20 @@ export const SPECS: readonly TextureSpec[] = [
       'one may be strongly saturated.',
     palette: [...RAMP.ember],
     stretch: 1,
-    gamma: 0.85,
+    gamma: 1.25,
     sharpen: 0.6,
     flatten: 0.6,
     notes:
       'The loudest surface in the game on purpose, and the one place the desaturation ' +
-      'rule is suspended. Gamma pushes dark so the crust dominates and the fissures ' +
-      'read as the exception, which is what makes them look hot.',
+      'rule is suspended. ' +
+      'Like stone, this is a texture the bake loses and the code-drawn version should ' +
+      'be kept. A hearth is about a metre across, so it renders at twelve texels, and ' +
+      'the model gives an accurate bed of coals: a dark crust with fissures one texel ' +
+      'wide. At twelve texels an accurate bed of coals reads as a patch of dirt with ' +
+      'orange specks on it. Pushing gamma light barely moved it, because the problem is ' +
+      'the proportion of crust to fire rather than the exposure. The Voronoi in ' +
+      'textures.ts sets crust plate size directly, which is the one control that ' +
+      'matters, and its hearth reads as fire from across the map.',
   },
 ]
 
@@ -406,7 +419,7 @@ export const SPEC_BY_NAME = new Map(SPECS.map((s) => [s.name, s]))
  * shared style string. It is hashed alongside each spec, so bumping it is how a
  * pipeline change invalidates the cache without anyone editing fourteen prompts.
  */
-export const PIPELINE_VERSION = 10
+export const PIPELINE_VERSION = 12
 
 /** The fal.ai endpoint. PATINA is fal's tiling material model; see ASSET_PIPELINE. */
 export const MODEL = 'fal-ai/patina/material'

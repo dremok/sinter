@@ -196,6 +196,64 @@ const player = {
 iso.target.copy(player.pos)
 iso.update()
 
+/**
+ * The player's silhouette, drawn only where something is in front of them.
+ *
+ * This replaces fading the world, which was the wrong lever. Ghosting trees and
+ * buildings made the scenery flicker as the player moved, dissolved the
+ * landmarks the game relies on for navigation now that D20 bans quest markers,
+ * and still left the world unreadable in the moment it mattered.
+ *
+ * Placement alone cannot solve it either, because the PLAYER moves. An item can
+ * be placed where the camera can see it, and generation now does exactly that,
+ * but a walking character will inevitably pass behind a wall and with the
+ * camera locked there is no second angle to fall back on.
+ *
+ * So the world stays solid and the character is drawn twice. The second pass
+ * uses GreaterDepth, meaning it renders ONLY where it fails the normal depth
+ * test, which is precisely the region where something is covering it. Flat,
+ * unlit, no outline. Standard practice in isometric games for the same reason.
+ *
+ * Cost is one extra draw of one small mesh. It replaces a system that was
+ * cloning materials and pushing whole buildings into the transparent pass.
+ */
+const silhouette = new THREE.Group()
+{
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xf2d9a8,
+    depthTest: true,
+    // Draw where the depth test FAILS: exactly the occluded pixels.
+    depthFunc: THREE.GreaterDepth,
+    depthWrite: false,
+    transparent: true,
+    opacity: 0.85,
+    fog: false,
+  })
+
+  character.group.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (!mesh.isMesh || mesh.userData.outlineHull === true) return
+    const ghost = new THREE.Mesh(mesh.geometry, mat)
+    ghost.userData.follows = mesh
+    silhouette.add(ghost)
+  })
+
+  silhouette.renderOrder = 999
+  scene.add(silhouette)
+}
+
+/** Keep every silhouette piece on top of the body part it shadows. */
+function syncSilhouette(): void {
+  for (const child of silhouette.children) {
+    const src = child.userData.follows as THREE.Object3D | undefined
+    if (!src) continue
+    src.updateWorldMatrix(true, false)
+    child.matrix.copy(src.matrixWorld)
+    child.matrixAutoUpdate = false
+    child.matrixWorldNeedsUpdate = true
+  }
+}
+
 // ---------------------------------------------------------------- ui
 
 const ui = new Ui({
@@ -872,6 +930,41 @@ function surfaceUnder(x: number, z: number, from: number): number {
   return best
 }
 
+/**
+ * Push out of any raised surface that is too tall to step onto.
+ *
+ * Without this a platform is only solid from the directions you can climb it.
+ * Max, on the plank crossing: "walkable from the short ends but if you walk
+ * onto it from the river you just walk through it." The deck sits a step above
+ * the bank and well above the streambed, so approaching along the water put the
+ * top out of STEP_HEIGHT range, `surfaceUnder` correctly declined to raise the
+ * player, and nothing else objected, so he waded straight through a bridge.
+ *
+ * The flickering came from the same cause: at the boundary, tiny movements
+ * crossed the step threshold back and forth, mounting and dismounting each
+ * frame.
+ *
+ * So a standable is now one of two things and never neither: low enough to walk
+ * onto, or an obstruction to walk around.
+ */
+function pushOutOfLedges(pos: THREE.Vector3): void {
+  for (const s of region.standables) {
+    // Reachable from here means it is a step, not a wall. Leave it alone.
+    if (s.top - pos.y <= STEP_HEIGHT) continue
+    // Already above it, so it is the floor rather than something in the way.
+    if (pos.y >= s.top - 0.01) continue
+
+    const dx = pos.x - s.x
+    const dz = pos.z - s.z
+    const r = s.radius + PLAYER_RADIUS
+    const d = Math.hypot(dx, dz)
+    if (d >= r || d < 1e-4) continue
+
+    pos.x += (dx / d) * (r - d)
+    pos.z += (dz / d) * (r - d)
+  }
+}
+
 function movePlayer(): void {
   const { forward, right } = iso.screenBasis()
   wish.set(0, 0, 0)
@@ -908,6 +1001,7 @@ function movePlayer(): void {
 
   player.pos.x = Math.min(BOUNDS.maxX, Math.max(BOUNDS.minX, player.pos.x))
   player.pos.z = Math.min(BOUNDS.maxZ, Math.max(BOUNDS.minZ, player.pos.z))
+  pushOutOfLedges(player.pos)
   player.pos.y = surfaceUnder(player.pos.x, player.pos.z, player.pos.y)
 }
 
@@ -951,6 +1045,7 @@ function syncMeshes(dt: number): void {
 
   character.group.position.copy(player.pos)
   character.update(dt, player.speed01, player.heading)
+  syncSilhouette()
 
   for (const e of queries.bobbing) {
     e.bob.phase += dt * 2
@@ -962,10 +1057,10 @@ function syncMeshes(dt: number): void {
   iso.update()
 
   groundEverything()
-  // Ghost whatever is standing between the camera and the player. Camera
-  // rotation is unbound, so there is no longer a keypress that gets you a
-  // second look at something a trunk is covering.
-  region.fadeOccluders(player.pos, iso.camera, dt)
+  // Nothing in the world fades any more. See the silhouette pass below: the
+  // thing that must never be hidden is the PLAYER, not the tree, and dissolving
+  // scenery to achieve that was worse than the problem. Max, on the live build:
+  // "This constant transparency flickering is really annoying."
 
   syncFireVisuals()
   placeLights()
