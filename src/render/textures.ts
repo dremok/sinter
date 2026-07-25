@@ -354,7 +354,7 @@ export const grass = (rng: Rng) =>
         // The whole value range of the ramp, spent on one slow gradient. Value
         // is decided here and only here, so the patches below cannot show up as
         // shapes in a greyscale check.
-        const idx = clamp(1.0 + drift(u, v) * 3.0, 0, 4.9)
+        const idx = clamp(0.85 + drift(u, v) * 3.3, 0, 4.9)
         // Thin, parched turf where `patch` runs high. Dithered against the
         // green ramp at the *same* index over a wide, gradual band, so the
         // transition is a hue drift rather than a stamped edge. The offset on
@@ -366,35 +366,39 @@ export const grass = (rng: Rng) =>
       }
     }
 
-    // Tufts. Sparse and large on purpose: about one every one and a half
-    // metres, each four to six texels across, so they read as individual plants
-    // at play distance instead of dissolving into grain.
-    const tufts = Math.round((n * n) / 380)
+    // Tufts, and there are far fewer of them than there were.
+    //
+    // At 720p through a pixel buffer this layer merged into texture. At native
+    // resolution it stopped merging and became a field of discrete pale specks
+    // on the one surface in the frame that has no outline to hold it together.
+    // The ground now does its work through the slow value drift above; these
+    // are an accent on top of it, not the thing that makes it grass.
+    const tufts = Math.round((n * n) / 1400)
     for (let i = 0; i < tufts; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
       const u = x / n
       const v = y / n
-      // Thinner on the parched ground, but not absent: it is dry turf, not
-      // bare earth, so something still grows there.
-      if (!r.chance((0.35 + drift(u, v) * 0.6) * (patch(u, v) > 0.72 ? 0.4 : 1))) continue
+      // Only weakly tied to the drift. Keying density hard to it gathered them
+      // into dense pale clusters exactly where the ground was already lightest,
+      // which read as a spill rather than as meadow.
+      if (!r.chance((0.5 + drift(u, v) * 0.2) * (patch(u, v) > 0.72 ? 0.5 : 1))) continue
 
       const aim = r.range(0, Math.PI * 2)
       const blades = r.int(3, 5)
       put(x, y, tone(RAMP.grass, 1))
       for (let b = 0; b < blades; b++) {
         const a = aim + r.range(-1, 1)
-        // Tips stop a step short of the lightest green. At full brightness a
-        // field of these reads as confetti scattered over the ground rather
-        // than as plants growing out of it.
-        stroke(put, x, y, Math.cos(a), Math.sin(a), r.int(4, 7), RAMP.grass, 2.4, 4.2)
+        // Tips stay close to the base tone. Contrast here buys nothing at
+        // native resolution and costs the whole field its calm.
+        stroke(put, x, y, Math.cos(a), Math.sin(a), r.int(4, 7), RAMP.grass, 2.2, 3.5)
       }
     }
 
     // Stones and fallen sticks, in the thin turf only, where a stone would
     // actually show through. Sparse: this is the last texel-scale layer left on
     // the ground and it is one mark short of being speckle again.
-    for (let i = 0; i < Math.round((n * n) / 5200); i++) {
+    for (let i = 0; i < Math.round((n * n) / 11000); i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
       if (patch(x / n, y / n) < 0.84) continue
@@ -617,7 +621,7 @@ export const stone = (rng: Rng) =>
       const y = r.int(0, n - 1)
       const w = r.int(2, 5)
       for (let dy = 0; dy < w; dy++) {
-        for (let dx = 0; dx < w - dy; dx++) put(x + dx, y + dy, tone(RAMP.stone, 5))
+        for (let dx = 0; dx < w - dy; dx++) put(x + dx, y + dy, tone(RAMP.stone, 4))
       }
     }
 
@@ -645,10 +649,10 @@ export const plank = (rng: Rng) =>
     const boards = n / BOARD
 
     for (let b = 0; b < boards; b++) {
-      const base = 2 + [1, 0, 2, 0][b % 4]!
+      const base = 2 + [1, 0, 1, 0][b % 4]!
       for (let row = 0; row < BOARD; row++) {
         const y = b * BOARD + row
-        const idx = row === 0 ? 0 : row === 1 ? base + 2 : row === BOARD - 1 ? base - 1 : base
+        const idx = row === 0 ? 0 : row === 1 ? base + 1 : row === BOARD - 1 ? base - 1 : base
         for (let x = 0; x < n; x++) put(x, y, tone(RAMP.wood, idx))
       }
 
@@ -686,26 +690,20 @@ export const straw = (rng: Rng) =>
 
     for (let c = 0; c < n / COURSE; c++) {
       const top = c * COURSE
-      // The shadow the course above throws down onto this one. Two texels, hard
-      // edged: this is the mark that makes a roof read as thatch at all.
+      // One dark line per course, and a ragged edge of stalk ends just under
+      // it. That is the entire read: horizontal courses with an uneven lower
+      // edge is what says thatch rather than siding.
+      for (let x = 0; x < n; x++) put(x, top, tone(RAMP.straw, 0))
       for (let x = 0; x < n; x++) {
-        put(x, top, tone(RAMP.straw, 0))
-        put(x, top + 1, tone(RAMP.straw, 1))
+        if (!r.chance(0.4)) continue
+        for (let k = 0; k < r.int(1, 3); k++) put(x, top + k, tone(RAMP.straw, 2))
       }
-      // Then the cut stalk ends of the course above, overhanging that shadow at
-      // uneven lengths. A straight shadow line on its own reads as a board; the
-      // ragged fringe is the whole difference between thatch and siding.
-      for (let x = 0; x < n; x++) {
-        if (!r.chance(0.45)) continue
-        const over = r.int(1, 3)
-        for (let k = 0; k < over; k++) put(x, top + k, tone(RAMP.straw, 4))
-      }
-      // Bold stalks, few of them, running down out of the shadow.
-      for (let s = 0; s < 9; s++) {
+      // A few stalks, one step either side of the base tone. This layer used to
+      // run from step 2 to step 5 over a step-3 base, and at native resolution a
+      // roof of that reads as a checkerboard quilt rather than as straw.
+      for (let s2 = 0; s2 < 5; s2++) {
         const x = r.int(0, n - 1)
-        const len = r.int(4, COURSE)
-        const lean = r.range(-0.3, 0.3)
-        stroke(put, x, top + 2, lean, 1, len, RAMP.straw, 2, r.chance(0.4) ? 5 : 4)
+        stroke(put, x, top + 2, r.range(-0.3, 0.3), 1, r.int(4, COURSE), RAMP.straw, 2, 4)
       }
     }
   })
@@ -940,14 +938,18 @@ export function tiled(tex: THREE.CanvasTexture, worldW: number, worldH: number):
   // nothing was being lost here; this is a local guarantee, so that the one
   // function handing textures to materials cannot hand over a filtered one.
   //
-  // Worth recording what this does NOT fix, because it was reported as texel
-  // density drifting between the near and far ground. The camera is
+  // Worth recording what this does NOT fix, because it was once reported as
+  // texel density drifting between the near and far ground. The camera is
   // orthographic, so density on a *flat* plane is constant by construction, and
-  // there are no mipmaps to mush anything. What actually varies is the terrain:
-  // ground tilted away from the camera compresses its texels in screen space.
-  // The other half is that the frame renders into a fixed-height buffer and is
-  // then scaled to the window by a non-integer factor, so the texel grid never
-  // lands on whole output pixels. Both live outside this file.
+  // there are no mipmaps to mush anything. What does vary is the terrain:
+  // ground tilted away from the camera compresses its texels in screen space,
+  // and only projected or triplanar UVs on the ground mesh would fix that.
+  //
+  // The other half of that report was the fixed-height pixel buffer being
+  // rescaled to the window by a non-integer factor. That is gone: the renderer
+  // draws at native resolution now, which is also why the fine detail in these
+  // tiles had to come down. Nothing here compensates for a resolution change,
+  // so if the render path changes again, look at the frame before trusting it.
   t.magFilter = THREE.NearestFilter
   t.minFilter = THREE.NearestFilter
   t.generateMipmaps = false

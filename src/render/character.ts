@@ -1,12 +1,15 @@
 /**
  * The player character: a hooded scavenger.
  *
- * The camera shows 22 world units across 720 buffer lines, and the character is
- * 1.35 units tall, so on screen it is about 36 pixels from boot to hood tip.
- * That is sprite territory. Nothing about a face, a belt buckle or a fold of
- * cloth survives at that size; the only thing that survives is the outline. So
- * the whole design is an outline problem, and every part here earns its place
- * by changing the silhouette:
+ * The camera shows 22 world units top to bottom whatever the resolution, and
+ * the character is 1.35 units tall, so it is always about a twentieth of the
+ * frame height: roughly 50 pixels in a 900 line window and about 60 at 1080p.
+ * Raising the render resolution did not make the character bigger and never
+ * will, because the camera is what decides its size. That is sprite territory.
+ * Nothing about a face, a belt buckle or a fold of cloth survives at that size;
+ * what survives is the outline and the value structure. So the whole design is
+ * an outline problem, and every part here earns its place by changing the
+ * silhouette:
  *
  *   - a big pointed hood that overhangs the face and runs back into a spike
  *   - a short mantle that flares off the shoulders, and a long cloak behind it
@@ -19,7 +22,7 @@
  * Proportions are stylised, not anatomical. The head is roughly a quarter of
  * the total height and nearly as wide as the shoulders, the legs are short, the
  * boots are oversized. Realistic proportions read as "small generic human" at
- * 36 pixels; exaggerated ones read as a character.
+ * fifty pixels; exaggerated ones read as a character.
  *
  * Forms are beveled boxes rather than plain boxes. An octagonal prism scaled to
  * a width and a depth is a box with its four vertical corners cut, which is
@@ -62,7 +65,6 @@
  */
 
 import * as THREE from 'three'
-import { BAND0 } from './palette'
 import { toon, toonUnique } from './toon'
 
 const TAU = Math.PI * 2
@@ -89,7 +91,7 @@ const HUE = {
    * where the shape is widest, not on the point. A near-white pointed hood over
    * a dark body is also a silhouette nobody wants on their player character.
    */
-  cloak: 0xc2ab84,
+  cloak: 0xd2c39c,
   /** The mantle. The light mass, at the widest part of the shape. */
   mantle: 0xdfd3b4,
   /** The red, kept as lining, sleeves and the trailing cloak panel. */
@@ -256,11 +258,6 @@ export class Character {
     this.hips.position.y = HIP
     this.chest.position.y = HIP
     this.root.add(this.hips, this.chest)
-
-    // TEMP-VALUE-PROBE
-    const probe = window as unknown as { __charGroup?: THREE.Group; __hideChar?: boolean }
-    probe.__charGroup = this.group
-    if (probe.__hideChar) this.group.visible = false
 
     this.buildLegs()
     this.buildTorso()

@@ -11,12 +11,10 @@
  * change of loader and nothing else. Raising one without raising
  * TEXELS_PER_UNIT would not add detail, it would zoom the texture out.
  *
- * `worldUnits` is that footprint written down, and it is the number the prompts
- * are actually written against. A bark tile is five metres of trunk, so it wants
- * four or five knots, not forty. This is the single easiest thing to get wrong
- * with a generative model, because a model asked for "bark" produces a
- * photograph-framing of bark: hundreds of fissures, correct for a 30cm crop and
- * complete mush once sixteen source pixels become one texel.
+ * `worldUnits` is that footprint written down. It is not, however, a framing to
+ * hand the model: saying "five metres of trunk" gets a painting of five trees.
+ * What it is for is the arithmetic above `SPECS`, which converts each material's
+ * wanted feature pitch in texels into a count the prompt can ask for.
  *
  * ## The style contract
  *
@@ -73,8 +71,16 @@ export interface TextureSpec {
   stretch: number
   /** >1 pushes light, <1 pushes dark. */
   gamma: number
-  /** Unsharp amount applied before reduction, to survive the box filter. */
+  /** One-texel unsharp amount, applied after reduction to restore hard edges. */
   sharpen: number
+  /**
+   * How much of the tile's own large-scale lighting to subtract, 0 to 1.
+   *
+   * High for anything the cel shader lights (every prop): a gradient baked into
+   * the albedo is a second, wrong light source that does not move with the sun.
+   * Zero for the ground, whose regional drift is deliberate art.
+   */
+  flatten: number
   /** Why this one is set up the way it is. */
   notes: string
 }
@@ -107,16 +113,17 @@ export const SPECS: readonly TextureSpec[] = [
     source: 2048,
     worldUnits: 85.3,
     prompt:
-      `${STYLE} A large meadow of short stylised grass seen from directly above, ` +
-      'filling the whole frame. Broad soft patches of lusher and drier grass drifting ' +
-      'across it at a large scale, and three or four wide patches of bare brown earth ' +
-      'worn through the turf with ragged edges. Small tufts and clumps of grass blades ' +
-      'read as separate plants rather than as a uniform carpet. Olive and sage green, ' +
-      'never emerald, never bright.',
+      `${STYLE} Short stylised meadow grass seen from directly above. Broad soft ` +
+      'drifts of lusher and drier grass about a sixth of the image across, and three ' +
+      'or four ragged patches of bare brown earth worn through the turf, each about a ' +
+      'tenth of the image wide. Densely covered in small individual tufts of grass ' +
+      'blades a few pixels across, so it reads as separate plants rather than as a ' +
+      'uniform carpet. Olive and sage green, never emerald, never bright.',
     palette: [...RAMP.grass, ...steps(RAMP.dirt, 1, 4)],
     stretch: 0.85,
     gamma: 1,
     sharpen: 0.4,
+    flatten: 0,
     notes:
       'The most important texture in the game: it is most of what is on screen. ' +
       'One tile spans the whole 92-unit region, so nothing in it may repeat, and it ' +
@@ -130,14 +137,15 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 21.3,
     prompt:
-      `${STYLE} Damp shore sand and fine gravel seen from directly above, twenty ` +
-      'metres across. Broad soft bands of wetter and drier sand curving gently across ' +
-      'the frame, a scattering of small waterworn pebbles, no more than a dozen. ' +
-      'Warm greyish tan, dusty, restful.',
+      `${STYLE} Damp shore sand seen from directly above. About thirteen soft broad ` +
+      'ripple bands of wetter and drier sand curving gently across the image, low ' +
+      'contrast, and about fifty small waterworn pebbles scattered over it. Warm ' +
+      'greyish tan, dusty, restful.',
     palette: [...RAMP.sand, ...steps(RAMP.dirt, 1, 2), ...steps(RAMP.stone, 2, 3)],
     stretch: 0.75,
     gamma: 1,
     sharpen: 0.5,
+    flatten: 0.5,
     notes:
       'region.ts tints this same bitmap for tracks, yards and tilled ground, so the ' +
       'banding has to stay low contrast: a bold ripple reads as wood grain once it is ' +
@@ -149,14 +157,15 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 10.7,
     prompt:
-      `${STYLE} The surface of a still shallow pond seen from directly above, ten ` +
-      'metres across. Slow broad ripple bands, soft and low contrast, drifting rather ' +
-      'than regular. Deeper darker water toward one side. Nothing sharp, no foam, no ' +
-      'reflections, no sparkle. Muted blue-grey teal.',
+      `${STYLE} The surface of a still shallow pond seen from directly above. About ` +
+      'nine slow broad ripple bands across the image, soft and low contrast, wandering ' +
+      'rather than regular, with deeper darker water toward one side. Nothing sharp, ' +
+      'no foam, no reflections, no sparkle. Muted blue-grey teal.',
     palette: [...RAMP.water],
     stretch: 0.7,
     gamma: 1,
     sharpen: 0,
+    flatten: 0.5,
     notes:
       'The one surface where fine detail is actively wrong: mipmaps are off, so ' +
       'per-texel variation shimmers the moment the camera moves. No sharpening at all, ' +
@@ -168,14 +177,14 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 5.3,
     prompt:
-      `${STYLE} The bark of a single standing tree trunk, five metres of it, seen ` +
-      'flat on. Long vertical grain running top to bottom in a small number of broad ' +
-      'ridges and deep grooves, four or five across the width, bending around three or ' +
-      'four dark round knots. Very few, very large shapes. Warm dark brown.',
+      `${STYLE} Rough tree bark, close up, filling the frame. About fourteen long ` +
+      'vertical ridges and deep grooves running the full height of the image, bending ' +
+      'around three or four dark round knots. Warm dark brown.',
     palette: [...RAMP.bark],
     stretch: 0.9,
     gamma: 1,
     sharpen: 0.6,
+    flatten: 1,
     notes:
       'A trunk 1.5 units wide shows about eighteen texels of this tile, so the grain ' +
       'period has to be four or five texels or a tree renders as a flat brown pole. ' +
@@ -187,14 +196,16 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 5.3,
     prompt:
-      `${STYLE} A mass of stylised leaves seen from above, five metres across, made ` +
-      'of about twenty large rounded clusters with ragged gaps between them that you ' +
-      'could see through. Each cluster is a simple bold shape, not individual leaves. ' +
-      'Nearly colourless pale grey-green, almost neutral, very low saturation.',
+      `${STYLE} A dense mass of stylised foliage seen from above, made of about ` +
+      'eighty overlapping rounded leaf clusters each a few pixels across, with ragged ' +
+      'dark gaps between them that you could see through. Each cluster is a simple ' +
+      'bold shape, not individual leaves. Nearly colourless pale grey-green, almost ' +
+      'neutral, very low saturation, and pale rather than dark.',
     palette: [...RAMP.leaf],
     stretch: 0.85,
     gamma: 1.15,
     sharpen: 0.6,
+    flatten: 0.7,
     notes:
       'region.ts multiplies this by a per-tier leaf tint, and multiplication compounds ' +
       'both saturation and darkness. So the ramp is deliberately pale and near-neutral ' +
@@ -207,14 +218,15 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 5.3,
     prompt:
-      `${STYLE} A wall of rough hewn granite blocks seen flat on, five metres across, ` +
-      'about six or seven large blocks wide. Thin dark joints between the blocks, each ' +
-      'block a slightly different flat tone, one or two chipped corners, one crack. ' +
-      'Nearly neutral warm grey.',
+      `${STYLE} A wall of rough hewn granite blocks seen flat on, about seven large ` +
+      'blocks across the image and seven down. Thin dark joints between the blocks, ' +
+      'each block a distinctly different flat tone from its neighbours, one or two ' +
+      'chipped corners, one crack. Nearly neutral warm grey.',
     palette: [...RAMP.stone],
     stretch: 0.8,
     gamma: 1,
     sharpen: 0.6,
+    flatten: 1,
     notes:
       'Blocks rather than a rock face, because the joints are what survives reduction ' +
       'to 64px. A mottled boulder becomes grey soup; a block pattern keeps a readable ' +
@@ -226,14 +238,16 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 5.3,
     prompt:
-      `${STYLE} A wall of sawn wooden planks laid horizontally, five metres across, ` +
-      'about sixteen narrow boards stacked top to bottom. Dark gaps between boards, ' +
-      'each board a slightly different flat tone, long straight lengthwise grain, a few ' +
-      'staggered butt joints where boards end. Warm pale yellow-brown, dry and weathered.',
+      `${STYLE} A wall of sawn wooden planks laid horizontally, about sixteen narrow ` +
+      'boards stacked from top to bottom of the image. Clear dark gaps between the ' +
+      'boards, each board a distinctly different tone from the ones above and below, ' +
+      'some noticeably darker, long straight lengthwise grain, a few staggered butt ' +
+      'joints where boards end. Warm pale yellow-brown, dry and weathered.',
     palette: [...RAMP.wood],
     stretch: 0.85,
     gamma: 1,
     sharpen: 0.7,
+    flatten: 1,
     notes:
       'Sixteen boards over 5.3 units is four texels per board, which is the pitch the ' +
       'code-drawn version uses and which puts about five boards up a hut wall. Fewer, ' +
@@ -245,14 +259,15 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 5.3,
     prompt:
-      `${STYLE} A thatched roof seen flat on, five metres across, laid in about eight ` +
-      'horizontal courses of cut straw stacked top to bottom. Each course is a band of ' +
-      'roughly parallel stalks with a darker line where the course above overlaps it ' +
-      'and paler cut ends at its lower edge. Dry pale golden brown, dusty, not yellow.',
+      `${STYLE} A thatched roof seen flat on, laid in about eight horizontal courses ` +
+      'of cut straw stacked from top to bottom of the image. Each course is a band of ' +
+      'roughly parallel stalks with a dark line where the course above overlaps it and ' +
+      'paler cut ends along its lower edge. Dry pale golden brown, dusty, not yellow.',
     palette: [...RAMP.straw],
     stretch: 0.85,
     gamma: 1,
     sharpen: 0.6,
+    flatten: 1,
     notes:
       'Courses, not fur. Eight courses over 5.3 units is eight texels each, so a ' +
       'cottage roof shows three or four of them, which is what makes it read as thatch ' +
@@ -265,12 +280,14 @@ export const SPECS: readonly TextureSpec[] = [
     worldUnits: 5.3,
     prompt:
       `${STYLE} A sheet of hammered wrought iron seen flat on, worn and old. Broad ` +
-      'soft horizontal brushed banding, and about a dozen large shallow hammer dents. ' +
-      'Cool desaturated blue-grey, matte, not shiny, no reflections at all.',
+      'soft horizontal brushed banding across the image, and about sixteen shallow ' +
+      'hammer dents scattered over it. Cool desaturated blue-grey, matte and dull, ' +
+      'not shiny, no reflections at all.',
     palette: [...RAMP.steel],
     stretch: 0.8,
     gamma: 1,
     sharpen: 0.6,
+    flatten: 1,
     notes:
       'Matte is stated twice because every model wants to put a specular highlight on ' +
       'metal, and a baked highlight on a cel-shaded surface reads as a smear that does ' +
@@ -289,6 +306,7 @@ export const SPECS: readonly TextureSpec[] = [
     stretch: 0.8,
     gamma: 1,
     sharpen: 0.7,
+    flatten: 1,
     notes:
       'Thirty threads over 64 texels is two texels a thread, which is the finest ' +
       'anything in this set is allowed to be. Any finer and the weave aliases into ' +
@@ -307,6 +325,7 @@ export const SPECS: readonly TextureSpec[] = [
     stretch: 0.8,
     gamma: 1,
     sharpen: 0.5,
+    flatten: 1,
     notes: 'Wheel ridges are the one feature that says "thrown pot" at ten texels.',
   },
   {
@@ -323,6 +342,7 @@ export const SPECS: readonly TextureSpec[] = [
     stretch: 0.75,
     gamma: 1.1,
     sharpen: 0.4,
+    flatten: 0.8,
     notes:
       'Glass materials in region.ts are tinted and often transparent, so the map has ' +
       'to carry structure without carrying a scene. "Nothing behind it" stops the model ' +
@@ -342,6 +362,7 @@ export const SPECS: readonly TextureSpec[] = [
     stretch: 0.9,
     gamma: 1,
     sharpen: 0.5,
+    flatten: 0.8,
     notes:
       'The one texture allowed real chroma: palette.ts says gold that is not loud is ' +
       'just brass. It is an item material, and items are the spotlight.',
@@ -352,14 +373,16 @@ export const SPECS: readonly TextureSpec[] = [
     source: 1024,
     worldUnits: 5.3,
     prompt:
-      `${STYLE} A bed of live coals seen from directly above, one metre across. A ` +
-      'crust of dark charred plates, roughly thirty of them, with bright hot orange ' +
-      'fire glowing in the cracks between them. High contrast between the near-black ' +
-      'crust and the glowing fissures. This one may be saturated.',
+      `${STYLE} A bed of live coals seen from directly above. A crust of dark charred ` +
+      'plates, about fifteen across the image and fifteen down, each only a few pixels ' +
+      'wide, with bright hot orange fire glowing in the narrow cracks between them. ' +
+      'Extreme contrast between the near-black crust and the glowing fissures. This ' +
+      'one may be strongly saturated.',
     palette: [...RAMP.ember],
     stretch: 1,
     gamma: 0.85,
     sharpen: 0.6,
+    flatten: 0.6,
     notes:
       'The loudest surface in the game on purpose, and the one place the desaturation ' +
       'rule is suspended. Gamma pushes dark so the crust dominates and the fissures ' +
@@ -375,7 +398,7 @@ export const SPEC_BY_NAME = new Map(SPECS.map((s) => [s.name, s]))
  * shared style string. It is hashed alongside each spec, so bumping it is how a
  * pipeline change invalidates the cache without anyone editing fourteen prompts.
  */
-export const PIPELINE_VERSION = 3
+export const PIPELINE_VERSION = 5
 
 /** The fal.ai endpoint. PATINA is fal's tiling material model; see ASSET_PIPELINE. */
 export const MODEL = 'fal-ai/patina/material'

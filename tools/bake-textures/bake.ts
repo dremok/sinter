@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url'
 import { decodePng, encodeIndexedPng, type Bitmap } from './png'
 import {
   chromaDistance,
+  flattenLighting,
   inspectTiling,
   magnify,
   meanLab,
@@ -164,6 +165,7 @@ function hashOf(spec: TextureSpec): string {
         stretch: spec.stretch,
         gamma: spec.gamma,
         sharpen: spec.sharpen,
+        flatten: spec.flatten,
       }),
     )
     .digest('hex')
@@ -195,7 +197,7 @@ interface Attempt {
 }
 
 function pipeline(spec: TextureSpec, source: Bitmap): Omit<Attempt, 'seed' | 'failures'> {
-  const small = sharpen(reduce(source, spec.size), spec.sharpen)
+  const small = sharpen(flattenLighting(reduce(source, spec.size), spec.flatten), spec.sharpen)
   const snapped = snapToPalette(small, {
     palette: spec.palette,
     stretch: spec.stretch,

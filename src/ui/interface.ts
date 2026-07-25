@@ -18,7 +18,7 @@
  *     ?debug=1 or F3; see `mountDebug` below.
  */
 
-import { useOf, useSummary as useSummaryProbe, type ItemDef, type Use } from '../items/catalog'
+import { useOf, type ItemDef, type Use } from '../items/catalog'
 import { landingOf } from '../items/interactions'
 import { canMerge, isDiscovered, mergeId, refusal, tryMerge } from '../items/merge'
 import { itemIcon } from '../render/icons'
@@ -392,10 +392,6 @@ export class Ui {
     this.markHeld()
     this.syncFade()
     this.renderBench()
-
-    // TEMPORARY PROBE, remove before reporting.
-    const probe = this.pack[0]
-    if (probe) this.held(itemIcon(probe), probe.name, useSummaryProbe(probe), 0, this.pack.length)
   }
 
   /**
@@ -465,7 +461,7 @@ export class Ui {
       actions.append(glyph)
     }
     if (picked) actions.append(el('div', 'card-slot', String(picked)))
-    if (this.hooks.onHold || true) {
+    if (this.hooks.onHold) {
       const hold = el('button', 'card-hold', 'Hold')
       hold.type = 'button'
       hold.title = `Take the ${def.name} in hand`

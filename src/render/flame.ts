@@ -284,7 +284,7 @@ class Particles {
 
 // --------------------------------------------------------------------- smoke
 
-const SMOKE_COLOR = new THREE.Color(0x6b6058)
+const SMOKE_COLOR = new THREE.Color(0xff00ff)
 const scratchColor = new THREE.Color()
 
 /**

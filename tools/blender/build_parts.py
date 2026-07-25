@@ -74,7 +74,7 @@ def active(obj):
     obj.select_set(True)
 
 
-def bevel(obj, width=0.008, segments=2, angle=48):
+def bevel(obj, width=0.008, segments=1, angle=48):
     m = obj.modifiers.new(name="bevel", type="BEVEL")
     m.width = width
     m.segments = segments
@@ -119,11 +119,19 @@ def socket(part, name, location):
     bpy.context.collection.objects.link(e)
 
 
-def finish(obj, name, anchor_mode="base", smooth=False, bevel_width=0.008, bevel_segments=2):
+COST = {}
+
+
+def finish(obj, name, anchor_mode="base", smooth=False, bevel_width=0.008):
     obj.name = name
     obj.data.name = name
     anchor(obj, anchor_mode)
+    # Recorded before and after, because the bevel roughly doubles a part and
+    # that is the first number to look at when the file is over budget. The
+    # split says whether the cost is the shape or the trim on it.
+    before = tri_count(obj)
     bevel(obj, width=bevel_width, segments=bevel_segments)
+    COST[name] = (before, tri_count(obj), bevel_segments)
     active(obj)
     if smooth:
         bpy.ops.object.shade_smooth()
@@ -314,7 +322,7 @@ def bm_box(bm, lo, hi):
         _face(bm, [v[i] for i in q])
 
 
-def emit(bm, name, anchor_mode="base", smooth=False, bevel_width=0.008, bevel_segments=2):
+def emit(bm, name, anchor_mode="base", smooth=False, bevel_width=0.008):
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     mesh = bpy.data.meshes.new(name)
@@ -732,7 +740,7 @@ def make_crate():
             bm_box(bm, (min(sx * h, sx * (h - 0.018)), -h, z0),
                    (max(sx * h, sx * (h - 0.018)), h, z0 + r))
 
-    o = emit(bm, "crate_box", "base", bevel_width=0.004, bevel_segments=1)
+    o = emit(bm, "crate_box", "base", bevel_width=0.004)
     socket(o, "socket_tip", (0, 0, 0.22))
     socket(o, "socket_mid", (0, 0, 0.11))
 
@@ -746,7 +754,7 @@ def make_ring():
            (-0.021, 0.0), (-0.012, -0.024), (0.020, -0.019)]
     bm_sweep(bm, arc_frames(0.140, 0.0, 2.0 * math.pi, 16, closed=True),
              lambda i, t: sec, closed=True)
-    emit(bm, "ring_band", "none", bevel_width=0.003, bevel_segments=1)
+    emit(bm, "ring_band", "none", bevel_width=0.003)
 
 
 def make_horseshoe():
@@ -832,7 +840,7 @@ def make_rope_coil():
         return pts
 
     bm_sweep(bm, tail, tail_sec)
-    emit(bm, "rope_coil", "none", bevel_width=0.0015, bevel_segments=1)
+    emit(bm, "rope_coil", "none", bevel_width=0.0015)
 
 
 def make_stone_shard():
@@ -932,7 +940,7 @@ def make_straw_bale():
         st(0.222, 0.124, 0.122, 0.55),
     ]
     bm_loft(bm, stations)
-    o = emit(bm, "straw_bale", "base", bevel_width=0.005, bevel_segments=1)
+    o = emit(bm, "straw_bale", "base", bevel_width=0.005)
     jitter(o, 0.012, 23)
     socket(o, "socket_tip", (0, 0, 0.31))
 
@@ -993,7 +1001,7 @@ def make_torch_head():
                  lambda i, t: [(0.006, 0.0), (0.0, 0.008), (-0.006, 0.0), (0.0, -0.008)],
                  closed=True)
 
-    o = emit(bm, "torch_head", "base", bevel_width=0.004, bevel_segments=1)
+    o = emit(bm, "torch_head", "base", bevel_width=0.004)
     jitter(o, 0.010, 41)
     socket(o, "socket_tip", (0, 0, 0.26))
 
@@ -1051,7 +1059,7 @@ def make_leaf_cluster():
     # to fall, which floats it clear of whatever it is growing out of. The
     # attachment point for a tuft is its root, and the convention says the
     # origin goes at the attachment point.
-    emit(bm, "leaf_cluster", "none", bevel_width=0.002, bevel_segments=1)
+    emit(bm, "leaf_cluster", "none", bevel_width=0.002)
 
 
 def make_stopper():
@@ -1165,7 +1173,7 @@ def make_blade_sword():
     ]
     bm_loft(bm, [sword_section(*s) for s in stations])
     bm_rot_x_up(bm)
-    o = emit(bm, "blade_sword", "none", bevel_width=0.003, bevel_segments=1)
+    o = emit(bm, "blade_sword", "none", bevel_width=0.003)
     socket(o, "socket_base", (0, 0, 0))
     socket(o, "socket_tip", (0, 0, 0.648))
 
@@ -1211,7 +1219,7 @@ def make_grip_wrapped():
 
     bm = bmesh.new()
     bm_lathe(bm, profile, segments=9)
-    o = emit(bm, "grip_wrapped", "base", bevel_width=0.003, bevel_segments=1)
+    o = emit(bm, "grip_wrapped", "base", bevel_width=0.003)
     socket(o, "socket_tip", (0, 0, 0.260))
 
 
@@ -1231,7 +1239,7 @@ def make_pommel_round():
         (0.023, 0.046),
         (0.0, 0.048),
     ], segments=10)
-    emit(bm, "pommel_round", "top", bevel_width=0.003, bevel_segments=1)
+    emit(bm, "pommel_round", "top", bevel_width=0.003)
 
 
 # ------------------------------------------------------------- the small things
@@ -1289,7 +1297,7 @@ def make_spectacles_frame():
             (0.011 * math.cos(2.0 * math.pi * k / 6),
              0.011 * math.sin(2.0 * math.pi * k / 6)) for k in range(6)])
 
-    emit(bm, "spectacles_frame", "none", bevel_width=0.002, bevel_segments=1)
+    emit(bm, "spectacles_frame", "none", bevel_width=0.002)
 
 
 def make_lens_round():
@@ -1305,7 +1313,7 @@ def make_lens_round():
         (0.0, 0.005),
     ], segments=14)
     bm_rot_z_forward(bm)
-    emit(bm, "lens_round", "none", smooth=True, bevel_width=0.001, bevel_segments=1)
+    emit(bm, "lens_round", "none", smooth=True, bevel_width=0.001)
 
 
 def make_key_body():
@@ -1351,7 +1359,7 @@ def make_key_body():
                             0.018 * math.sin(2.0 * math.pi * k / 6)) for k in range(6)],
              closed=True)
 
-    o = emit(bm, "key_body", "base", bevel_width=0.003, bevel_segments=1)
+    o = emit(bm, "key_body", "base", bevel_width=0.003)
     socket(o, "socket_tip", (0, 0, 0.448))
 
 
@@ -1391,7 +1399,7 @@ def make_chili_pod():
         return pts
 
     bm_sweep(bm, frames, sec)
-    o = emit(bm, "chili_pod", "top", bevel_width=0.003, bevel_segments=1)
+    o = emit(bm, "chili_pod", "top", bevel_width=0.003)
     socket(o, "socket_base", (0, 0, 0))
 
 
@@ -1423,7 +1431,7 @@ def make_stem_calyx():
         (0.009, 0.102),
         (0.0, 0.108),
     ], segments=10, lobes=5)
-    o = emit(bm, "stem_calyx", "base", bevel_width=0.002, bevel_segments=1)
+    o = emit(bm, "stem_calyx", "base", bevel_width=0.002)
     socket(o, "socket_tip", (0, 0, 0.100))
 
 
@@ -1485,7 +1493,7 @@ def make_phial_ribbed():
         (0.020, 0.272),
         (0.0, 0.266),
     ], segments=12, lobes=6)
-    o = emit(bm, "phial_ribbed", "base", bevel_width=0.003, bevel_segments=1)
+    o = emit(bm, "phial_ribbed", "base", bevel_width=0.003)
     socket(o, "socket_tip", (0, 0, 0.250))
     socket(o, "socket_mid", (0, 0, 0.10))
 
@@ -1547,7 +1555,7 @@ def make_prod_bow():
                 (hx * 0.5, -hz), (hx, -hz * 0.45)]
 
     bm_sweep(bm, frames, sec)
-    o = emit(bm, "prod_bow", "none", bevel_width=0.003, bevel_segments=1)
+    o = emit(bm, "prod_bow", "none", bevel_width=0.003)
     socket(o, "socket_mid", (0, 0, 0))
 
 
@@ -1580,7 +1588,7 @@ def make_fork_sling():
 
         bm_sweep(bm, frames, sec)
 
-    o = emit(bm, "fork_sling", "base", bevel_width=0.004, bevel_segments=1)
+    o = emit(bm, "fork_sling", "base", bevel_width=0.004)
     socket(o, "socket_tip", (0, 0, 0.336))
 
 
@@ -1605,7 +1613,7 @@ def make_scabbard_long():
     ]
     bm_loft(bm, [box_section(*s) for s in stations])
     bm_rot_x_up(bm)
-    o = emit(bm, "scabbard_long", "top", bevel_width=0.004, bevel_segments=1)
+    o = emit(bm, "scabbard_long", "top", bevel_width=0.004)
     socket(o, "socket_base", (0, 0, -0.672))
 
 
@@ -1668,7 +1676,7 @@ def make_book_closed():
              lambda i, t: [(0.004, 0.046), (-0.012, 0.038), (-0.019, 0.014),
                            (-0.019, -0.014), (-0.012, -0.038), (0.004, -0.046)])
 
-    o = emit(bm, "book_closed", "base", bevel_width=0.003, bevel_segments=1)
+    o = emit(bm, "book_closed", "base", bevel_width=0.003)
     socket(o, "socket_tip", (0, 0, 0.064))
 
 
@@ -1697,13 +1705,16 @@ def main():
 
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    meshes = sorted((o.name, len(o.data.loop_triangles) or sum(
-        max(len(p.vertices) - 2, 0) for p in o.data.polygons))
-        for o in bpy.data.objects if o.type == "MESH")
-    total = sum(t for _, t in meshes)
-    print(f"[parts] built {len(meshes)} parts, {total} tris")
-    for name, tris in meshes:
-        print(f"[parts]   {name:<14} {tris:>5}")
+    rows = sorted(((tri_count(o), o.name) for o in bpy.data.objects if o.type == "MESH"),
+                  reverse=True)
+    total = sum(t for t, _ in rows)
+    raw = sum(COST.get(n, (0, 0, 0))[0] for _, n in rows)
+    print(f"[parts] built {len(rows)} parts, {total} tris "
+          f"({raw} authored, {total - raw} added by bevel)")
+    print(f"[parts] {'part':<18}{'tris':>6}{'shape':>7}{'bevel':>7}{'seg':>5}")
+    for tris, name in rows:
+        before, after, seg = COST.get(name, (0, tris, 0))
+        print(f"[parts] {name:<18}{tris:>6}{before:>7}{after - before:>7}{seg:>5}")
 
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.export_scene.gltf(

@@ -73,6 +73,18 @@ export function oklabOfHex(hex: string): Oklab {
   return oklab(LIN[(v >> 16) & 255]!, LIN[(v >> 8) & 255]!, LIN[v & 255]!)
 }
 
+/** Oklab back to linear sRGB. Needed to change a pixel's value and keep its hue. */
+function unOklab(c: Oklab): [number, number, number] {
+  const l = (c.L + 0.3963377774 * c.a + 0.2158037573 * c.b) ** 3
+  const m = (c.L - 0.1055613458 * c.a - 0.0638541728 * c.b) ** 3
+  const s = (c.L - 0.0894841775 * c.a - 1.291485548 * c.b) ** 3
+  return [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ]
+}
+
 /**
  * How much hue is allowed to matter against value when picking a ramp step.
  *
@@ -169,6 +181,77 @@ export function sharpen(src: Bitmap, amount: number): Bitmap {
       }
       out[o + 3] = 255
     }
+  }
+  return { width: w, height: h, data: out }
+}
+
+/**
+ * Subtract the tile's own large-scale lighting, leaving its texture behind.
+ *
+ * This is a high-pass on value only: blur the lightness channel with a very wide
+ * wrapping kernel, subtract it, add the mean back. Hue and chroma are untouched.
+ *
+ * It exists because "flat lighting, no baked shadows or highlights" is the one
+ * instruction the models ignore most reliably. The plank tile came back with a
+ * broad dark-at-the-top, light-at-the-bottom gradient across the whole image,
+ * which is a light source, and it caused two separate faults: it is exactly what
+ * the art direction forbids, since the cel shader is supposed to be the only
+ * thing that decides where the light falls, and it does not wrap, so the tile
+ * failed the seam check with a visible band where one copy met the next.
+ *
+ * Both faults have the same cause and this removes it. The kernel is a quarter
+ * of the tile wide, so anything smaller than that survives untouched: stone
+ * blocks at five texels and plank boards at four are unaffected, and only the
+ * gradient spanning the whole image goes.
+ *
+ * Not for every texture. The ground wants regional drift at a sixth of its own
+ * width and that is the art rather than a fault, so `grass` opts out.
+ */
+export function flattenLighting(src: Bitmap, amount: number): Bitmap {
+  if (amount <= 0) return src
+  const { width: w, height: h, data } = src
+  const n = w * h
+  const radius = Math.max(1, Math.round(w / 4))
+
+  const lab = labField(src)
+  const L = Float64Array.from(lab, (p) => p.L)
+
+  // Separable wrapping box blur, run twice so the kernel is a tent rather than a
+  // step. A single box pass leaves faint square-edged banding behind.
+  let field = L
+  for (let pass = 0; pass < 2; pass++) {
+    const tmp = new Float64Array(n)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let sum = 0
+        for (let k = -radius; k <= radius; k++) sum += field[y * w + (((x + k) % w) + w) % w]!
+        tmp[y * w + x] = sum / (radius * 2 + 1)
+      }
+    }
+    const out = new Float64Array(n)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let sum = 0
+        for (let k = -radius; k <= radius; k++) sum += tmp[((((y + k) % h) + h) % h) * w + x]!
+        out[y * w + x] = sum / (radius * 2 + 1)
+      }
+    }
+    field = out
+  }
+
+  let mean = 0
+  for (let i = 0; i < n; i++) mean += L[i]!
+  mean /= n
+
+  const out = new Uint8Array(n * 4)
+  for (let i = 0; i < n; i++) {
+    const p = lab[i]!
+    const corrected = p.L + (mean - field[i]!) * amount
+    const [r, g, b] = unOklab({ L: Math.max(0, corrected), a: p.a, b: p.b })
+    out[i * 4] = encodeSrgb(Math.max(0, Math.min(1, r)))
+    out[i * 4 + 1] = encodeSrgb(Math.max(0, Math.min(1, g)))
+    out[i * 4 + 2] = encodeSrgb(Math.max(0, Math.min(1, b)))
+    out[i * 4 + 3] = 255
   }
   return { width: w, height: h, data: out }
 }

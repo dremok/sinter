@@ -190,7 +190,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     barkDead: toonUnique({ color: 0x9d9484, map: tiled(tex.bark, 1.5, 3) }),
     log: toonUnique({ map: tiled(tex.bark, 1.5, 0.9) }),
     charred: toonUnique({ color: 0x33291f, map: tiled(tex.bark, 1.5, 0.9) }),
-    plank: toonUnique({ map: tiled(tex.plank, 2.4, 1.6) }),
+    plank: toonUnique({ color: 0xdcb079, map: tiled(tex.plank, 2.4, 1.6) }),
     plankDark: toonUnique({ color: 0x8c6038, map: tiled(tex.plank, 2.4, 1.6) }),
     stone: toonUnique({ map: tiled(tex.stone, 2.4, 2.4) }),
     stoneDark: toonUnique({ color: 0x8a8c92, map: tiled(tex.stone, 2.4, 2.4) }),
@@ -202,8 +202,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // does not, because at this pitch the real one lands on the ground.
     doorway: toonUnique({ color: 0x140f0b }),
     eaveShade: toonUnique({ color: 0x4a3423 }),
-    thatch: toonUnique({ map: tiled(tex.straw, 2.2, 2.2) }),
-    thatchOld: toonUnique({ color: 0xbda06a, map: tiled(tex.straw, 2.2, 2.2) }),
+    thatch: toonUnique({ color: 0xf2dda6, map: tiled(tex.straw, 2.2, 2.2) }),
+    thatchOld: toonUnique({ color: 0xd9be82, map: tiled(tex.straw, 2.2, 2.2) }),
     straw: toonUnique({ map: tiled(tex.straw, 0.7, 0.7) }),
     reed: toonUnique({ color: 0x9fb862, map: tiled(tex.straw, 0.6, 0.6) }),
     tuft: toonUnique({ color: 0x8a9354, map: tiled(tex.straw, 0.7, 0.7) }),
@@ -544,8 +544,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // the fence reads as a building site; grass surviving between the worn parts
   // is what makes the worn parts read as feet.
   layPatch(0.3, 13.1, 3.9, M.yard, trackRng, 0.34, 30, 0.06)
-  layPatch(-3.4, 14.4, 1.7, M.yard, trackRng, 0.36, 18, 0.06)
-  layPatch(4.6, 14.4, 1.5, M.yard, trackRng, 0.36, 18, 0.06)
+  layPatch(-4.7, 15.2, 3.0, M.yard, trackRng, 0.36, 20, 0.06)
+  layPatch(6.1, 15.2, 2.3, M.yard, trackRng, 0.36, 18, 0.06)
   layPatch(HOME.x + 0.1, HOME.z - 0.3, 1.75, M.ash, trackRng, 0.24, 20, 0.07)
 
   // ----------------------------------------------------------------- trees
@@ -1504,8 +1504,47 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     })
   }
 
-  longhouse(-4.9, 15.5, 0.22, 5.0, 3.2)
+  longhouse(-4.9, 15.5, 1.83, 5.0, 3.2)
   shed(6.2, 15.5, -0.34, 3.2, 2.4)
+
+  // The three lines a person actually walks at home: door to fire, fire to
+  // shed, fire to well. These are laid last so they sit on top of the yard, and
+  // they are the reason the ground under the buildings is not unbroken lawn.
+  layTrack(
+    [
+      [-2.64, 16.14],
+      [-1.7, 15.1],
+      [-0.6, 14.1],
+      [0.2, 13.7],
+    ],
+    0.52,
+    M.track,
+    trackRng,
+    0.075,
+  )
+  layTrack(
+    [
+      [0.9, 13.4],
+      [3.0, 14.0],
+      [5.0, 14.8],
+      [6.0, 15.2],
+    ],
+    0.46,
+    M.track,
+    trackRng,
+    0.075,
+  )
+  layTrack(
+    [
+      [0.5, 12.7],
+      [1.8, 12.0],
+      [2.8, 11.5],
+    ],
+    0.42,
+    M.track,
+    trackRng,
+    0.075,
+  )
 
   /** The hearth. Always lit, never consumed. */
   {
@@ -1864,8 +1903,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Drying rack: an A-frame with strips hanging off it. */
   {
-    const rx = -2.4
-    const rz = 16.6
+    const rx = -0.9
+    const rz = 17.3
     const h = heightAt(rx, rz)
     const g = new THREE.Group()
     for (const sx of [-1, 1]) {
@@ -1975,7 +2014,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
 
     for (const [x, z] of [
-      [-3.0, 13.4],
+      [-2.3, 12.5],
       [4.2, 13.9],
     ] as const) {
       const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.32, 0.85, 10), M.plankDark)

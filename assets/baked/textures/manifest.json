@@ -1,0 +1,34 @@
+{
+  "bark": {
+    "hash": "aa11e2a47ebfddd4",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9043,
+    "bytes": 990,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.553,
+      "seamY": 0.452,
+      "busyness": 0.0344,
+      "used": 6,
+      "dominance": 0.303
+    }
+  },
+  "stone": {
+    "hash": "937bf46afdd5c143",
+    "size": 64,
+    "worldUnits": 5.3,
+    "model": "fal-ai/patina/material",
+    "seed": 9074,
+    "bytes": 1036,
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 1.203,
+      "seamY": 1.443,
+      "busyness": 0.046,
+      "used": 5,
+      "dominance": 0.345
+    }
+  }
+}
