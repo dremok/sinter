@@ -31,7 +31,7 @@ import * as THREE from 'three'
 import { createNoise2D } from 'simplex-noise'
 import type { Rng } from '../core/rng'
 import { world, type Entity } from '../ecs/world'
-import { CATALOG } from '../items/catalog'
+import { CATALOG, STARTING_ITEMS } from '../items/catalog'
 import { buildItemMesh } from '../render/kitbash'
 import { BAND0 } from '../render/palette'
 import { toonUnique } from '../render/toon'
@@ -54,12 +54,45 @@ const HOME = { x: 0, z: 13.4 }
 /** The palisade line. */
 const PAL_Z = -8
 
+/**
+ * A tall opaque thing that can stand between the camera and the player.
+ *
+ * `radius` and `top` are the horizontal half-extent and the height above the
+ * object's own origin. Both are known exactly at build time, which is cheaper
+ * and steadier than computing a bounding box from geometry that includes a
+ * canopy hanging out over the trunk.
+ */
+interface Occluder {
+  object: THREE.Object3D
+  radius: number
+  top: number
+  /** Current opacity, eased toward the target. 1 means fully solid. */
+  opacity: number
+  /** Cloned, transparent-capable materials, made only when one is first needed. */
+  faded: { mesh: THREE.Mesh; solid: THREE.Material; ghost: THREE.MeshToonMaterial }[] | null
+}
+
 export interface Region {
   group: THREE.Group
   heightAt: (x: number, z: number) => number
   playerStart: THREE.Vector3
   gate: THREE.Vector3
+  /**
+   * Fade whatever is currently hiding the player. Call once per frame.
+   *
+   * Camera rotation is unbound, so the player cannot turn to see around a
+   * trunk any more, which makes a permanently hidden player a real defect
+   * rather than a keypress away. Ghosting to a quarter opacity rather than to
+   * nothing, because an invisible tree reads as a bug and a faint one reads as
+   * a tree you are behind.
+   */
+  fadeOccluders: (playerPos: THREE.Vector3, camera: THREE.Camera, dt: number) => void
 }
+
+/** How see-through a tree gets when it is in the way. Not zero, on purpose. */
+const FADE_TO = 0.26
+const FADE_IN_RATE = 1 / 0.15
+const FADE_OUT_RATE = 1 / 0.3
 
 function smoothstep(a: number, b: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)))
@@ -118,6 +151,16 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     return h
   }
 
+  /** Everything that can hide the player. Filled in as the world is built. */
+  const occluders: Occluder[] = []
+  const occluder = (object: THREE.Object3D, radius: number, top: number): Occluder => ({
+    object,
+    radius,
+    top,
+    opacity: 1,
+    faded: null,
+  })
+
   const tex = textures(rng)
 
   // Surfaces whose UVs are authored in world units, 3.2 of them per tile, which
@@ -146,6 +189,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     barkPale: toonUnique({ color: 0xd9d2bc, map: tiled(tex.bark, 1.5, 3) }),
     barkDead: toonUnique({ color: 0x9d9484, map: tiled(tex.bark, 1.5, 3) }),
     log: toonUnique({ map: tiled(tex.bark, 1.5, 0.9) }),
+    charred: toonUnique({ color: 0x33291f, map: tiled(tex.bark, 1.5, 0.9) }),
     plank: toonUnique({ map: tiled(tex.plank, 2.4, 1.6) }),
     plankDark: toonUnique({ color: 0x8c6038, map: tiled(tex.plank, 2.4, 1.6) }),
     stone: toonUnique({ map: tiled(tex.stone, 2.4, 2.4) }),
@@ -153,10 +197,17 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // Warm grey. The lighting ramp turns anything neutral bright blue on its
     // shadow side, and a blue plinth under a cottage reads as painted plastic.
     rubbleWall: toonUnique({ color: 0xb2a08a, map: tiled(tex.stone, 1.4, 1.4) }),
+    // Openings have to be nearly black or they read as a panel of paint. The
+    // eave band is the shadow the overhang ought to be throwing on the wall and
+    // does not, because at this pitch the real one lands on the ground.
+    doorway: toonUnique({ color: 0x140f0b }),
+    eaveShade: toonUnique({ color: 0x4a3423 }),
     thatch: toonUnique({ map: tiled(tex.straw, 2.2, 2.2) }),
     thatchOld: toonUnique({ color: 0xbda06a, map: tiled(tex.straw, 2.2, 2.2) }),
     straw: toonUnique({ map: tiled(tex.straw, 0.7, 0.7) }),
     reed: toonUnique({ color: 0x9fb862, map: tiled(tex.straw, 0.6, 0.6) }),
+    tuft: toonUnique({ color: 0x8a9354, map: tiled(tex.straw, 0.7, 0.7) }),
+    tuftPale: toonUnique({ color: 0xa9a271, map: tiled(tex.straw, 0.7, 0.7) }),
     cloth: toonUnique({ map: tiled(tex.cloth, 1.2, 1.2) }),
     clothBlue: toonUnique({ color: 0x8fa8c4, map: tiled(tex.cloth, 1.2, 1.2) }),
     clothRed: toonUnique({ color: 0xc48b7a, map: tiled(tex.cloth, 1.2, 1.2) }),
@@ -574,6 +625,15 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     tree.position.set(x, h, z)
     tree.rotation.y = r.range(0, Math.PI * 2)
     group.add(tree)
+
+    // Canopy half-width and total height, both known here. Scrub is too short
+    // to hide anything, so it is not worth a per-frame test.
+    if (species !== 'scrub') {
+      const spread = species === 'pine' ? 0.95 : species === 'dead' ? 0.9 : 1.45
+      const height =
+        species === 'dead' ? trunkH + scale * 0.9 : trunkH + (species === 'pine' ? 3.4 : 2.6) * scale
+      occluders.push(occluder(tree, spread * scale, height))
+    }
     return tree
   }
 
@@ -733,11 +793,19 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
       const h = heightAt(x, z)
       const clump = new THREE.Group()
-      for (let t = 0; t < 3; t++) {
-        const tuft = new THREE.Mesh(tuftGeo, M.straw)
-        const s = grassRng.range(0.55, 0.85)
-        tuft.scale.set(s, s * grassRng.range(1, 1.5), s)
-        tuft.position.set(grassRng.range(-0.4, 0.4), s * 0.5, grassRng.range(-0.4, 0.4))
+      // Two to five blades, leaning different ways, in two dulled greens rather
+      // than one saturated tan. These were the only warm high-value thing on a
+      // green field, so they pulled the eye harder than dressing ever should.
+      for (let t = 0; t < grassRng.int(2, 5); t++) {
+        const tuft = new THREE.Mesh(tuftGeo, grassRng.chance(0.6) ? M.tuft : M.tuftPale)
+        const s = grassRng.range(0.42, 0.95)
+        tuft.scale.set(s * grassRng.range(0.7, 1.1), s * grassRng.range(1.1, 2.0), s)
+        tuft.position.set(grassRng.range(-0.5, 0.5), s * 0.5, grassRng.range(-0.5, 0.5))
+        tuft.rotation.set(
+          grassRng.range(-0.28, 0.28),
+          grassRng.range(0, Math.PI * 2),
+          grassRng.range(-0.28, 0.28),
+        )
         tuft.castShadow = true
         clump.add(tuft)
       }
@@ -826,6 +894,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         rock.receiveShadow = true
         group.add(rock)
         if (s > 1.2) {
+          occluders.push(occluder(rock, s * 0.9, s * 0.9))
           world.add({
             transform: { pos: new THREE.Vector3(x, heightAt(x, z) + s * 0.3, z), ry: 0 },
             mesh: rock,
@@ -902,6 +971,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     post.position.set(x, h, z)
     post.rotation.set(palRng.range(-0.05, 0.05), palRng.range(0, 3), palRng.range(-0.06, 0.06))
     group.add(post)
+    occluders.push(occluder(post, 0.42, height + 0.5))
 
     world.add({
       transform: { pos: new THREE.Vector3(x, h + height * 0.5, z), ry: 0 },
@@ -1003,6 +1073,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.add(leaf)
     g.position.set(0, gateH, PAL_Z)
     group.add(g)
+    occluders.push(occluder(g, 1.8, 3.9))
 
     world.add({
       transform: { pos: new THREE.Vector3(0, gateH + 1.3, PAL_Z), ry: 0 },
@@ -1031,6 +1102,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       rock.castShadow = true
       rock.receiveShadow = true
       group.add(rock)
+      occluders.push(occluder(rock, s * 0.9, s * 0.9))
 
       world.add({
         transform: { pos: new THREE.Vector3(x, h + s * 0.3, z), ry: 0 },
@@ -1166,14 +1238,25 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // the fence, the washing, the vegetables, the birds, and the mud.
   const homeRng = rng.fork('home')
 
-  /** A gable-roofed cottage with a stone footing, shutters and a door. */
-  function cottage(x: number, z: number, turn: number, w: number, dep: number, chimney: boolean): void {
+  /**
+   * The longhouse. One building, not a pair of matching boxes: it is long, it
+   * is the tallest thing at home, and it is the only one with a door.
+   *
+   * Four details do most of the work of stopping it reading as a printed
+   * carton. Notched log ends at every corner, so the walls are built out of
+   * something. A near-black doorway with a warm sliver behind it, so there is
+   * an inside. A painted shadow band under the eave, because at this pitch the
+   * overhang's real shadow lands on the ground rather than on the wall. And
+   * horizontal battens across the thatch, which is what stops the straw texture
+   * reading as a checked tablecloth.
+   */
+  function longhouse(x: number, z: number, turn: number, w: number, dep: number): void {
     const h = heightAt(x, z)
     const g = new THREE.Group()
-    const wallH = 2.05
+    const wallH = 2.35
 
-    const footing = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.26, dep + 0.3), M.rubbleWall)
-    footing.position.y = 0.13
+    const footing = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.3, dep + 0.3), M.rubbleWall)
+    footing.position.y = 0.15
     footing.castShadow = true
     footing.receiveShadow = true
     g.add(footing)
@@ -1184,14 +1267,33 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     walls.receiveShadow = true
     g.add(walls)
 
+    // Notched log ends. Six short cylinders per corner, alternating which axis
+    // they run along, exactly as a corner-notched log wall stacks.
+    const endGeo = new THREE.CylinderGeometry(0.14, 0.15, 0.5, 7).rotateZ(Math.PI / 2)
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        for (let i = 0; i < 6; i++) {
+          const end = new THREE.Mesh(endGeo, M.log)
+          const y = 0.42 + i * 0.34
+          if (i % 2 === 0) end.position.set((sx * w) / 2 + sx * 0.12, y, (sz * dep) / 2 - sz * 0.16)
+          else {
+            end.rotation.y = Math.PI / 2
+            end.position.set((sx * w) / 2 - sx * 0.16, y, (sz * dep) / 2 + sz * 0.12)
+          }
+          end.castShadow = true
+          g.add(end)
+        }
+      }
+    }
+
     // The ridge runs along X, so the roof slopes in Z and the triangular gable
     // ends are the walls at x = +-w/2. Stepped rather than triangular: a real
-    // triangle needs its own UVs, and four boxes read the same at this size.
-    const pitch = 0.62
+    // triangle needs its own UVs, and five boxes read the same at this size.
+    const pitch = 0.76
     const eave = 0.3 + wallH
-    const run = dep / 2 + 0.42
+    const run = dep / 2 + 0.5
     const ridge = eave + run * Math.tan(pitch)
-    const steps = 4
+    const steps = 5
     for (const sx of [-1, 1]) {
       for (let i = 0; i < steps; i++) {
         const f = 1 - (i + 0.5) / steps
@@ -1212,60 +1314,173 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       half.castShadow = true
       half.receiveShadow = true
       g.add(half)
+
+      // Battens: thatch is laid in courses and pinned, and the horizontal lines
+      // are what tell you the strands run down-slope.
+      for (let i = 1; i <= 3; i++) {
+        const t = i / 4
+        const batten = new THREE.Mesh(new THREE.BoxGeometry(w + 0.74, 0.07, 0.09), M.plankDark)
+        batten.position.set(
+          0,
+          eave + (ridge - eave) * t + 0.11 * Math.cos(pitch),
+          sz * (run * (1 - t) + 0.11 * Math.sin(pitch)),
+        )
+        g.add(batten)
+      }
+
+      // A ragged, darker eave edge, and the shadow it should be throwing.
+      const edge = new THREE.Mesh(new THREE.BoxGeometry(w + 0.72, 0.2, 0.14), M.thatchOld)
+      edge.position.set(0, eave - 0.02, sz * run)
+      edge.rotation.x = sz * pitch
+      g.add(edge)
+
+      const band = new THREE.Mesh(new THREE.BoxGeometry(w - 0.05, 0.34, 0.04), M.eaveShade)
+      band.position.set(0, eave - 0.22, (sz * dep) / 2 + sz * 0.03)
+      g.add(band)
     }
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, 0.2, 0.36), M.thatchOld)
+
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, 0.24, 0.4), M.thatchOld)
     cap.position.y = ridge + 0.02
     cap.castShadow = true
     g.add(cap)
 
-    const doorFrame = new THREE.Mesh(new THREE.BoxGeometry(0.86, 1.3, 0.09), M.plankDark)
-    doorFrame.position.set(-w * 0.18, 0.95, dep / 2 + 0.05)
-    g.add(doorFrame)
-    const door = new THREE.Mesh(new THREE.BoxGeometry(0.66, 1.16, 0.1), M.log)
-    door.position.set(-w * 0.18, 0.92, dep / 2 + 0.09)
-    g.add(door)
+    // The doorway. Near black, with one warm plane behind it: somebody is in.
+    const doorX = -w * 0.24
+    const opening = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.55, 0.16), M.doorway)
+    opening.position.set(doorX, 1.05, dep / 2 + 0.02)
+    g.add(opening)
+    const inside = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.66, 1.2),
+      toonUnique({ color: 0xff9a48, emissive: new THREE.Color(0xff7a2a), emissiveIntensity: 0.55 }),
+    )
+    inside.position.set(doorX, 0.92, dep / 2 + 0.045)
+    g.add(inside)
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.18, 0.26), M.log)
+    lintel.position.set(doorX, 1.92, dep / 2 + 0.06)
+    lintel.castShadow = true
+    g.add(lintel)
+    // The leaf, standing open against the wall beside it.
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.5, 0.1), M.plankDark)
+    leaf.position.set(doorX + 0.82, 1.05, dep / 2 + 0.32)
+    leaf.rotation.y = -0.75
+    leaf.castShadow = true
+    g.add(leaf)
+    const stepStone = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.16, 0.55), M.rubbleWall)
+    stepStone.position.set(doorX, 0.08, dep / 2 + 0.42)
+    stepStone.receiveShadow = true
+    g.add(stepStone)
 
-    const win = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.44, 0.08), toonUnique({ color: 0x2b2118 }))
-    win.position.set(w * 0.26, 1.32, dep / 2 + 0.06)
-    g.add(win)
-    for (const s of [-1, 1]) {
-      const shutter = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.5, 0.07), M.plankDark)
-      shutter.position.set(w * 0.26 + s * 0.38, 1.32, dep / 2 + 0.08)
-      shutter.rotation.y = s * 0.4
-      g.add(shutter)
+    for (const wx of [w * 0.24, -w * 0.42]) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.46, 0.08), M.doorway)
+      win.position.set(wx, 1.6, dep / 2 + 0.05)
+      g.add(win)
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.08, 0.16), M.log)
+      sill.position.set(wx, 1.34, dep / 2 + 0.08)
+      g.add(sill)
+      for (const s of [-1, 1]) {
+        const shutter = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.52, 0.07), M.plankDark)
+        shutter.position.set(wx + s * 0.4, 1.6, dep / 2 + 0.08)
+        shutter.rotation.y = s * 0.4
+        g.add(shutter)
+      }
     }
 
-    if (chimney) {
-      const cx = -w / 2 - 0.16
-      const top = ridge + 0.55
-      const stack = new THREE.Mesh(new THREE.BoxGeometry(0.66, top, 0.7), M.stone)
-      stack.position.set(cx, top / 2, 0)
-      stack.castShadow = true
-      g.add(stack)
-      const crown = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.22, 0.88), M.stoneDark)
-      crown.position.set(cx, top + 0.1, 0)
-      crown.castShadow = true
-      g.add(crown)
-      // No smoke plume. A static one reads as three grey boxes hanging in the
-      // air, and it cannot be animated from here: this file builds the scene
-      // and never gets a tick. It belongs with the flame visuals or nowhere.
-    }
+    const cx = -w / 2 - 0.18
+    const top = ridge + 0.6
+    const stack = new THREE.Mesh(new THREE.BoxGeometry(0.7, top, 0.74), M.rubbleWall)
+    stack.position.set(cx, top / 2, 0)
+    stack.castShadow = true
+    g.add(stack)
+    const crown = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.24, 0.94), M.stoneDark)
+    crown.position.set(cx, top + 0.11, 0)
+    crown.castShadow = true
+    g.add(crown)
 
     g.position.set(x, h, z)
     g.rotation.y = turn
     group.add(g)
+    occluders.push(occluder(g, Math.max(w, dep) * 0.62, ridge + 0.9))
 
     world.add({
       transform: { pos: new THREE.Vector3(x, h + 0.9, z), ry: turn },
       mesh: g,
       label: 'Home',
       props: { WOODEN: 0.8, FLAMMABLE: 0.3, RIGID: 0.9 },
-      blocker: { radius: Math.max(w, dep) * 0.62 },
+      blocker: { radius: Math.max(w, dep) * 0.6 },
     })
   }
 
-  cottage(-4.8, 15.4, 0.22, 4.1, 3.2, true)
-  cottage(5.4, 15.8, -0.44, 3.3, 2.7, false)
+  /**
+   * The other building is not a second house. It is a low open-sided shed:
+   * four posts, a mono-pitch roof, one half wall, and everything that lives
+   * outdoors stacked underneath it. Two identical huts read as a diorama; a
+   * house and the shed it needs read as a holding.
+   */
+  function shed(x: number, z: number, turn: number, w: number, dep: number): void {
+    const h = heightAt(x, z)
+    const g = new THREE.Group()
+    const front = 1.75
+    const back = 2.5
+
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const tall = sz < 0 ? back : front
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.14, tall, 7), M.log)
+        post.position.set((sx * w) / 2, tall / 2, (sz * dep) / 2)
+        post.castShadow = true
+        g.add(post)
+      }
+    }
+
+    // Half wall along the high side, where the weather comes from.
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, 1.5, 0.14), M.plank)
+    backWall.position.set(0, 0.75, -dep / 2)
+    backWall.castShadow = true
+    backWall.receiveShadow = true
+    g.add(backWall)
+    for (let i = 0; i < 4; i++) {
+      const board = new THREE.Mesh(new THREE.BoxGeometry(w + 0.24, 0.1, 0.06), M.plankDark)
+      board.position.set(0, 0.3 + i * 0.42, -dep / 2 - 0.09)
+      g.add(board)
+    }
+
+    const rise = back - front
+    const slopeLen = Math.hypot(dep + 0.6, rise)
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.7, 0.16, slopeLen), M.thatchOld)
+    roof.position.set(0, (front + back) / 2 + 0.12, 0)
+    roof.rotation.x = -Math.atan2(rise, dep + 0.6)
+    roof.castShadow = true
+    roof.receiveShadow = true
+    g.add(roof)
+    for (let i = 1; i <= 2; i++) {
+      const batten = new THREE.Mesh(new THREE.BoxGeometry(w + 0.74, 0.06, 0.08), M.plankDark)
+      batten.position.set(0, (front + back) / 2 + 0.2 + (i - 1.5) * rise * 0.5, (i - 1.5) * dep * 0.7)
+      batten.rotation.x = -Math.atan2(rise, dep + 0.6)
+      g.add(batten)
+    }
+
+    // A shelf along the back wall, which is where a jar of something ends up.
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(w - 0.3, 0.08, 0.42), M.plank)
+    shelf.position.set(0, 1.15, -dep / 2 + 0.28)
+    shelf.castShadow = true
+    g.add(shelf)
+
+    g.position.set(x, h, z)
+    g.rotation.y = turn
+    group.add(g)
+    occluders.push(occluder(g, Math.max(w, dep) * 0.5, back + 0.4))
+
+    world.add({
+      transform: { pos: new THREE.Vector3(x, h + 0.8, z), ry: turn },
+      mesh: g,
+      label: 'The shed',
+      props: { WOODEN: 0.9, FLAMMABLE: 0.45, RIGID: 0.8 },
+      blocker: { radius: Math.max(w, dep) * 0.5 },
+    })
+  }
+
+  longhouse(-4.9, 15.5, 0.22, 5.4, 3.3)
+  shed(6.0, 15.6, -0.38, 3.4, 2.6)
 
   /** The hearth. Always lit, never consumed. */
   {
@@ -1286,18 +1501,46 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       group.add(st)
     }
 
+    // A dark bowl first, so the glow sits down inside something. A bright disc
+    // laid flat on the grass is a puddle of paint; ash around it and charred
+    // wood over it is what makes it a fire that has been burning a while.
+    const bowl = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.86, 0.62, 0.34, 14, 1, true),
+      toonUnique({ color: 0x2a231c, map: tiled(tex.stone, 1.6, 1.6), side: THREE.BackSide }),
+    )
+    bowl.position.set(hx, h - 0.02, hz)
+    group.add(bowl)
+
+    const ash = new THREE.Mesh(
+      new THREE.CircleGeometry(0.84, 14).rotateX(-Math.PI / 2),
+      toonUnique({ color: 0x3b332b, map: tiled(tex.stone, 1.8, 1.8) }),
+    )
+    ash.position.set(hx, h - 0.03, hz)
+    group.add(ash)
+
     const coals = new THREE.Mesh(
-      new THREE.CircleGeometry(0.66, 12).rotateX(-Math.PI / 2),
+      new THREE.CircleGeometry(0.56, 12).rotateX(-Math.PI / 2),
       toonUnique({ map: tiled(tex.ember, 1.2, 1.2), emissive: new THREE.Color(0xff5a1a), emissiveIntensity: 0.9 }),
     )
-    coals.position.set(hx, h + 0.12, hz)
+    coals.position.set(hx, h - 0.08, hz)
     group.add(coals)
 
-    // Half-burnt logs across the coals.
-    for (let i = 0; i < 3; i++) {
-      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 1.1, 6), M.log)
-      log.rotation.set(Math.PI / 2, 0, (i / 3) * Math.PI + 0.3)
-      log.position.set(hx + homeRng.range(-0.2, 0.2), h + 0.18, hz + homeRng.range(-0.2, 0.2))
+    // Charred logs laid across the pit, burnt through in the middle. The tint
+    // runs from bark at the ends to near black where they cross the coals.
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI + homeRng.range(-0.2, 0.2)
+      const burnt = i % 2 === 0
+      const log = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.085, 0.11, homeRng.range(0.95, 1.35), 6),
+        burnt ? M.charred : M.log,
+      )
+      log.rotation.set(Math.PI / 2, 0, a)
+      log.position.set(
+        hx + Math.cos(a + 1.57) * homeRng.range(0, 0.22),
+        h + 0.06 + homeRng.range(0, 0.11),
+        hz + Math.sin(a + 1.57) * homeRng.range(0, 0.22),
+      )
+      log.rotation.x = Math.PI / 2 + homeRng.range(-0.12, 0.12)
       log.castShadow = true
       group.add(log)
     }
@@ -1322,19 +1565,23 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     tri.position.set(hx, h, hz)
     group.add(tri)
 
-    const glow = new THREE.PointLight(0xff8a3d, 9, 9, 2)
-    glow.position.set(hx, h + 0.7, hz)
-    group.add(glow)
-
-    // Log seats, worn smooth.
-    for (const [dx, dz, ry] of [
-      [1.5, 0.9, 0.5],
-      [-1.4, 1.2, -0.8],
+    // Log seats, worn smooth and bedded into the ground rather than resting on
+    // it. Anything cylindrical sitting exactly tangent to the terrain reads as
+    // a prop dropped in from a menu.
+    for (const [dx, dz, ry, len, rad] of [
+      [1.55, 0.95, 0.5, 1.6, 0.3],
+      [-1.35, 1.25, -0.86, 1.15, 0.26],
     ] as const) {
-      const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.32, 1.5, 9).rotateZ(Math.PI / 2), M.log)
-      seat.position.set(hx + dx, h + 0.3, hz + dz)
-      seat.rotation.y = ry
+      const seat = new THREE.Mesh(
+        new THREE.CylinderGeometry(rad, rad * 1.08, len, 9).rotateZ(Math.PI / 2),
+        M.log,
+      )
+      const sx = hx + dx
+      const sz = hz + dz
+      seat.position.set(sx, heightAt(sx, sz) + rad * 0.72, sz)
+      seat.rotation.set(homeRng.range(-0.05, 0.05), ry, homeRng.range(-0.06, 0.06))
       seat.castShadow = true
+      seat.receiveShadow = true
       group.add(seat)
     }
 
@@ -1859,24 +2106,125 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
   }
 
+  // ------------------------------------------------------------ occlusion
+  /**
+   * Ghost anything standing between the camera and the player.
+   *
+   * Everything is done in camera space, where the test is exact and costs two
+   * vector transforms per candidate: an occluder hides the player when it is
+   * nearer the camera in view depth, overlaps him horizontally within its own
+   * radius, and its vertical span crosses his. The projection is orthographic,
+   * so world size maps to view size one to one and there is no perspective term
+   * to worry about. No raycast, no bounding-box rebuild, nothing per-frame that
+   * allocates.
+   *
+   * Materials are shared through the toon cache, so writing opacity onto one
+   * tree's material would fade every tree in the region. Each occluder gets its
+   * own clones, made the first time it actually needs to fade and kept
+   * afterwards. Most never fade, so this stays close to free.
+   */
+  const viewPlayer = new THREE.Vector3()
+  const viewObject = new THREE.Vector3()
+
+  function fadeOccluders(playerPos: THREE.Vector3, camera: THREE.Camera, dt: number): void {
+    viewPlayer.copy(playerPos).applyMatrix4(camera.matrixWorldInverse)
+    // The player is about 1.7 tall; test against his middle and his head.
+    const headY = viewPlayer.y + 1.4 * 0.816
+
+    for (const o of occluders) {
+      o.object.getWorldPosition(viewObject).applyMatrix4(camera.matrixWorldInverse)
+
+      // View space looks down -z, so a larger z is nearer the camera. Half the
+      // object's height is added because a world-vertical leans toward the
+      // camera under this projection: a trunk's base can be behind the player
+      // while its canopy is squarely in front of him.
+      const nearer = viewObject.z + o.top * 0.29 > viewPlayer.z + 0.4
+      const across = Math.abs(viewObject.x - viewPlayer.x) < o.radius + 0.45
+      const spans = viewObject.y < headY + 0.3 && viewObject.y + o.top * 0.816 > viewPlayer.y
+      const hiding = nearer && across && spans
+
+      const target = hiding ? FADE_TO : 1
+      if (o.opacity === target) continue
+
+      const rate = hiding ? FADE_IN_RATE : FADE_OUT_RATE
+      const step = rate * dt
+      o.opacity =
+        Math.abs(target - o.opacity) <= step ? target : o.opacity + Math.sign(target - o.opacity) * step
+
+      if (!o.faded) {
+        o.faded = []
+        o.object.traverse((child) => {
+          const mesh = child as THREE.Mesh
+          if (!mesh.isMesh) return
+          const solid = mesh.material as THREE.Material
+          const ghost = (solid as THREE.MeshToonMaterial).clone()
+          ghost.transparent = true
+          ghost.depthWrite = false
+          o.faded!.push({ mesh, solid, ghost })
+        })
+      }
+
+      const solid = o.opacity > 0.995
+      for (const f of o.faded) {
+        if (solid) {
+          f.mesh.material = f.solid
+        } else {
+          f.ghost.opacity = o.opacity
+          f.mesh.material = f.ghost
+        }
+      }
+    }
+  }
+
   // ----------------------------------------------------------------- items
   // Ten items, placed by hand, every one of them somewhere a person would have
   // left it or lost it: on the track, at the block, by the water. All outside
   // the yard fence, and all clear of blockers.
-  const layout: [string, number, number][] = [
-    ['torch', 1.5, 8.2],
-    ['flint', 4.9, 5.2],
-    ['horseshoe', -1.1, 3.4],
-    ['straw', -6.6, 9.5],
-    ['rope', -7.7, 9.9],
-    ['bucket', -6.2, 4.3],
-    ['plank', -14.0, -1.2],
-    ['oil', 6.2, 1.0],
-    ['apple', 9.4, 6.2],
-    ['axe', 10.0, 12.1],
-  ]
+  const PLACED: Record<string, [number, number]> = {
+    torch: [1.5, 8.2],
+    flint: [4.9, 5.2],
+    horseshoe: [-1.1, 3.4],
+    straw: [-6.6, 9.5],
+    rope: [-7.7, 9.9],
+    bucket: [-6.2, 4.3],
+    plank: [-14.0, -1.2],
+    oil: [6.2, 1.0],
+    apple: [9.4, 6.2],
+    axe: [10.0, 12.1],
 
+    // On the verge of the main track, within sight of the yard gate. Whatever
+    // else a player does in the first minute, they walk past this.
+    rock: [2.4, 6.8],
+    // On the bench outside the fence, where somebody sat down and forgot them.
+    glasses: [3.25, 8.15],
+    // In the bed outside the fence, with the rest of what grows there.
+    chili: [-3.6, 8.0],
+    // By the chopping block, with the axe.
+    knife: [8.6, 12.8],
+    // On the shed shelf, which is where a jar you do not want indoors goes.
+    poison: [11.6, 13.6],
+    // Dropped at the water's edge and never found. Not near any door.
+    key: [-9.2, 1.2],
+    // Well into the west wood, off every track. The one thing in Band 0 worth
+    // going to look for rather than tripping over.
+    sword: [-13.4, -8.6],
+  }
+
+  /**
+   * Iterating the catalog rather than a literal list, so an item added to Band
+   * 0 cannot silently fail to exist in the world. Positions stay hand-authored;
+   * anything without one lands on the verge of the main track, which is ugly
+   * and obvious, which is the point.
+   */
   const itemRng = rng.fork('items')
+  let spare = 0
+  const layout: [string, number, number][] = STARTING_ITEMS.map((id) => {
+    const at = PLACED[id]
+    if (at) return [id, at[0], at[1]]
+    spare++
+    return [id, 1.9 + spare * 0.55, 4.6 - spare * 0.35]
+  })
+
   for (const [id, x, z] of layout) {
     const def = CATALOG[id]
     if (!def) continue
@@ -1902,5 +2250,6 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     heightAt,
     playerStart: new THREE.Vector3(0.8, heightAt(0.8, 10.8), 10.8),
     gate: new THREE.Vector3(0, gateH, PAL_Z),
+    fadeOccluders,
   }
 }

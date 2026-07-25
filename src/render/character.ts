@@ -232,7 +232,9 @@ export class Character {
     this.root.add(this.hips, this.chest)
 
     // TEMP-VALUE-PROBE
-    ;(window as unknown as { __charGroup?: THREE.Group }).__charGroup = this.group
+    const probe = window as unknown as { __charGroup?: THREE.Group; __hideChar?: boolean }
+    probe.__charGroup = this.group
+    if (probe.__hideChar) this.group.visible = false
 
     this.buildLegs()
     this.buildTorso()

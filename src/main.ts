@@ -110,7 +110,7 @@ scene.add(new THREE.HemisphereLight(BAND0.skyLight, BAND0.groundLight, 0.78))
 // Sun azimuth must differ from the camera's, or shadows hide behind their own
 // casters and read as broken. `iso.sunOffset()` owns that now, at every camera
 // angle rather than only the starting one. (DECISIONS D9)
-const sun = new THREE.DirectionalLight(new THREE.Color(BAND0.sun).lerp(new THREE.Color(0xffc46a), 0.5), 3.6)
+const sun = new THREE.DirectionalLight(new THREE.Color(BAND0.sun).lerp(new THREE.Color(0xffc46a), 0.34), 3.6)
 sun.castShadow = true
 
 /**
@@ -136,7 +136,7 @@ sc.far = SUN_REACH + SHADOW_EXTENT + 12
 sc.updateProjectionMatrix()
 scene.add(sun, sun.target)
 
-const fill = new THREE.DirectionalLight(new THREE.Color(BAND0.skyLight).lerp(new THREE.Color(0x3f6fc0), 0.6), 0.5)
+const fill = new THREE.DirectionalLight(new THREE.Color(BAND0.skyLight).lerp(new THREE.Color(0x3f6fc0), 0.72), 0.62)
 scene.add(fill, fill.target)
 
 const sunOffset = new THREE.Vector3()
@@ -543,9 +543,30 @@ function groundEverything(): void {
     blobs.delete(e)
   }
 
+  if (!first) return
+
   // Parented to the character rather than moved each frame: the group already
   // sits at the player's feet, so following is free and cannot drift.
-  if (first) character.group.add(groundBlob(0.6, 0.62))
+  character.group.add(groundBlob(0.6, 0.62))
+
+  /**
+   * A small key light that rides with the player.
+   *
+   * The readability test for this frame is "find the character in a greyscale
+   * version", and the character kept failing it: a red tunic sits at the same
+   * value as grass in shade, so a figure standing in front of a hedge simply
+   * disappears. The thick outline and the contact shadow give it the darkest
+   * value in its own neighbourhood; this gives it the lightest, which is what
+   * the value plan actually asks for.
+   *
+   * Tight on purpose. decay 1.5 over 3 metres means it lifts the character and
+   * the ground at its feet and reaches nothing else, so it reads as the eye
+   * being drawn rather than as a lantern being carried. It also feeds the rim
+   * term in the toon shader, which is where most of the effect ends up.
+   */
+  const key = new THREE.PointLight(0xfff0dc, 0.72, 2.7, 1.5)
+  key.position.set(0, 1.1, 0)
+  character.group.add(key)
 }
 
 // ---------------------------------------------------------------- interaction
@@ -794,9 +815,13 @@ function handleInput(): void {
 
 let crossed = false
 
+/** Scratch, because `movePlayer` runs on every fixed tick and the budget in
+ *  docs/PERFORMANCE.md asks for no allocation in the loop. */
+const wish = new THREE.Vector3()
+
 function movePlayer(): void {
   const { forward, right } = iso.screenBasis()
-  const wish = new THREE.Vector3()
+  wish.set(0, 0, 0)
   if (keys.has('w')) wish.add(forward)
   if (keys.has('s')) wish.sub(forward)
   if (keys.has('d')) wish.add(right)
@@ -884,6 +909,11 @@ function syncMeshes(dt: number): void {
   iso.update()
 
   groundEverything()
+  // Ghost whatever is standing between the camera and the player. Camera
+  // rotation is unbound, so there is no longer a keypress that gets you a
+  // second look at something a trunk is covering.
+  region.fadeOccluders(player.pos, iso.camera, dt)
+
   syncFireVisuals()
   placeLights()
   syncBufferSize()

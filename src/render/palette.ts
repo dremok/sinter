@@ -49,8 +49,16 @@
 
 /** Dark to light. Index 0 is deepest shadow, the last index is full sunlight. */
 export const RAMP = {
-  /** Field grass. Olive-sage, ~32-40% saturation, spanning 3.6:1 in value. */
-  grass: ['#28301d', '#374227', '#4a5834', '#617043', '#7c8c59', '#9cab75'],
+  /**
+   * Field grass. Olive-sage, spanning 3.5:1 in value.
+   *
+   * Saturation genuinely peaks in the middle here: 27% at the shadow end, 39%
+   * at step 2, 20% at the top. The first attempt held ~35% all the way up, and
+   * a 2.1-intensity warm sun on a saturated light green came out acid lime
+   * across every lit slope. The top step has to be sun-bleached, not just
+   * bright, or the brightest thing in the frame is the backdrop.
+   */
+  grass: ['#2b3124', '#39432a', '#4b5836', '#5f6f45', '#7b8a5f', '#9ca887'],
   /** Bare soil. Warmer and redder than bark, so worn ground reads as earth. */
   dirt: ['#352a1c', '#473828', '#5a4835', '#705843', '#876c53', '#9e8267'],
   /**
@@ -113,7 +121,7 @@ export const BAND0 = {
 
   // Sampled off RAMP.grass. Reference values for anything needing a flat green;
   // the ground itself is textured.
-  grass: [0x617043, 0x4a5834, 0x7c8c59, 0x374227],
+  grass: [0x5f6f45, 0x4b5836, 0x7b8a5f, 0x39432a],
   dirt: 0x705843,
   sand: 0xa08c68,
   rock: 0x7c7e77,

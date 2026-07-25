@@ -244,6 +244,24 @@ function normalized(f: (u: number, v: number) => number): (u: number, v: number)
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
 const dither = (x: number, y: number) => (BAYER[(y & 3) * 4 + (x & 3)]! + 0.5) / 16
 
+/**
+ * A second dither threshold, hashed from the position instead of tabled.
+ *
+ * Bayer is right for a hard boundary a few texels wide, and wrong for a slow
+ * gradient across a whole tile: over a large area where the value sits near
+ * halfway between two ramp steps, a 4x4 matrix resolves into a visible
+ * crosshatch, and a screen door over the ground is the same defect as speckle.
+ * A hash gives an irregular stipple that never organises into a grid.
+ *
+ * Deterministic and independent of the seeded stream, so calling it does not
+ * shift any later rng draw.
+ */
+function hashDither(x: number, y: number): number {
+  let h = (Math.round(x) * 374761393 + Math.round(y) * 668265263) | 0
+  h = Math.imul(h ^ (h >>> 13), 1274126177) | 0
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296
+}
+
 /** Fill the tile with one colour. */
 function fill(put: Put, size: number, color: string): void {
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) put(x, y, color)
@@ -296,7 +314,14 @@ function stroke(
  */
 function ditherStep(put: Put, x: number, y: number, ramp: readonly string[], f: number): void {
   const lo = Math.floor(f)
-  put(x, y, tone(ramp, f - lo > dither(x, y) ? lo + 1 : lo))
+  const frac = f - lo
+  // Stipple only in the middle fifth of the gap between two steps. Dithering
+  // the whole gradient puts a texel of noise on every surface, which in a
+  // greyscale check reads as grain over the entire field; confining it to the
+  // boundary leaves four fifths of the ground genuinely flat and still avoids a
+  // hard contour line where one ramp step gives way to the next.
+  const t = frac < 0.4 ? 0 : frac > 0.6 ? 1 : (frac - 0.4) * 5
+  put(x, y, tone(ramp, t > hashDither(x, y) ? lo + 1 : lo))
 }
 
 // ---------------------------------------------------------------- generators
@@ -336,7 +361,7 @@ export const grass = (rng: Rng) =>
         } else {
           // The whole value range of the ramp, spent on one slow gradient.
           const dim = clamp(soil + 0.6, 0, 1) * 1.4
-          ditherStep(put, x, y, RAMP.grass, clamp(0.9 + drift(u, v) * 3.4 - dim, 0, 4.9))
+          ditherStep(put, x, y, RAMP.grass, clamp(1.0 + drift(u, v) * 3.0 - dim, 0, 4.9))
         }
       }
     }
@@ -358,7 +383,10 @@ export const grass = (rng: Rng) =>
       put(x, y, tone(RAMP.grass, 1))
       for (let b = 0; b < blades; b++) {
         const a = aim + r.range(-1, 1)
-        stroke(put, x, y, Math.cos(a), Math.sin(a), r.int(3, 6), RAMP.grass, 2.4, 5)
+        // Tips stop a step short of the lightest green. At full brightness a
+        // field of these reads as confetti scattered over the ground rather
+        // than as plants growing out of it.
+        stroke(put, x, y, Math.cos(a), Math.sin(a), r.int(4, 7), RAMP.grass, 2.4, 4.2)
       }
     }
 
@@ -439,8 +467,8 @@ export const water = (rng: Rng) =>
       for (let x = 0; x < n; x++) {
         const u = x / n
         const band = ripple(u, v)
-        const idx = 3.6 + (band > 0.5 ? 1 : band > 0 ? 0 : band > -0.5 ? -0.9 : -1.8)
-        ditherStep(put, x, y, RAMP.water, clamp(idx - deep(u, v) * 1.4, 0, 4.9))
+        const idx = 4 + (band > 0.5 ? 1 : band > 0 ? 0 : band > -0.5 ? -1 : -2)
+        put(x, y, tone(RAMP.water, idx - Math.round(deep(u, v) * 1.4)))
       }
     }
 
@@ -576,7 +604,7 @@ export const stone = (rng: Rng) =>
         const up = wrapDelta(y - sy[hit]!, n) < 0
         let idx = base[hit]! + (up ? 1 : -1)
         if (edge < 0.9) idx = 0
-        else if (edge < 2.1) idx = up ? 5 : 1
+        else if (edge < 2.1) idx = up ? 4 : 1
         put(x, y, tone(RAMP.stone, idx))
       }
     }
@@ -662,6 +690,14 @@ export const straw = (rng: Rng) =>
         put(x, top, tone(RAMP.straw, 0))
         put(x, top + 1, tone(RAMP.straw, 1))
       }
+      // Then the cut stalk ends of the course above, overhanging that shadow at
+      // uneven lengths. A straight shadow line on its own reads as a board; the
+      // ragged fringe is the whole difference between thatch and siding.
+      for (let x = 0; x < n; x++) {
+        if (!r.chance(0.45)) continue
+        const over = r.int(1, 3)
+        for (let k = 0; k < over; k++) put(x, top + k, tone(RAMP.straw, 4))
+      }
       // Bold stalks, few of them, running down out of the shadow.
       for (let s = 0; s < 9; s++) {
         const x = r.int(0, n - 1)
@@ -697,7 +733,7 @@ export const cloth = (rng: Rng) =>
     const fold = normalized(fbm(r, 3))
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
-        ditherStep(put, x, y, RAMP.cloth, 2 + fold(x / n, y / n) * 2.2)
+        put(x, y, tone(RAMP.cloth, 2 + Math.round(fold(x / n, y / n) * 2)))
       }
     }
     // Weave: one darker thread every four texels, in one direction only. Two

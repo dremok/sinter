@@ -271,6 +271,35 @@ def arc_frames(radius, a0, a1, steps, z=0.0, closed=False):
     return out
 
 
+def arc_frames_xz(radius, a0, a1, steps, centre=(0.0, 0.0, 0.0), closed=False):
+    """Frames around a circular arc standing in the XZ plane, so a hoop faces
+    along Y. Spectacle rims and a key's bow are both rings seen face on, and
+    face on for those means facing the way the item is looked at."""
+    out = []
+    span = steps if closed else max(steps - 1, 1)
+    cx, cy, cz = centre
+    for i in range(steps):
+        t = i / span
+        a = a0 + (a1 - a0) * t
+        c, s = math.cos(a), math.sin(a)
+        out.append((Vector((cx + radius * c, cy, cz + radius * s)),
+                    Vector((c, 0.0, s)), Vector((0.0, 1.0, 0.0)), t))
+    return out
+
+
+def bm_rot_x_up(bm):
+    """Stand an X-aligned build upright: +X becomes +Z. A proper rotation about
+    Y rather than an axis swap, so winding survives."""
+    for v in bm.verts:
+        v.co = Vector((-v.co.z, v.co.y, v.co.x))
+
+
+def bm_rot_z_forward(bm):
+    """Lay a Z-aligned build on its face: +Z becomes +Y."""
+    for v in bm.verts:
+        v.co = Vector((v.co.x, v.co.z, -v.co.y))
+
+
 def bm_box(bm, lo, hi):
     """An axis aligned box. Used where a box is honestly the right answer, which
     is mostly crate framing."""
@@ -343,6 +372,47 @@ def blade_section(x, z0, z1, half_t, fullness=0.0, bow=0.0, fullness_lo=None, fl
         (bx(zm), half_t, zm),
         (bx(zq_hi), q_hi, zq_hi),
         (bx(z1), t_hi, z1),
+    ]
+
+
+def sword_section(x, z0, z1, half_t, fuller=0.0, floor=0.0011):
+    """
+    Sixteen point section for a DOUBLE edged blade, in the YZ plane.
+
+    `blade_section` will not do here. An axe has one edge at the far end and
+    blunt rims top and bottom, so it wants a high fullness; a sword is sharp at
+    z0 AND z1 and flat in between. So this comes to nothing at both ends, with
+    the faces running parallel from a quarter of the way in, which is what a
+    ground bevel actually looks like.
+
+    `fuller` sinks a groove down the middle of each face. That groove is most of
+    why a sword reads as a sword rather than as a very long knife: it splits
+    each face into three bands under the cel ramp, and the bands run the whole
+    length, so the eye gets a line to follow.
+    """
+    h = z1 - z0
+    zm = 0.5 * (z0 + z1)
+    fh = 0.21 * h
+    t = max(half_t, floor)
+    fd = max(t - fuller, floor * 0.6)
+    e = floor
+    return [
+        (x, -e, z1),
+        (x, -t * 0.5, z1 - h * 0.11),
+        (x, -t, z1 - h * 0.26),
+        (x, -fd, zm + fh),
+        (x, -fd, zm - fh),
+        (x, -t, z0 + h * 0.26),
+        (x, -t * 0.5, z0 + h * 0.11),
+        (x, -e, z0),
+        (x, e, z0),
+        (x, t * 0.5, z0 + h * 0.11),
+        (x, t, z0 + h * 0.26),
+        (x, fd, zm - fh),
+        (x, fd, zm + fh),
+        (x, t, z1 - h * 0.26),
+        (x, t * 0.5, z1 - h * 0.11),
+        (x, e, z1),
     ]
 
 
@@ -1053,6 +1123,332 @@ def make_bar():
     socket(o, "socket_tip", (0.15, 0, 0))
 
 
+# ------------------------------------------------------------------ the hilt
+#
+# Everything from here down was authored for items the catalog was building out
+# of whatever came closest: a sword made from a knife and a coin, spectacles
+# made from two barrel hoops, a key made from a bar and a nail. The parts above
+# are generic and get reused across bands; these are specific, because the
+# things they are for are specific and were reading as the wrong object.
+#
+# The sword is authored along Z rather than X, unlike `blade_axe` and
+# `blade_knife`. Those hang off a haft that crosses them, so their length is a
+# reach outward; a sword IS its own vertical, and a hilt stacks along it. The
+# loft is still built along X, because `sword_section` and the section machinery
+# work in the YZ plane, and then stood upright by `bm_rot_x_up`.
+
+
+def make_blade_sword():
+    """
+    A double edged blade with a fuller, a distal taper, and a point.
+
+    Origin at the shoulder, where the blade leaves the guard, with the blade
+    running up +Z. That is the attachment point, so a hilt assembles by stacking
+    downward from zero and nothing needs a fudge offset.
+
+    The distal taper matters as much as the profile taper. The blade narrows
+    from 96 to nothing in width, but it also thins from 23mm to 6mm in
+    thickness, and the two together are why the point looks like it was ground
+    rather than snapped off.
+    """
+    bm = bmesh.new()
+    #      along,   z0,     z1,   half_t, fuller
+    stations = [
+        (0.000, -0.050, 0.050, 0.0120, 0.0048),   # shoulder
+        (0.055, -0.049, 0.049, 0.0117, 0.0048),
+        (0.250, -0.046, 0.046, 0.0106, 0.0044),
+        (0.410, -0.042, 0.042, 0.0092, 0.0036),
+        (0.520, -0.035, 0.035, 0.0078, 0.0022),
+        (0.585, -0.025, 0.025, 0.0060, 0.0),      # the point begins
+        (0.625, -0.010, 0.010, 0.0034, 0.0),
+        (0.648, -0.002, 0.002, 0.0011, 0.0),      # point
+    ]
+    bm_loft(bm, [sword_section(*s) for s in stations])
+    bm_rot_x_up(bm)
+    o = emit(bm, "blade_sword", "none", bevel_width=0.003, bevel_segments=1)
+    socket(o, "socket_base", (0, 0, 0))
+    socket(o, "socket_tip", (0, 0, 0.648))
+
+
+def make_guard_cross():
+    """
+    A crossguard: a bar across the blade, swollen at the middle where the blade
+    passes through and swept down toward the grip at the tips.
+
+    The sweep is the whole point. A straight bar reads as the coin-on-a-stick it
+    is replacing; tips that drop toward the hand make a shallow V, and a V is a
+    shape nothing else in the catalog has.
+    """
+    bm = bmesh.new()
+    stations = [
+        (-0.118, 0.015, -0.034, 0.004, 0.55),
+        (-0.100, 0.019, -0.030, 0.013, 0.42),
+        (-0.054, 0.023, -0.021, 0.020, 0.30),
+        (-0.021, 0.031, -0.027, 0.033, 0.28),     # boss round the blade
+        (0.021, 0.031, -0.027, 0.033, 0.28),
+        (0.054, 0.023, -0.021, 0.020, 0.30),
+        (0.100, 0.019, -0.030, 0.013, 0.42),
+        (0.118, 0.015, -0.034, 0.004, 0.55),
+    ]
+    bm_loft(bm, [box_section(*s) for s in stations])
+    o = emit(bm, "guard_cross", "none", bevel_width=0.004)
+    socket(o, "socket_tip", (0, 0, 0.033))
+
+
+def make_grip_wrapped():
+    """
+    A leather-over-cord grip: waisted, with five wrap ridges.
+
+    Base anchored at the pommel end, so a hilt reads bottom up: pommel, grip,
+    guard, blade. The ridges are under two pixels on the ground and exist for
+    the inventory icon, which is where a player actually studies an item.
+    """
+    profile = [(0.0, 0.0), (0.0250, 0.004)]
+    for i in range(5):
+        z = 0.014 + i * 0.046
+        profile += [(0.0242, z), (0.0288, z + 0.022), (0.0242, z + 0.042)]
+    profile += [(0.0262, 0.250), (0.0224, 0.260), (0.0, 0.257)]
+
+    bm = bmesh.new()
+    bm_lathe(bm, profile, segments=9)
+    o = emit(bm, "grip_wrapped", "base", bevel_width=0.003, bevel_segments=1)
+    socket(o, "socket_tip", (0, 0, 0.260))
+
+
+def make_pommel_round():
+    """A faceted pommel, anchored at its TOP because that is where it meets the
+    grip. Small, but it stops the hilt ending in a flat cut."""
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, -0.054),
+        (0.021, -0.051),
+        (0.039, -0.038),
+        (0.048, -0.018),
+        (0.049, 0.002),
+        (0.041, 0.020),
+        (0.027, 0.032),
+        (0.021, 0.038),              # collar under the grip
+        (0.023, 0.046),
+        (0.0, 0.048),
+    ], segments=10)
+    emit(bm, "pommel_round", "top", bevel_width=0.003, bevel_segments=1)
+
+
+# ------------------------------------------------------------- the small things
+
+def make_spectacles_frame():
+    """
+    A whole wire frame: two rims, an arched bridge, two arms hooking down.
+
+    Deliberately one part rather than five. Spectacles are about 24 pixels wide
+    on the ground with a rim wire under two pixels thick, and at that size the
+    thing that reads is the RELATIONSHIP between the parts, two circles a fixed
+    distance apart joined across the top. Composing that from separate rims and
+    a bar in a recipe means the relationship depends on offsets being right to
+    the millimetre, and being wrong by a millimetre is the difference between
+    spectacles and some wire.
+
+    The lenses stay separate, because they are glass and the frame is steel and
+    material is chosen per part at assembly. Rims are centred at x = ±0.115,
+    which is where `lens_round` goes.
+
+    Built in the XZ plane so the frame faces along Y, with the arms sweeping
+    back in +Y.
+    """
+    bm = bmesh.new()
+    RIM_X, RIM_R, WIRE = 0.115, 0.085, 0.016
+
+    def wire_sec(i, t):
+        return [(WIRE * math.cos(2.0 * math.pi * k / 6),
+                 WIRE * math.sin(2.0 * math.pi * k / 6)) for k in range(6)]
+
+    for sx in (-1.0, 1.0):
+        bm_sweep(bm, arc_frames_xz(RIM_R, 0.0, 2.0 * math.pi, 12,
+                                   centre=(sx * RIM_X, 0.0, 0.0), closed=True),
+                 wire_sec, closed=True)
+
+    # Bridge, arched so it is not simply a bar between two rings.
+    bm_loft(bm, [box_section(*s) for s in (
+        (-0.044, 0.013, 0.004, 0.028, 0.40),
+        (-0.020, 0.013, 0.016, 0.040, 0.40),
+        (0.020, 0.013, 0.016, 0.040, 0.40),
+        (0.044, 0.013, 0.004, 0.028, 0.40),
+    )])
+
+    # Arms: back along +Y from the outer edge of each rim, then hooked down.
+    for sx in (-1.0, 1.0):
+        frames = []
+        steps = 6
+        for i in range(steps):
+            t = i / (steps - 1)
+            frames.append((Vector((sx * (RIM_X + RIM_R - 0.006 - 0.012 * t),
+                                   0.20 * t,
+                                   0.010 - 0.078 * t * t)),
+                           Vector((1.0, 0.0, 0.0)), Vector((0.0, 0.0, 1.0)), t))
+        bm_sweep(bm, frames, lambda i, t: [
+            (0.011 * math.cos(2.0 * math.pi * k / 6),
+             0.011 * math.sin(2.0 * math.pi * k / 6)) for k in range(6)])
+
+    emit(bm, "spectacles_frame", "none", bevel_width=0.002, bevel_segments=1)
+
+
+def make_lens_round():
+    """One spectacle lens. Faces along Y to match `spectacles_frame`, so the
+    recipe drops a pair at x = ±0.115 and they seat in the rims."""
+    bm = bmesh.new()
+    bm_lathe(bm, [
+        (0.0, -0.005),
+        (0.058, -0.006),
+        (0.072, -0.002),
+        (0.072, 0.002),
+        (0.058, 0.006),
+        (0.0, 0.005),
+    ], segments=14)
+    bm_rot_z_forward(bm)
+    emit(bm, "lens_round", "none", smooth=True, bevel_width=0.001, bevel_segments=1)
+
+
+def make_key_body():
+    """
+    A whole key: bow, collar, shank, and a bit with two wards.
+
+    One part, for the same reason as the spectacles and more so. This is the
+    flagship `noMerge` item and the player will look at it, but on the ground it
+    is about 28 pixels tall and 8 of those are the bow. A key is a glyph, and
+    the glyph is loop-on-top, straight shank, blocky foot to one side. Assembled
+    from three generic parts that glyph depends on three offsets agreeing; built
+    as one part it cannot come apart.
+
+    The wards are a slot cut between two teeth. At this size the slot is barely
+    over a pixel, which is enough: what it buys is that the foot is not a solid
+    rectangle, and a notched foot is the difference between a key and a hammer.
+    """
+    bm = bmesh.new()
+
+    # Shank, with a collar under the bow.
+    bm_lathe(bm, [
+        (0.0, 0.004),
+        (0.017, 0.0),
+        (0.018, 0.020),
+        (0.016, 0.120),
+        (0.016, 0.250),
+        (0.028, 0.262),              # collar
+        (0.027, 0.276),
+        (0.017, 0.286),
+        (0.016, 0.312),
+        (0.0, 0.316),
+    ], segments=9)
+
+    # Bit: a spine with two teeth, and the ward slot between them.
+    bm_box(bm, (0.012, -0.014, 0.006), (0.042, 0.014, 0.094))
+    bm_box(bm, (0.042, -0.013, 0.006), (0.108, 0.013, 0.034))
+    bm_box(bm, (0.042, -0.013, 0.058), (0.092, 0.013, 0.094))
+
+    # Bow: a ring standing in the XZ plane, so it reads as a loop face on.
+    bm_sweep(bm, arc_frames_xz(0.058, 0.0, 2.0 * math.pi, 14,
+                               centre=(0.0, 0.0, 0.372), closed=True),
+             lambda i, t: [(0.018 * math.cos(2.0 * math.pi * k / 6),
+                            0.018 * math.sin(2.0 * math.pi * k / 6)) for k in range(6)],
+             closed=True)
+
+    o = emit(bm, "key_body", "base", bevel_width=0.003, bevel_segments=1)
+    socket(o, "socket_tip", (0, 0, 0.448))
+
+
+def make_chili_pod():
+    """
+    A pod: fat at the shoulder, curving away, kinked near the tip.
+
+    Anchored at the TOP, where the stem joins, because that is the attachment
+    point and it makes a calyx trivial to place: the recipe puts the leaves at
+    the same height as the pod and they meet.
+
+    The curve is what separates this from a stretched apple, which is what the
+    catalog was using. A straight tapered cone reads as a carrot. The kink in
+    the last quarter is the detail that says the thing grew.
+    """
+    bm = bmesh.new()
+    radii = [0.026, 0.048, 0.056, 0.055, 0.049, 0.041, 0.031, 0.017, 0.004]
+    steps = len(radii)
+
+    frames = []
+    for i in range(steps):
+        t = i / (steps - 1)
+        kink = 0.9 * max(0.0, t - 0.72) ** 2
+        frames.append((Vector((0.062 * t * t + kink, 0.0, -0.300 * t)),
+                       Vector((1.0, 0.0, 0.0)), Vector((0.0, 1.0, 0.0)), t))
+
+    def sec(i, t):
+        r = radii[i]
+        pts = []
+        for k in range(8):
+            a = 2.0 * math.pi * k / 8
+            rr = r * (1.0 + 0.11 * math.cos(3.0 * a))
+            pts.append((rr * math.cos(a), rr * math.sin(a)))
+        return pts
+
+    bm_sweep(bm, frames, sec)
+    o = emit(bm, "chili_pod", "top", bevel_width=0.003, bevel_segments=1)
+    socket(o, "socket_base", (0, 0, 0))
+
+
+def make_stone_lump():
+    """
+    A boulder, as opposed to `stone_shard`, which is a struck flake.
+
+    The catalog was building a rock out of two shards at different scales, so a
+    rock and a flint were the same object twice. This is the opposite form on
+    purpose: roughly equidimensional instead of wedged, many small facets
+    instead of a few big ones, and flattened underneath so it sits on the ground
+    rather than balancing on a corner.
+    """
+    bm = bmesh.new()
+    rng = _Lcg(97)
+    for _ in range(22):
+        u = rng.next() * 2.0 - 1.0
+        v = rng.next() * 2.0 - 1.0
+        w = rng.next() * 2.0 - 1.0
+        n = max(math.sqrt(u * u + v * v + w * w), 1e-4)
+        # Push out to a shell so the hull gets facets all round rather than a
+        # few big ones spanning an empty middle.
+        k = (0.72 + 0.28 * rng.next()) / n
+        bm.verts.new((u * k * 0.132, v * k * 0.118, max(w * k * 0.104, -0.052)))
+    bmesh.ops.convex_hull(bm, input=bm.verts)
+    emit(bm, "stone_lump", "base", bevel_width=0.004)
+
+
+def make_phial_ribbed():
+    """
+    A ribbed hexagonal phial, for things that are not to be drunk.
+
+    Poison bottles were made ribbed and angular by law so they could be told
+    from medicine by touch in the dark. That is exactly the problem here, minus
+    the dark: the item cannot carry a label at nineteen pixels, so the warning
+    has to be in the shape. Set against the flask, which is a wide flattened
+    bulb, this is a narrow upright column with six hard ribs and a mean little
+    neck, and the pair are never confusable.
+    """
+    bm = bmesh.new()
+    rib = 0.009
+    bm_lathe(bm, [
+        (0.0, 0.0),
+        (0.050, 0.0, rib),
+        (0.057, 0.014, rib),
+        (0.059, 0.150, rib),         # long straight ribbed body
+        (0.056, 0.186, rib),
+        (0.046, 0.208),              # shoulder, cut in hard
+        (0.029, 0.226),
+        (0.026, 0.248),              # neck
+        (0.033, 0.258),              # lip
+        (0.031, 0.268),
+        (0.020, 0.270),
+        (0.0, 0.264),
+    ], segments=12, lobes=6)
+    o = emit(bm, "phial_ribbed", "base", bevel_width=0.003, bevel_segments=1)
+    socket(o, "socket_tip", (0, 0, 0.250))
+    socket(o, "socket_mid", (0, 0, 0.10))
+
+
 BUILDERS = [
     make_haft_short, make_haft_long,
     make_blade_axe, make_blade_knife, make_head_hammer,
@@ -1062,6 +1458,9 @@ BUILDERS = [
     make_stone_shard, make_apple, make_straw_bale, make_rag_wrap,
     make_torch_head, make_leaf_cluster, make_stopper, make_nail_spike,
     make_disc, make_bar,
+    make_blade_sword, make_guard_cross, make_grip_wrapped, make_pommel_round,
+    make_spectacles_frame, make_lens_round, make_key_body,
+    make_chili_pod, make_stone_lump, make_phial_ribbed,
 ]
 
 

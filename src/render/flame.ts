@@ -136,8 +136,8 @@ uniform float uCut;
 varying vec2 vUv;
 
 void main() {
-  float n = texture2D( uNoise, vec2( vUv.x * 2.0, vUv.y * 0.9 - uTime ) ).r;
-  if ( n < uCut + vUv.y * 0.78 ) discard;
+  float n = texture2D( uNoise, vec2( vUv.x * 1.3, vUv.y * 0.9 - uTime ) ).r;
+  if ( n < uCut + vUv.y * 0.42 ) discard;
   gl_FragColor = vec4( uColor, 1.0 );
 }
 `
@@ -160,11 +160,11 @@ interface TongueSpec {
 }
 
 const TONGUES: readonly TongueSpec[] = [
-  { color: DEEP, height: 0.9, width: 1.1, angle: 0.0, radius: 0.17, rate: 7, cut: 0.3, scroll: 1.1 },
-  { color: EMBER, height: 1.0, width: 0.95, angle: 2.09, radius: 0.16, rate: 11, cut: 0.26, scroll: 1.4 },
-  { color: EMBER, height: 0.84, width: 0.9, angle: 4.19, radius: 0.18, rate: 9, cut: 0.28, scroll: 1.25 },
-  { color: FLAME, height: 1.06, width: 0.7, angle: 0.0, radius: 0.0, rate: 14, cut: 0.16, scroll: 1.7 },
-  { color: CORE, height: 1.2, width: 0.48, angle: 0.0, radius: 0.0, rate: 19, cut: 0.08, scroll: 2.1 },
+  { color: DEEP, height: 0.9, width: 1.1, angle: 0.0, radius: 0.17, rate: 7, cut: 0.2, scroll: 1.1 },
+  { color: EMBER, height: 1.0, width: 0.95, angle: 2.09, radius: 0.16, rate: 11, cut: 0.18, scroll: 1.4 },
+  { color: EMBER, height: 0.84, width: 0.9, angle: 4.19, radius: 0.18, rate: 9, cut: 0.2, scroll: 1.25 },
+  { color: FLAME, height: 1.06, width: 0.7, angle: 0.0, radius: 0.0, rate: 14, cut: 0.1, scroll: 1.7 },
+  { color: CORE, height: 1.2, width: 0.48, angle: 0.0, radius: 0.0, rate: 19, cut: 0.04, scroll: 2.1 },
 ]
 
 /** One material per tongue role, shared by every fire in the scene. The time

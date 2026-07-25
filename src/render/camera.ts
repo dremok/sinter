@@ -112,13 +112,15 @@ export class IsoCamera {
    * The window is narrow. Ground at the bottom of the frame sits about
    * `viewSize * 0.7` nearer than the camera target and ground at the top about
    * the same amount further, with tall things at the top further again. So the
-   * near plane sits just in front of the target and the far plane well past the
-   * top of the frame: any tighter and the middle distance goes milky.
+   * near plane sits just BEHIND the target and the far plane well past the top
+   * of the frame. Starting it in front of the player was what put a milky veil
+   * over the middle distance: at this zoom that is most of the frame, and fog
+   * over most of the frame is not aerial perspective, it is weather.
    */
   fogRange(): { near: number; far: number } {
     return {
-      near: this.distance - this.viewSize * 0.1,
-      far: this.distance + this.viewSize * 3.2,
+      near: this.distance + this.viewSize * 0.2,
+      far: this.distance + this.viewSize * 4.5,
     }
   }
 

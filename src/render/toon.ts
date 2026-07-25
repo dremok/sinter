@@ -164,7 +164,7 @@ export function toonRamp(): THREE.DataTexture {
     [0.27, 0.34, 0.53],
     [0.60, 0.46, 0.38], // terminator: one texel, a real step, still a colour
     [0.84, 0.76, 0.62], // the step out of it
-    [1.00, 0.94, 0.82], // light
+    [1.00, 0.96, 0.88], // light
     [1.00, 0.98, 0.90],
   ]
 
@@ -324,7 +324,7 @@ void main() {
   // reach: a shadow map zeroes the key light, so the ramp's blue band never
   // gets to apply there.
   float l = dot( c, LUMA );
-  c *= mix( vec3( 0.76, 0.90, 1.29 ), vec3( 1.08, 1.00, 0.89 ), smoothstep( 0.0, 0.60, l ) );
+  c *= mix( vec3( 0.68, 0.85, 1.38 ), vec3( 1.09, 1.00, 0.87 ), smoothstep( 0.0, 0.68, l ) );
 
   // Contrast about a mid pivot, then saturation, weighted by brightness.
   //
@@ -334,7 +334,7 @@ void main() {
   // leaves dark grass looking like dark grass instead of like grass in shade.
   c = clamp( ( c - 0.40 ) * 1.16 + 0.42, 0.0, 1.0 );
   float g = dot( c, LUMA );
-  c = clamp( mix( vec3( g ), c, mix( 0.80, 1.14, smoothstep( 0.04, 0.58, l ) ) ), 0.0, 1.0 );
+  c = clamp( mix( vec3( g ), c, mix( 0.82, 1.22, smoothstep( 0.04, 0.58, l ) ) ), 0.0, 1.0 );
 
   // A cooler, flatter, darker band along the top edge.
   //
@@ -345,12 +345,12 @@ void main() {
   // trick a painter uses when the horizon is out of shot.
   float far = smoothstep( 0.74, 1.0, vUv.y );
   vec3 distant = mix( vec3( dot( c, LUMA ) ), c, 0.62 ) * vec3( 0.88, 0.92, 1.02 );
-  c = mix( c, distant, far * 0.3 );
+  c = mix( c, distant, far * 0.18 );
 
   // Vignette, cool rather than black, so the corners read as air between the
   // camera and the far trees rather than as a lens.
   vec2 d = vUv - 0.5;
-  float v = smoothstep( 0.52, 0.13, dot( d, d ) );
+  float v = smoothstep( 0.55, 0.11, dot( d, d ) );
   c = mix( c * vec3( 0.83, 0.88, 0.99 ), c, mix( 1.0, v, uVignette ) );
 
   gl_FragColor = vec4( c, 1.0 );

@@ -91,10 +91,13 @@ export function itemIcon(def: ItemDef): string {
   const url = r.domElement.toDataURL('image/png')
 
   s.remove(mesh)
-  mesh.traverse((o) => {
-    const m = o as THREE.Mesh
-    if (m.isMesh) m.geometry?.dispose?.()
-  })
+  // Deliberately no geometry dispose. `buildItemMesh` does not own its
+  // geometry: `parts.ts` hands out ONE BufferGeometry per part name and every
+  // mesh in the world shares it, so disposing here freed the GPU buffers of
+  // parts the region is still drawing, and the next frame silently re-uploaded
+  // them. Rendering ten icons dropped 16 of the renderer's 387 live geometries.
+  // The meshes themselves are unreferenced after this and are collected
+  // normally; there is nothing here that needs freeing by hand.
 
   cache.set(def.id, url)
   return url
