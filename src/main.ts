@@ -3,7 +3,7 @@ import { createRng } from './core/rng'
 import { Clock, TICK_DT } from './core/clock'
 import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
-import { Grade, groundBlob, sizeToDisplay, toonUnique } from './render/toon'
+import { ContactShadow, Grade, sizeToDisplay, toonUnique } from './render/toon'
 import { advanceSmoke, Flame, setFlameViewport } from './render/flame'
 import { applyOutlines, setOutlineViewport } from './render/outline'
 import { loadParts } from './render/parts'
@@ -495,7 +495,8 @@ function isGroundSurface(mesh: THREE.Mesh): boolean {
   return m?.side === THREE.DoubleSide
 }
 
-const blobs = new Map<Entity, THREE.Mesh>()
+const blobs = new Map<Entity, ContactShadow>()
+let playerShadow: ContactShadow | null = null
 const bbox = new THREE.Box3()
 
 /**
@@ -521,9 +522,15 @@ function sitOnGround(e: Entity): void {
   const radius = Math.min(Math.max(w, d) * 0.42, 2.2)
   if (radius < 0.05) return
 
-  const blob = groundBlob(radius, 0.55)
-  blob.position.set((bbox.min.x + bbox.max.x) / 2, bbox.min.y + 0.03, (bbox.min.z + bbox.max.z) / 2)
-  scene.add(blob)
+  const cx = (bbox.min.x + bbox.max.x) / 2
+  const cz = (bbox.min.z + bbox.max.z) / 2
+
+  // Draped once. Nothing in this set moves, and the terrain under it never
+  // changes, so re-sampling it every frame would buy nothing.
+  const blob = new ContactShadow(radius, 0.42)
+  blob.mesh.position.set(cx, bbox.min.y, cz)
+  blob.drape(cx, cz, bbox.min.y, region.heightAt)
+  scene.add(blob.mesh)
   blobs.set(e, blob)
 }
 
@@ -550,15 +557,18 @@ function groundEverything(): void {
   for (const e of queries.meshed) sitOnGround(e)
   for (const [e, blob] of blobs) {
     if (e.mesh?.parent) continue
-    blob.removeFromParent()
+    blob.mesh.removeFromParent()
     blobs.delete(e)
   }
 
   if (!first) return
 
   // Parented to the character rather than moved each frame: the group already
-  // sits at the player's feet, so following is free and cannot drift.
-  character.group.add(groundBlob(0.6, 0.62))
+  // sits at the player's feet, so following is free and cannot drift. This one
+  // is redraped every frame, because it is the only contact shadow in the game
+  // that travels over ground it has not already measured.
+  playerShadow = new ContactShadow(0.6, 0.5)
+  character.group.add(playerShadow.mesh)
 
   /**
    * A small key light that rides with the player.
@@ -856,20 +866,47 @@ const STEP_HEIGHT = 0.55
  * standables, a plank thrown down becomes a step and nobody will have written
  * that down.
  */
+/**
+ * How far past a platform's edge you keep standing on it.
+ *
+ * Without this the bridge flickers. At the boundary the player's own movement
+ * and the ground's slope push them a few centimetres in and out of the
+ * footprint every frame, so the height alternates between the deck and the
+ * streambed, which reads as the whole bridge strobing.
+ *
+ * Hysteresis is the standard answer: the radius you STAY on a platform is
+ * larger than the radius you step ONTO it, so the two thresholds cannot
+ * oscillate against each other.
+ */
+const LEDGE_GRIP = 0.28
+
+/** Which standable the player is currently standing on, if any. */
+let footing: number | null = null
+
 function surfaceUnder(x: number, z: number, from: number): number {
   let best = region.heightAt(x, z)
+  let bestIndex: number | null = null
 
-  for (const s of region.standables) {
+  for (let i = 0; i < region.standables.length; i++) {
+    const s = region.standables[i]!
     const dx = x - s.x
     const dz = z - s.z
-    if (dx * dx + dz * dz > s.radius * s.radius) continue
+    const d2 = dx * dx + dz * dz
+
+    // Already standing on this one, so it keeps you a little past its edge.
+    const reach = footing === i ? s.radius + LEDGE_GRIP : s.radius
+    if (d2 > reach * reach) continue
+
     if (s.top <= best) continue
     // Reachable from where the player currently is, not from the terrain, so
     // walking along a raised deck does not fall off it every frame.
     if (s.top - from > STEP_HEIGHT) continue
+
     best = s.top
+    bestIndex = i
   }
 
+  footing = bestIndex
   return best
 }
 
@@ -945,7 +982,14 @@ function movePlayer(): void {
   player.pos.x = Math.min(BOUNDS.maxX, Math.max(BOUNDS.minX, player.pos.x))
   player.pos.z = Math.min(BOUNDS.maxZ, Math.max(BOUNDS.minZ, player.pos.z))
   pushOutOfLedges(player.pos)
-  player.pos.y = surfaceUnder(player.pos.x, player.pos.z, player.pos.y)
+
+  // Ease onto the surface rather than snapping. A hard assignment makes even a
+  // correct step up read as a teleport, and it turns any remaining single-frame
+  // disagreement into a visible jolt instead of something the ease absorbs.
+  const target = surfaceUnder(player.pos.x, player.pos.z, player.pos.y)
+  const rise = target - player.pos.y
+  player.pos.y += rise * Math.min(1, TICK_DT * 18)
+  if (Math.abs(target - player.pos.y) < 0.004) player.pos.y = target
 }
 
 function stepSimulation(): void {
@@ -1012,6 +1056,10 @@ function syncMeshes(dt: number): void {
   syncFireVisuals()
   placeLights()
   syncBufferSize()
+  // The ground under the player changes as they walk, so this is the one
+  // contact shadow that has to be re-measured. Twenty-five height samples.
+  playerShadow?.drape(player.pos.x, player.pos.z, player.pos.y, region.heightAt)
+
   // Every smoke column in the world, wherever region.ts put them.
   advanceSmoke(dt)
 }

@@ -254,6 +254,14 @@ function blobTexture(): THREE.DataTexture {
   return blob
 }
 
+/** Height of the ground at a world point. Passed in rather than imported, so
+ *  this file never has to know that `world/region.ts` exists. */
+export type HeightSampler = (x: number, z: number) => number
+
+/** How far above the ground the sheet floats. Enough to beat depth precision,
+ *  small enough that it never reads as hovering. */
+const CONTACT_LIFT = 0.025
+
 /**
  * A darkened patch to sit a thing on the ground.
  *
@@ -262,26 +270,77 @@ function blobTexture(): THREE.DataTexture {
  * no shadow of its own, because there is no key light left to block. A blob
  * does not care, and the player is looking at the character the whole time.
  *
- * Cool rather than black, so it belongs to the same shadow family as everything
- * else in the frame.
+ * It is a subdivided sheet that is DRAPED over the terrain, not a flat quad.
+ * The flat version was a real bug and worth recording, because it failed in two
+ * different-looking ways that were the same mistake:
+ *
+ *   - on a slope the quad cut through the ground, so half of it was buried and
+ *     half floated, and the visible half was a hard-edged dark lozenge lying at
+ *     the wrong angle. At tree and boulder radii that is most of the quad, and
+ *     it littered every hillside in the region with dark shards.
+ *   - in a dip, the character's own patch sat below the surrounding bank, the
+ *     bank drew over its edges, and what was left read as a hole punched in the
+ *     world with the player standing inside it.
+ *
+ * Following the ground fixes both at once, and it is the only fix that does:
+ * shrinking it hides the first and makes the second worse.
  */
-export function groundBlob(radius: number, opacity = 0.45): THREE.Mesh {
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(radius * 2, radius * 2).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({
-      map: blobTexture(),
-      color: 0x121e30,
-      transparent: true,
-      opacity,
-      depthWrite: false,
-      fog: false,
-    }),
-  )
-  mesh.position.y = 0.03
-  mesh.renderOrder = -1
-  // It is a shadow. It must never be given one, and never cast one.
-  mesh.userData.noShadow = true
-  return mesh
+export class ContactShadow {
+  readonly mesh: THREE.Mesh
+  private readonly radius: number
+
+  constructor(radius: number, opacity = 0.42) {
+    this.radius = radius
+    // Enough subdivisions to follow a bank, few enough to redrape every frame.
+    // A creek edge is the sharpest thing in Band 0 and four spans cross it.
+    const segments = Math.min(10, Math.max(3, Math.round(radius * 4)))
+
+    this.mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(radius * 2, radius * 2, segments, segments).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        map: blobTexture(),
+        // Desaturated and only slightly cool. A saturated navy against
+        // desaturated olive ground reads as a hole rather than as shade: the
+        // hue was as wrong as the geometry.
+        color: 0x2e332e,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        fog: false,
+        // Belt and braces against z-fighting with the ground it lies on.
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      }),
+    )
+    this.mesh.renderOrder = -1
+    // It is a shadow. It must never be given one, and never cast one, and never
+    // take an outline.
+    this.mesh.userData.noShadow = true
+    this.mesh.userData.noOutline = true
+    // Redraped constantly and never worth a bounding-sphere rebuild.
+    this.mesh.frustumCulled = false
+  }
+
+  /**
+   * Lay the sheet over the ground around a world point.
+   *
+   * `baseY` is whatever the mesh's own origin sits at, so the vertices come out
+   * relative to it and this works whether the sheet is parented to a moving
+   * character or dropped into the scene at a fixed spot.
+   */
+  drape(cx: number, cz: number, baseY: number, sample: HeightSampler): void {
+    const pos = this.mesh.geometry.attributes.position as THREE.BufferAttribute
+    for (let i = 0; i < pos.count; i++) {
+      pos.setY(i, sample(cx + pos.getX(i), cz + pos.getZ(i)) - baseY + CONTACT_LIFT)
+    }
+    pos.needsUpdate = true
+  }
+
+  /** World radius, so a caller can decide whether a redrape is worth it. */
+  get size(): number {
+    return this.radius
+  }
 }
 
 // ---------------------------------------------------------------- colour grade

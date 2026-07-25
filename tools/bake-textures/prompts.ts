@@ -165,13 +165,15 @@ export const SPECS: readonly TextureSpec[] = [
       `${STYLE} Short stylised meadow grass seen from directly above. Broad soft ` +
       'drifts of lusher and drier grass about a sixth of the image across, and three ' +
       'or four ragged patches of bare brown earth worn through the turf, each about a ' +
-      'tenth of the image wide. Mostly large flat areas of one tone, with only an ' +
-      'occasional small tuft of grass picked out, well separated, so the surface reads ' +
-      'as calm and open. No fine detail, no speckle, no dense stippling of blades. ' +
-      'Deep olive and sage green, never emerald, never bright, and not pale.',
+      'twelfth of the image wide and clearly readable as soil. Over the whole surface, ' +
+      'clumps of grass painted as bold deliberate strokes, each one big enough to see ' +
+      'on its own and well separated from its neighbours, so the field reads as a ' +
+      'meadow of distinct plants rather than as soft mottled blobs. No fine speckle, ' +
+      'no dense stippling of individual blades. Deep olive and sage green, never ' +
+      'emerald, never bright.',
     palette: [...RAMP.grass, ...steps(RAMP.dirt, 0, 3)],
     stretch: 0.85,
-    gamma: 0.78,
+    gamma: 0.85,
     sharpen: 0.4,
     flatten: 0,
     notes:

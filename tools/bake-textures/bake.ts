@@ -132,7 +132,7 @@ const LIMIT_OVERRIDES: Record<string, Partial<Limits>> = {
   // already. The number is what the code-drawn ground actually scores, measured
   // the same way (0.0055 Oklab), so the gate is "no busier than what we have"
   // rather than a figure someone liked the look of.
-  grass: { maxBusyness: 0.007 },
+  grass: { maxBusyness: 0.009 },
   // A crust of dark plates with fire in the cracks is mostly crust.
   ember: { maxDominance: 0.7, maxBusyness: 0.12 },
   // The weave is two texels a thread, which is deliberately at the noise ceiling.
