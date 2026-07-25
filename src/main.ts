@@ -3,7 +3,8 @@ import { createRng } from './core/rng'
 import { Clock, TICK_DT } from './core/clock'
 import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
-import { sizeToPixelBuffer, toonUnique } from './render/toon'
+import { Grade, sizeToPixelBuffer, toonUnique } from './render/toon'
+import { Flame } from './render/flame'
 import { loadParts } from './render/parts'
 import { Character } from './render/character'
 import { BOUNDS, buildRegion } from './world/region'
@@ -53,29 +54,92 @@ document.body.appendChild(renderer.domElement)
 // the entire look, and AA would smear them back into mush.
 sizeToPixelBuffer(renderer, innerWidth, innerHeight)
 
+// One fullscreen pass on the way to the canvas: shoulder, split tone, contrast,
+// vignette. No post-processing dependency, one extra draw.
+const grade = new Grade()
+
 const scene = new THREE.Scene()
-scene.background = new THREE.Color(BAND0.sky)
 
 const iso = new IsoCamera(innerWidth / innerHeight)
 iso.viewSize = 13
 
-// Fog derived from camera distance, never hardcoded. (DECISIONS D9)
-scene.fog = new THREE.Fog(BAND0.sky, iso.distance + BAND0.fogNear, iso.distance + BAND0.fogFar)
+/**
+ * Aerial perspective.
+ *
+ * The far end of the clearing should lose contrast and drift toward the colour
+ * of the air, which is not the colour of the sky directly overhead: it is the
+ * sky with the low sun bleeding into it. Fog and background share it, so the
+ * tree line dissolves rather than ending at a hard edge.
+ *
+ * Range comes from `IsoCamera.fogRange()`, never from absolute numbers. (D9)
+ */
+const HAZE = new THREE.Color(BAND0.sky).lerp(new THREE.Color(0xf7e6cc), 0.22)
+scene.background = HAZE
+const fogRange = iso.fogRange()
+scene.fog = new THREE.Fog(HAZE, fogRange.near, fogRange.far)
 
-scene.add(new THREE.HemisphereLight(BAND0.skyLight, BAND0.groundLight, 1.5))
+/**
+ * Three lights, and each one has a job.
+ *
+ * The hemisphere is the sky landing on upward faces. The key makes the time of
+ * day and is the only thing that casts. The fill comes from the opposite side,
+ * cool and low, and exists so the shadow side of everything is a colour rather
+ * than an absence: a single directional light plus ambient gives you lit and
+ * unlit, which is what made the first pass look like flat vector art.
+ *
+ * The warm/cool contrast is deliberately built three times over, because each
+ * layer reaches somewhere the others cannot. The ramp in `toon.ts` tints the
+ * key's own falloff. The fill tints geometry the key never reaches. The grade's
+ * split tone catches cast shadows, where the key is switched off entirely and
+ * neither of the other two has anything to say.
+ */
+scene.add(new THREE.HemisphereLight(BAND0.skyLight, BAND0.groundLight, 0.8))
 
 // Sun azimuth must differ from the camera's, or shadows hide behind their own
-// casters and read as broken. (DECISIONS D9)
-const sun = new THREE.DirectionalLight(BAND0.sun, 2.1)
-sun.position.set(24, 30, -20)
+// casters and read as broken. `iso.sunOffset()` owns that now, at every camera
+// angle rather than only the starting one. (DECISIONS D9)
+const sun = new THREE.DirectionalLight(new THREE.Color(BAND0.sun).lerp(new THREE.Color(0xffc46a), 0.5), 3.1)
 sun.castShadow = true
-sun.shadow.mapSize.set(1024, 1024)
-sun.shadow.bias = -0.0012
-sun.shadow.normalBias = 0.04
+
+/**
+ * Shadow bounds, sized to what is on screen rather than to the region.
+ *
+ * The visible ground is about 23 by 22 metres, so ±19 covers it plus the
+ * overhang of anything tall enough to cast in from outside the frame. At 2048
+ * that is roughly 2cm per texel, which is what makes a fence post read as
+ * standing on the ground instead of hovering over a smear.
+ *
+ * near/far bracket the sun's actual distance for the same reason: a shadow
+ * camera 1 to 90 deep spends most of its depth precision on empty air.
+ */
+const SHADOW_EXTENT = 19
+const SUN_REACH = iso.sunOffset().length()
+sun.shadow.mapSize.set(2048, 2048)
+sun.shadow.bias = -0.0004
+sun.shadow.normalBias = 0.022
 const sc = sun.shadow.camera
-sc.left = -24; sc.right = 24; sc.top = 24; sc.bottom = -24; sc.near = 1; sc.far = 90
+sc.left = -SHADOW_EXTENT; sc.right = SHADOW_EXTENT; sc.top = SHADOW_EXTENT; sc.bottom = -SHADOW_EXTENT
+sc.near = Math.max(1, SUN_REACH - SHADOW_EXTENT - 12)
+sc.far = SUN_REACH + SHADOW_EXTENT + 12
 sc.updateProjectionMatrix()
 scene.add(sun, sun.target)
+
+const fill = new THREE.DirectionalLight(new THREE.Color(BAND0.skyLight).lerp(new THREE.Color(0x3f6fc0), 0.6), 0.65)
+scene.add(fill, fill.target)
+
+const sunOffset = new THREE.Vector3()
+
+/** Both lights ride with the camera, so the shadow map never wastes texels on
+ *  ground the player cannot see and the key stays square to the screen. */
+function placeLights(): void {
+  iso.sunOffset(sunOffset)
+  sun.target.position.copy(iso.target)
+  sun.position.copy(iso.target).add(sunOffset)
+  // Opposite side, and much lower, so it fills what the key leaves dark instead
+  // of doubling it. A fill at the same elevation just washes the whole frame.
+  fill.target.position.copy(iso.target)
+  fill.position.set(iso.target.x - sunOffset.x * 0.9, iso.target.y + 12, iso.target.z - sunOffset.z * 0.9)
+}
 
 // ---------------------------------------------------------------- region
 
@@ -131,9 +195,14 @@ addEventListener('keydown', (e) => {
   }
   if (!keys.has(k)) pressed.add(k)
   keys.add(k)
-  if (k === 'q') iso.rotate(-1)
-  if (k === 'e') iso.rotate(1)
 })
+
+// Camera rotation is deliberately unbound. Q and E used to step the azimuth 90
+// degrees, and hitting one by accident was disorienting: the whole world snaps
+// and the movement basis rotates under you mid-stride. IsoCamera keeps the
+// capability, because the sun and the movement basis are both derived from the
+// azimuth and the design still wants "see behind buildings" eventually. It just
+// needs to be a considered gesture rather than a stray keypress.
 addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()))
 addEventListener('resize', () => {
   sizeToPixelBuffer(renderer, innerWidth, innerHeight)
@@ -266,44 +335,96 @@ function placeInWorld(def: ItemDef, x: number, z: number): void {
 
 // ---------------------------------------------------------------- fire visuals
 
-const flameGeo = new THREE.ConeGeometry(0.34, 1.05, 5)
-const flameMat = new THREE.MeshBasicMaterial({ color: BAND0.flame })
-const emberMat = new THREE.MeshBasicMaterial({ color: BAND0.ember })
+const fires = new Map<Entity, Flame>()
+const alight: { e: Entity; at: THREE.Vector3; heat: number; near: number }[] = []
+
+/**
+ * How hard a thing is visibly burning, which is not the same question as
+ * whether the fire sim is consuming it.
+ *
+ * Reading HOT and LUMINOUS rather than the `burning` component is what gives
+ * the hearth a real fire: it is HOT 1 with no fuel of its own, so it is a
+ * permanent ignition source that `sim/fire.ts` never touches. Anything else
+ * that ends up hot and glowing, including a merge result nobody has invented
+ * yet, lights up for the same reason. No id is involved. (Rule 2)
+ */
+function fireHeat(e: Entity): number {
+  if (e.burning) return e.burning.heat
+  const props = e.props ?? {}
+  const hot = p(props, 'HOT')
+  return hot >= 0.5 && p(props, 'LUMINOUS') >= 0.3 ? hot * 0.85 : 0
+}
+
+/** How tall the flame stands on a given thing. A burning palisade is a column
+ *  of fire; a tuft of dry grass is a handful. */
+function fireSize(e: Entity): number {
+  return e.structure ? Math.min(1.9, 0.5 + e.structure.height * 0.36) : 0.8
+}
+
+/**
+ * Point lights are forward-shaded: every one of them costs every material in
+ * the scene, and the palisade can have seventeen posts alight at once. The
+ * nearest few get a real light and spill onto the ground; the rest keep their
+ * flame and their embers and lose only the pool of warmth nobody was looking at.
+ */
+const MAX_FIRE_LIGHTS = 6
 
 function syncFireVisuals(): void {
-  for (const e of queries.burning) {
-    if (!e.flame) {
-      const sprite = new THREE.Group()
-      const outer = new THREE.Mesh(flameGeo, emberMat)
-      const inner = new THREE.Mesh(flameGeo, flameMat)
-      inner.scale.setScalar(0.58)
-      inner.position.y = 0.12
-      sprite.add(outer, inner)
+  alight.length = 0
+  for (const e of queries.simulated) {
+    const heat = fireHeat(e)
+    if (heat <= 0.02) continue
+    alight.push({ e, at: e.transform.pos, heat, near: e.transform.pos.distanceToSquared(iso.target) })
+  }
+  alight.sort((a, b) => a.near - b.near)
 
-      const light = new THREE.PointLight(BAND0.ember, 0, 9, 2)
-      const at = e.transform.pos
-      sprite.position.set(at.x, at.y + 0.6, at.z)
-      light.position.copy(sprite.position)
-      scene.add(sprite, light)
-      world.addComponent(e, 'flame', { light, sprite })
+  // Anything not driven by `burning.age` needs a clock, and the tick counter is
+  // the only one the headless path advances.
+  const now = clock.tick * TICK_DT
+
+  for (let i = 0; i < alight.length; i++) {
+    const { e, at, heat } = alight[i]!
+    let fx = fires.get(e)
+    if (!fx) {
+      fx = new Flame(at)
+      scene.add(fx.group)
+      fires.set(e, fx)
     }
-    const f = e.flame!
-    const heat = e.burning.heat
-    // Quantised flicker. A smooth sine reads as a pulsing blob at this
-    // resolution; stepping it makes the flame look hand-animated.
-    const step = Math.floor(e.burning.age * 12) % 3
-    const flicker = 0.8 + step * 0.12
-    f.sprite.scale.setScalar(heat * flicker * 1.35)
-    f.sprite.rotation.y = step * 1.1
-    f.light.intensity = heat * 16 * flicker
+    fx.update(at, heat, fireSize(e), e.burning ? e.burning.age : now, i < MAX_FIRE_LIGHTS)
   }
 
-  for (const e of world.entities) {
-    if (e.flame && !e.burning) {
-      scene.remove(e.flame.sprite, e.flame.light)
-      world.removeComponent(e, 'flame')
-      if (e.mesh) darken(e.mesh, 0.32)
-    }
+  for (const [e, fx] of fires) {
+    if (fireHeat(e) > 0.02) continue
+    scene.remove(fx.group)
+    fx.dispose()
+    fires.delete(e)
+    if (e.spent && e.mesh) darken(e.mesh, 0.32)
+  }
+}
+
+/**
+ * Shadow flags, applied to whatever is in the scene.
+ *
+ * Half the scene graph was built without them, so loose items and the character
+ * cast nothing and read as stickers laid over a picture of ground. A contact
+ * shadow is most of what makes an object sit in a world.
+ *
+ * Re-run when the region gains children, which is the only way a mesh appears
+ * after boot: dropping an item, or planting a ladder against a wall.
+ */
+let groundedChildren = -1
+
+function groundEverything(): void {
+  if (region.group.children.length === groundedChildren) return
+  groundedChildren = region.group.children.length
+
+  for (const root of [region.group, character.group]) {
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh
+      if (!mesh.isMesh) return
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+    })
   }
 }
 
@@ -495,12 +616,12 @@ function syncMeshes(dt: number): void {
     e.mesh.rotation.y += dt * 0.6
   }
 
-  syncFireVisuals()
-
   iso.target.lerp(player.pos, 0.2)
   iso.update()
-  sun.target.position.copy(iso.target)
-  sun.position.set(iso.target.x + 24, iso.target.y + 30, iso.target.z - 20)
+
+  groundEverything()
+  syncFireVisuals()
+  placeLights()
 }
 
 // ---------------------------------------------------------------- hud
@@ -583,7 +704,7 @@ if (HEADLESS_TICKS > 0) {
   updateFocus()
   updateHud(0)
   iso.update()
-  renderer.render(scene, iso.camera)
+  grade.render(renderer, scene, iso.camera)
   window.__sinterReady = true
 } else {
   let lastFpsSample = performance.now()
@@ -610,7 +731,7 @@ if (HEADLESS_TICKS > 0) {
     }
     updateHud(fps)
 
-    renderer.render(scene, iso.camera)
+    grade.render(renderer, scene, iso.camera)
     window.__sinterReady = true
   })
 }

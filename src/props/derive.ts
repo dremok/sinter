@@ -5,7 +5,8 @@
  * to produce identical output, because `merge(A, B) === merge(B, A)` is a
  * design guarantee. Every rule below is symmetric in its inputs; keep it that
  * way. `max`, `sum` and `blend` are all symmetric, and the emergent rules read
- * only the already-combined values, so they inherit the symmetry.
+ * only the already-combined values, so they inherit the symmetry. `sum` was the
+ * one that was not, and the fix is written up where it is applied.
  *
  * There are no item ids in this file and there never will be.
  */
@@ -25,7 +26,13 @@ function combineOne(id: PropertyId, a: number, b: number): number {
     case 'max':
       return Math.max(a, b)
     case 'sum':
-      return clamp01(a + b * 0.75)
+      // Written as `a + b * 0.75` until 2026-07-25, which is NOT symmetric:
+      // derive(flint, horseshoe) and derive(horseshoe, flint) disagreed on
+      // HEAVY. The old merge() hid it behind a pair-keyed cache, so whichever
+      // order was tried first won and the commutativity test passed anyway.
+      // Ordering by size makes it symmetric and keeps the intent, which is that
+      // the smaller quantity contributes less than the larger one.
+      return clamp01(Math.max(a, b) + Math.min(a, b) * 0.75)
     case 'blend':
       // Materials dilute. Half a thing made of oak is half as wooden, which is
       // what stops a merge chain from ending in a lump of every material at 1.0.
@@ -86,7 +93,7 @@ function emerge(out: Properties): void {
 
   // So does an edge with weight behind it. Note the `min`: a razor with no mass
   // and a boulder with no edge are both unremarkable to stand in front of.
-  set('FRIGHTENING', Math.min(p(out, 'SHARP'), p(out, 'HEAVY')) * 1.1)
+  set('FRIGHTENING', Math.min(p(out, 'SHARP'), p(out, 'HEAVY')) * 0.9)
 }
 
 /**

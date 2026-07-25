@@ -5,14 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SINTER</title>
     <style>
+      /*
+       * UI surface.
+       *
+       * Everything here is DOM over the WebGL canvas. Three type roles and no
+       * more: a slab display face carries names and headers, a humanist sans
+       * carries labels and copy, and monospace is reserved for numerals so
+       * columns of digits line up. All three are system stacks, because the
+       * game has to boot with the network unplugged.
+       */
       :root {
-        --ink: #e8e0d0;
-        --dim: #9a9285;
-        --panel: rgba(22, 20, 18, 0.9);
-        --edge: rgba(232, 224, 208, 0.16);
+        --ink: #f0e6d3;
+        --ink-2: #c9bda7;
+        --dim: #918876;
+
         --warm: #e0a35c;
         --hot: #ff8244;
-        --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+        --leather: #171310;
+        --stitch: rgba(226, 198, 150, 0.17);
+        --edge: rgba(232, 224, 208, 0.13);
+
+        /* Slab first. Rockwell ships with macOS and with Office on Windows;
+           everything else falls back through to Georgia, which is everywhere. */
+        --display: Rockwell, "Roboto Slab", "Bookman Old Style", "American Typewriter", Georgia, serif;
+        --ui: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       }
 
       html, body { margin: 0; padding: 0; height: 100%; background: #0b0d10; overflow: hidden; }
@@ -31,169 +49,463 @@
         image-rendering: crisp-edges;
       }
 
-      .muted { color: var(--dim); }
-
       body {
-        font-family: var(--mono);
+        font-family: var(--ui);
         color: var(--ink);
         -webkit-font-smoothing: antialiased;
       }
 
-      /* ------------------------------------------------------------- hud */
-      #hud {
-        position: fixed; top: 14px; left: 16px;
-        font-size: 11px; line-height: 1.65;
-        color: var(--dim); pointer-events: none; white-space: pre;
-        background: var(--panel); border: 1px solid var(--edge); border-radius: 3px;
-        padding: 10px 14px; backdrop-filter: blur(6px);
+      button { font: inherit; color: inherit; }
+
+      /* ------------------------------------------------------------ carried */
+      /*
+       * The only permanent thing in the shipped frame. Icon and numeral, no
+       * words, corner anchored, and it disappears entirely when the pack is
+       * empty. Anything with a variable name in it belongs in #hud below.
+       */
+      #carry {
+        position: fixed; top: 18px; left: 20px;
+        display: flex; align-items: center; gap: 7px;
+        padding: 6px 11px 6px 8px; border-radius: 4px;
+        color: var(--ink-2); pointer-events: none;
+        background: linear-gradient(rgba(20, 16, 13, 0.62), rgba(12, 10, 8, 0.68));
+        box-shadow: inset 0 1px 0 rgba(240, 220, 190, 0.09), 0 3px 12px rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(5px);
       }
-      #hud b { color: var(--ink); font-weight: 600; }
+      #carry[hidden] { display: none; }
+      #carry svg { display: block; opacity: 0.85; }
+      #carry-n { font: 600 13px/1 var(--mono); color: var(--ink); }
+
+      /* ---------------------------------------------------------- debug hud */
+      /*
+       * Raw seeds, ticks and counters. Not shipped UI: hidden unless the run
+       * asks for it with ?debug=1 or the player presses F3. See Ui.debug().
+       */
+      #hud {
+        position: fixed; top: 18px; left: 20px; display: none;
+        font: 400 11px/1.6 var(--mono); white-space: pre;
+        color: #9fb0a4; pointer-events: none;
+        background: rgba(8, 10, 9, 0.82); border: 1px solid rgba(120, 200, 150, 0.22);
+        border-radius: 2px; padding: 9px 13px 10px;
+      }
+      #hud::before {
+        content: 'debug  F3';
+        display: block; margin-bottom: 6px; padding-bottom: 5px;
+        border-bottom: 1px solid rgba(120, 200, 150, 0.18);
+        color: #6f8a7a; letter-spacing: 0.18em;
+      }
+      #hud b { color: #d8f0e0; font-weight: 600; }
+      body.debug #hud { display: block; }
+      body.debug #carry { display: none; }
 
       /* ---------------------------------------------------------- prompt */
       #prompt {
-        position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
-        background: var(--panel); border: 1px solid var(--edge); border-radius: 3px;
-        padding: 8px 14px; font-size: 12px; display: none; align-items: center; gap: 10px;
+        position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%);
+        display: none; align-items: center; gap: 12px;
+        padding: 9px 16px; border-radius: 4px;
+        font: 400 12.5px/1 var(--ui); color: var(--ink);
+        background: linear-gradient(rgba(24, 19, 15, 0.86), rgba(14, 11, 9, 0.9));
+        box-shadow:
+          inset 0 1px 0 rgba(240, 220, 190, 0.1),
+          inset 2px 0 0 var(--warm),
+          0 6px 20px rgba(0, 0, 0, 0.45);
         pointer-events: none; backdrop-filter: blur(6px);
       }
       #prompt.on { display: flex; }
-      .key {
-        display: inline-block; min-width: 17px; text-align: center;
-        border: 1px solid var(--edge); border-bottom-width: 2px; border-radius: 3px;
-        padding: 1px 5px; font-size: 10.5px; color: var(--ink); background: rgba(255,255,255,0.07);
+      #prompt b { font: 600 13px/1 var(--display); letter-spacing: 0.04em; }
+
+      .muted { color: var(--dim); }
+
+      /*
+       * A prompt whose only content is muted is a negative: the thing is named
+       * but nothing you carry acts on it. That is ambient information, not a
+       * notification, so it loses the plate, the accent and most of its weight
+       * rather than sitting in the frame shouting no.
+       */
+      #prompt:has(.muted) {
+        background: rgba(14, 11, 9, 0.4);
+        box-shadow: none;
+        opacity: 0.5;
       }
+      #prompt:has(.muted) b { font-weight: 400; color: var(--ink-2); }
+
+      /* -------------------------------------------------------------- keys */
+      /*
+       * Filled caps with dark ink, so they read as physical keys rather than as
+       * outlined placeholders. Also used by the targeting prompt in main.ts.
+       */
+      .key {
+        display: inline-block; min-width: 9px; text-align: center;
+        padding: 3px 5px 2px; border-radius: 3px;
+        font: 700 9.5px/1 var(--mono); letter-spacing: 0.06em;
+        color: #191512; background: linear-gradient(#efe7d8, #d5cbb8);
+        box-shadow: 0 1.5px 0 #7e7768, 0 2px 3px rgba(0, 0, 0, 0.35);
+      }
+      .key + .key { margin-left: 3px; }
 
       /* --------------------------------------------------------- controls */
       #controls {
-        position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
-        font-size: 10.5px; color: var(--dim); display: flex; gap: 14px;
-        pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+        position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+        display: flex; align-items: center;
+        padding: 7px 6px; border-radius: 999px;
+        background: linear-gradient(rgba(22, 18, 14, 0.8), rgba(10, 8, 7, 0.84));
+        box-shadow:
+          inset 0 1px 0 rgba(240, 220, 190, 0.12),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+          0 6px 22px rgba(0, 0, 0, 0.5);
+        pointer-events: none; backdrop-filter: blur(7px);
       }
+      #controls .ctrl {
+        display: flex; align-items: center; gap: 7px; padding: 0 13px;
+        font: 500 10px/1 var(--ui); letter-spacing: 0.13em; text-transform: uppercase;
+        color: #d9d1c1;
+      }
+      #controls .ctrl + .ctrl { box-shadow: inset 1px 0 0 rgba(240, 220, 190, 0.11); }
+      #controls .ctrl span:last-child { padding-top: 1px; }
 
       /* --------------------------------------------------------- inventory */
+      /*
+       * Dark leather: grain, a warm rake of light from the top corner, a
+       * stitched inset border and four rivets, and a real shadow where the
+       * panel sits on top of the world.
+       */
       #inventory {
-        position: fixed; top: 0; right: 0; height: 100%; width: 390px;
-        background: var(--panel); border-left: 1px solid var(--edge);
-        transform: translateX(100%); transition: transform 160ms ease-out;
-        display: flex; flex-direction: column; backdrop-filter: blur(10px);
+        position: fixed; top: 0; right: 0; height: 100%; width: 406px;
+        display: flex; flex-direction: column;
+        transform: translateX(100%); transition: transform 180ms cubic-bezier(0.2, 0.7, 0.2, 1);
+        background:
+          repeating-linear-gradient(97deg, rgba(255, 255, 255, 0.022) 0 1px, rgba(0, 0, 0, 0.05) 1px 4px),
+          repeating-linear-gradient(6deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 7px),
+          radial-gradient(120% 46% at 88% 0%, rgba(224, 163, 92, 0.14), transparent 64%),
+          radial-gradient(90% 40% at 4% 100%, rgba(120, 90, 60, 0.12), transparent 70%),
+          linear-gradient(#221b16, var(--leather) 46%, #0e0b09);
+        box-shadow:
+          inset 1px 0 0 rgba(240, 220, 190, 0.1),
+          -3px 0 0 rgba(0, 0, 0, 0.28),
+          -30px 0 60px rgba(0, 0, 0, 0.5);
       }
       #inventory.open { transform: translateX(0); }
 
-      .inv-head {
-        padding: 14px 16px 10px; border-bottom: 1px solid var(--edge);
+      /* stitching */
+      #inventory::before {
+        content: ''; position: absolute; inset: 10px 10px 10px 12px; z-index: 4;
+        border: 1px dashed var(--stitch); border-radius: 3px; pointer-events: none;
       }
-      .inv-title { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; }
-      .inv-count { color: var(--dim); font-size: 10.5px; margin-top: 2px; }
+      /* rivets, one per corner of the stitch line */
+      #inventory::after {
+        content: ''; position: absolute; inset: 0; z-index: 5; pointer-events: none;
+        background:
+          radial-gradient(circle 3.5px at 12px 10px, #cbb289 0 38%, #4a3f33 60%, transparent 72%),
+          radial-gradient(circle 3.5px at calc(100% - 10px) 10px, #cbb289 0 38%, #4a3f33 60%, transparent 72%),
+          radial-gradient(circle 3.5px at 12px calc(100% - 10px), #cbb289 0 38%, #4a3f33 60%, transparent 72%),
+          radial-gradient(circle 3.5px at calc(100% - 10px) calc(100% - 10px), #cbb289 0 38%, #4a3f33 60%, transparent 72%);
+      }
+
+      .inv-head {
+        display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+        padding: 24px 24px 13px;
+      }
+      .inv-title {
+        margin: 0; font: 400 22px/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase;
+        color: #f4e9d3; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
+      }
+      .inv-count {
+        font: 500 10px/1 var(--ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+      }
+      .inv-count b { font: 600 11px/1 var(--mono); color: var(--ink-2); font-weight: 600; }
+
+      .rule {
+        height: 1px; margin: 0 18px; flex: none;
+        background: linear-gradient(90deg, transparent, var(--stitch) 18%, var(--stitch) 82%, transparent);
+      }
+
+      /* ------------------------------------------------------------ filter */
+      #filter-bar {
+        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+        padding: 10px 22px 10px; margin: 0 12px;
+        background: linear-gradient(rgba(0, 0, 0, 0.26), rgba(0, 0, 0, 0.16));
+        box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.4), inset 0 -1px 0 rgba(240, 220, 190, 0.05);
+      }
+      #filter-toggle {
+        display: inline-flex; align-items: center; gap: 7px;
+        padding: 5px 10px 5px 9px; border: 1px solid var(--edge); border-radius: 3px;
+        background: rgba(255, 255, 255, 0.06); cursor: pointer;
+        font: 500 9.5px/1 var(--ui); letter-spacing: 0.15em; text-transform: uppercase;
+        color: var(--ink-2);
+      }
+      #filter-toggle:hover { color: var(--ink); border-color: rgba(232, 224, 208, 0.26); }
+      #filter-toggle .caret { font-size: 8px; transition: transform 140ms ease; opacity: 0.7; }
+      #filter-toggle[aria-expanded='true'] { color: var(--ink); background: rgba(255, 255, 255, 0.09); }
+      #filter-toggle[aria-expanded='true'] .caret { transform: rotate(180deg); }
+
+      #filter-active { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+      #filter-clear {
+        margin-left: auto; padding: 4px 2px; border: 0; background: none; cursor: pointer;
+        font: 500 9.5px/1 var(--ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+        text-decoration: underline; text-underline-offset: 3px;
+      }
+      #filter-clear:hover { color: var(--warm); }
+      #filter-clear[hidden] { display: none; }
 
       #filters {
-        display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 16px;
-        border-bottom: 1px solid var(--edge); max-height: 108px; overflow-y: auto;
+        padding: 2px 22px 14px; max-height: 42vh; overflow-y: auto;
       }
+      #filters[hidden] { display: none; }
+      .fgroup { margin-bottom: 11px; }
+      .fgroup-name {
+        font: 500 8.5px/1 var(--ui); letter-spacing: 0.22em; text-transform: uppercase;
+        color: var(--dim); margin-bottom: 6px; padding-left: 2px;
+      }
+      .fgroup-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+
       .chip {
-        font-size: 9.5px; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 2px;
-        border: 1px solid transparent; cursor: pointer; user-select: none;
-        background: rgba(255,255,255,0.06); color: var(--dim);
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 4px 7px 4px 6px; border-radius: 2px; cursor: pointer;
+        border: 1px solid rgba(255, 255, 255, 0.09); background: rgba(255, 255, 255, 0.035);
+        font: 500 9px/1 var(--ui); letter-spacing: 0.11em; text-transform: uppercase;
+        color: var(--ink-2); user-select: none;
       }
-      .chip:hover { color: var(--ink); }
-      .chip.active { color: #14110e; font-weight: 700; }
+      .chip:hover { color: var(--ink); border-color: rgba(232, 224, 208, 0.28); }
+      .chip .dot {
+        width: 6px; height: 6px; border-radius: 1px; flex: none;
+        background: var(--pcolor, #888); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+      }
+      .chip.on {
+        background: var(--pcolor); border-color: rgba(255, 255, 255, 0.45);
+        color: #14110e; font-weight: 700;
+      }
+      .chip.on .dot { background: #14110e; box-shadow: none; }
+      .chip.on .dot::after {
+        content: ''; display: block; width: 6px; height: 6px;
+        background: var(--pcolor);
+        clip-path: polygon(20% 48%, 42% 70%, 82% 22%, 92% 34%, 43% 88%, 10% 58%);
+      }
+      .chip.mini { padding: 3px 6px; font-size: 8.5px; }
 
-      #items { flex: 1; overflow-y: auto; padding: 8px; }
+      /* ------------------------------------------------------------- items */
+      /*
+       * Own scroll region. `min-height: 0` is what stops a flex column child
+       * from refusing to shrink and pushing rows under the bench, and the mask
+       * fades the last row out instead of guillotining it.
+       */
+      #items {
+        flex: 1 1 auto; min-height: 0; overflow-y: auto;
+        padding: 4px 16px 26px;
+        -webkit-mask-image: linear-gradient(#000 0 calc(100% - 34px), transparent 100%);
+        mask-image: linear-gradient(#000 0 calc(100% - 34px), transparent 100%);
+      }
+      #items::-webkit-scrollbar { width: 6px; }
+      #items::-webkit-scrollbar-thumb { background: rgba(232, 224, 208, 0.14); border-radius: 3px; }
+
       .card {
-        display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: center;
-        padding: 7px 9px; border: 1px solid transparent; border-radius: 3px; cursor: pointer;
+        display: grid; grid-template-columns: 40px 1fr; gap: 12px; align-items: start;
+        padding: 9px 10px; margin-bottom: 2px; cursor: pointer;
+        border: 1px solid transparent; border-radius: 4px;
       }
-      .card:hover { background: rgba(255,255,255,0.05); border-color: var(--edge); }
-      .card.picked { background: rgba(224,163,92,0.14); border-color: var(--warm); }
-      .swatch { width: 30px; height: 30px; border-radius: 2px; border: 1px solid var(--edge); }
-      .card-name { font-size: 11.5px; }
-      .card-props { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
-      .pchip { font-size: 8.5px; padding: 1px 4px; border-radius: 2px; color: #14110e; font-weight: 700; }
-      .empty { color: var(--dim); font-size: 11px; text-align: center; padding: 28px 12px; line-height: 1.6; }
+      .card:hover { background: rgba(255, 255, 255, 0.045); border-color: rgba(255, 255, 255, 0.07); }
+      .card.picked {
+        background: linear-gradient(90deg, rgba(224, 163, 92, 0.19), rgba(224, 163, 92, 0.05));
+        border-color: rgba(224, 163, 92, 0.5);
+      }
+      .swatch {
+        width: 40px; height: 40px; border-radius: 3px;
+        background: rgba(0, 0, 0, 0.3);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), inset 0 6px 12px rgba(0, 0, 0, 0.35);
+      }
+      .card-top { display: flex; align-items: baseline; gap: 8px; min-height: 17px; }
+      .card-name {
+        font: 400 15.5px/1.1 var(--display); letter-spacing: 0.01em; color: var(--ink);
+      }
+      .card.picked .card-name { color: #ffe9c8; }
+      /*
+       * The USE mode badge (IDEAS A11: contextual, panel, projected, worn) lands
+       * here, right aligned on this row, and a USE button goes beside MERGE in
+       * the bench below. Both are another agent's items/ work; the room is kept
+       * so neither reflows this card when it arrives.
+       */
+      .card-slot {
+        margin-left: auto; flex: none;
+        font: 700 9px/1 var(--mono); letter-spacing: 0.1em; color: var(--warm);
+      }
 
-      /* ------------------------------------------------------------ bench */
-      #bench { border-top: 1px solid var(--edge); padding: 12px 16px 14px; }
-      .bench-title { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin-bottom: 9px; }
-      .slots { display: grid; grid-template-columns: 1fr 16px 1fr; gap: 8px; align-items: center; }
-      .slot {
-        height: 54px; border: 1px dashed var(--edge); border-radius: 3px;
-        display: flex; align-items: center; justify-content: center; text-align: center;
-        font-size: 10px; color: var(--dim); padding: 4px; cursor: pointer; line-height: 1.35;
+      .card-traits { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+      .trait {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 3px 6px; border-radius: 2px;
+        background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+        font: 500 8.5px/1 var(--ui); letter-spacing: 0.1em; text-transform: uppercase;
+        color: var(--ink-2);
       }
-      .slot.filled { border-style: solid; color: var(--ink); background: rgba(255,255,255,0.05); }
-      .plus { text-align: center; color: var(--dim); font-size: 13px; }
+      /*
+       * Pips, not floats. "FLAMMABLE 1.00" is a debug print; four pips say
+       * "as flammable as things get" in a glance and never invite arithmetic.
+       */
+      .pips { display: flex; gap: 1.5px; }
+      .pip { width: 4px; height: 8px; border-radius: 0.5px; background: rgba(255, 255, 255, 0.13); }
+      .pip.on { background: var(--pcolor, #ccc); }
+      .trait-more { color: var(--dim); font: 500 8.5px/1 var(--ui); letter-spacing: 0.1em; align-self: center; }
+
+      .empty {
+        color: var(--dim); font: 400 12px/1.7 var(--ui);
+        text-align: center; padding: 40px 26px; white-space: pre-line;
+      }
+
+      /* ------------------------------------------------------------- bench */
+      #bench {
+        flex: none; padding: 14px 22px 18px;
+        background: linear-gradient(rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.46));
+        box-shadow: 0 -1px 0 var(--stitch), 0 -16px 26px rgba(0, 0, 0, 0.45);
+      }
+      .bench-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+      .bench-title {
+        font: 400 12.5px/1 var(--display); letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-2);
+      }
+      .bench-hint { font: 400 10px/1 var(--ui); letter-spacing: 0.1em; color: var(--dim); }
+      .bench-hint[hidden] { display: none; }
+
+      .slots { display: grid; grid-template-columns: 1fr 18px 1fr; gap: 9px; align-items: center; }
+      .slot {
+        height: 58px; border-radius: 3px; padding: 5px;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+        text-align: center; cursor: pointer;
+        border: 1px dashed rgba(232, 224, 208, 0.2); background: rgba(0, 0, 0, 0.25);
+      }
+      .slot img { width: 22px; height: 22px; }
+      .slot span {
+        font: 400 11px/1.15 var(--display); color: var(--ink);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+      }
+      .slot.filled {
+        border: 1px solid rgba(224, 163, 92, 0.45);
+        background: linear-gradient(rgba(224, 163, 92, 0.13), rgba(224, 163, 92, 0.04));
+      }
+      .plus { text-align: center; color: var(--dim); font: 400 15px/1 var(--display); }
 
       #result {
-        margin-top: 10px; padding: 9px 10px; border-radius: 3px;
-        border: 1px solid var(--edge); background: rgba(255,255,255,0.04);
-        font-size: 11px; min-height: 34px; display: flex; align-items: center; gap: 9px;
+        display: flex; align-items: center; gap: 10px;
+        margin-top: 10px; padding: 9px 11px; border-radius: 3px;
+        border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.035);
       }
-      #result .q { font-size: 19px; color: var(--warm); }
+      #result[hidden] { display: none; }
+      #result img { width: 26px; height: 26px; }
+      #result .rtext { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+      #result .name { font: 400 14px/1.1 var(--display); color: var(--ink); }
+      #result .q { font: 400 22px/1 var(--display); color: var(--warm); width: 26px; text-align: center; }
+      #result .sub { font: 400 11px/1.35 var(--ui); color: var(--dim); }
+      #result.refused { border-color: rgba(255, 130, 68, 0.3); }
 
       #merge-btn {
-        margin-top: 10px; width: 100%; padding: 9px; cursor: pointer;
-        background: var(--warm); color: #171310; border: none; border-radius: 3px;
-        font-family: var(--mono); font-size: 11px; font-weight: 700;
-        letter-spacing: 0.13em; text-transform: uppercase;
+        display: block; width: 100%; margin-top: 11px; padding: 11px; cursor: pointer;
+        border: 0; border-radius: 3px;
+        background: linear-gradient(#eab168, #d5924b); color: #1d1409;
+        font: 700 11px/1 var(--ui); letter-spacing: 0.2em; text-transform: uppercase;
+        box-shadow: 0 2px 0 #94622c, 0 4px 12px rgba(0, 0, 0, 0.4);
       }
-      #merge-btn:disabled { background: rgba(255,255,255,0.09); color: var(--dim); cursor: default; }
-      .warn { font-size: 9.5px; color: var(--dim); margin-top: 7px; text-align: center; line-height: 1.5; }
+      #merge-btn:hover:not(:disabled) { background: linear-gradient(#f4bd76, #e09f56); }
+      #merge-btn:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 0 0 #94622c; }
+      #merge-btn:disabled {
+        background: rgba(255, 255, 255, 0.06); color: var(--dim); cursor: default;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+      }
+
+      /* Only shown when a merge is actually one click away, which is the only
+         moment the warning means anything. */
+      .warn {
+        margin-top: 9px; text-align: center;
+        font: 400 9.5px/1.5 var(--ui); letter-spacing: 0.06em; color: var(--dim);
+      }
+      .warn[hidden] { display: none; }
 
       /* ------------------------------------------------------------ toast */
       #toasts {
-        position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%);
+        position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
         display: flex; flex-direction: column-reverse; gap: 6px; align-items: center;
         pointer-events: none;
       }
       .toast {
-        background: var(--panel); border: 1px solid var(--edge); border-left: 2px solid var(--warm);
-        border-radius: 3px; padding: 8px 14px; font-size: 11.5px; backdrop-filter: blur(6px);
+        padding: 8px 15px; border-radius: 3px;
+        background: linear-gradient(rgba(24, 19, 15, 0.9), rgba(14, 11, 9, 0.92));
+        box-shadow:
+          inset 2px 0 0 var(--warm),
+          inset 0 1px 0 rgba(240, 220, 190, 0.1),
+          0 5px 16px rgba(0, 0, 0, 0.45);
+        backdrop-filter: blur(6px);
         animation: rise 300ms ease-out;
       }
-      .toast .label { color: var(--dim); font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; }
-      .toast.fire { border-left-color: var(--hot); }
+      .toast .label {
+        font: 500 8.5px/1 var(--ui); letter-spacing: 0.2em; text-transform: uppercase;
+        color: var(--dim); margin-bottom: 4px;
+      }
+      .toast .body { font: 400 12.5px/1.3 var(--ui); color: var(--ink); }
+      .toast.fire { box-shadow: inset 2px 0 0 var(--hot), inset 0 1px 0 rgba(240, 220, 190, 0.1), 0 5px 16px rgba(0, 0, 0, 0.45); }
       @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
       #flash {
         position: fixed; inset: 0; pointer-events: none; opacity: 0;
-        background: radial-gradient(circle at 50% 60%, rgba(255,120,50,0.3), transparent 62%);
+        background: radial-gradient(circle at 50% 60%, rgba(255, 120, 50, 0.3), transparent 62%);
         transition: opacity 500ms ease-out;
       }
     </style>
   </head>
   <body>
-    <div id="hud"></div>
+    <div id="carry" hidden>
+      <svg viewBox="0 0 16 16" width="15" height="15" fill="none" aria-hidden="true">
+        <path d="M5.6 5V3.7a2.4 2.4 0 0 1 4.8 0V5" stroke="currentColor" stroke-width="1.3" />
+        <rect x="2.6" y="5.2" width="10.8" height="8.2" rx="1.2" fill="currentColor" fill-opacity="0.16"
+              stroke="currentColor" stroke-width="1.3" />
+        <path d="M2.6 8.6h10.8" stroke="currentColor" stroke-width="1.3" />
+      </svg>
+      <span id="carry-n">0</span>
+    </div>
 
+    <div id="hud"></div>
 
     <div id="prompt"></div>
 
     <div id="controls">
-      <span><span class="key">WASD</span> move</span>
-      <span><span class="key">Q</span><span class="key">E</span> rotate</span>
-      <span><span class="key">F</span> take</span>
-      <span><span class="key">G</span> drop</span>
-      <span><span class="key">TAB</span> pack</span>
+      <span class="ctrl"><span><span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span></span><span>move</span></span>
+      <span class="ctrl"><span><span class="key">Q</span><span class="key">E</span></span><span>turn</span></span>
+      <span class="ctrl"><span class="key">F</span><span>take</span></span>
+      <span class="ctrl"><span class="key">G</span><span>drop</span></span>
+      <span class="ctrl"><span class="key">TAB</span><span>pack</span></span>
     </div>
 
     <div id="toasts"></div>
     <div id="flash"></div>
 
     <aside id="inventory">
-      <div class="inv-head">
-        <div class="inv-title">Pack</div>
-        <div class="inv-count" id="inv-count">nothing yet</div>
+      <header class="inv-head">
+        <h2 class="inv-title">Pack</h2>
+        <div class="inv-count" id="inv-count">empty</div>
+      </header>
+      <div class="rule"></div>
+
+      <div id="filter-bar">
+        <button id="filter-toggle" type="button" aria-expanded="false">
+          <span class="caret">&#9660;</span>Traits
+        </button>
+        <div id="filter-active"></div>
+        <button id="filter-clear" type="button" hidden>clear</button>
       </div>
-      <div id="filters"></div>
+      <div id="filters" hidden></div>
+
       <div id="items"></div>
+
       <div id="bench">
-        <div class="bench-title">Merge Bench</div>
-        <div class="slots">
-          <div class="slot" id="slot-a">empty</div>
-          <div class="plus">+</div>
-          <div class="slot" id="slot-b">empty</div>
+        <div class="bench-head">
+          <span class="bench-title">Merge Bench</span>
+          <span class="bench-hint" id="bench-hint">pick two</span>
         </div>
-        <div id="result"><span style="color:var(--dim)">pick two things</span></div>
+        <div class="slots">
+          <div class="slot" id="slot-a"></div>
+          <div class="plus">+</div>
+          <div class="slot" id="slot-b"></div>
+        </div>
+        <div id="result" hidden></div>
+        <!-- A USE button belongs beside this one once items declare a use mode
+             (IDEAS A11). Same row, MERGE keeps the right half. -->
         <button id="merge-btn" disabled>Merge</button>
-        <div class="warn">Both inputs are destroyed. There is no undo.</div>
+        <div class="warn" id="warn" hidden>Both inputs are destroyed. There is no undo.</div>
       </div>
     </aside>
 

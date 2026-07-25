@@ -17,6 +17,12 @@ const AZIMUTHS: readonly THREE.Vector3[] = [
   new THREE.Vector3(1, 1, -1),
 ].map((v) => v.normalize())
 
+/** How far out the sun sits horizontally, and how high. atan gives ~36 degrees
+ * of elevation: low enough that shadows have length and every vertical face
+ * shows a terminator, high enough that they do not stripe the whole clearing. */
+const SUN_REACH = 42
+const SUN_HEIGHT = 31
+
 export class IsoCamera {
   readonly camera: THREE.OrthographicCamera
   readonly target = new THREE.Vector3()
@@ -67,6 +73,45 @@ export class IsoCamera {
     const forward = new THREE.Vector3(-dir.x, 0, -dir.z).normalize()
     const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize()
     return { forward, right }
+  }
+
+  /**
+   * Where the sun belongs, relative to whatever the camera is looking at.
+   *
+   * Perpendicular in azimuth to the camera, so shadows fall across the screen
+   * instead of hiding behind their own casters. D9 records that trap and leaves
+   * the follow-up open: a *fixed* sun only satisfies it at one camera angle.
+   * Rotate 90 degrees and the same sun sits directly behind the viewer, which
+   * is the exact failure again. Deriving it from the current azimuth closes
+   * that, and keeps the key light coming from the same side of the screen at
+   * all four angles, so the frame is lit the same way however the player turns.
+   */
+  sunOffset(out = new THREE.Vector3()): THREE.Vector3 {
+    const dir = AZIMUTHS[this.azimuthIndex]!
+    const h = Math.hypot(dir.x, dir.z)
+    return out.set((dir.z / h) * SUN_REACH, SUN_HEIGHT, (-dir.x / h) * SUN_REACH)
+  }
+
+  /**
+   * Fog distances, in camera depth.
+   *
+   * Under an orthographic rig everything sits at roughly `distance` from the
+   * camera and the visible frame only spans about `viewSize` either side of
+   * that, so fog has to bracket `distance` or it does nothing whatsoever. The
+   * old hardcoded 94..156 sat entirely behind the far tree line, which is why
+   * the frame had no aerial perspective at all despite having fog. (D9)
+   *
+   * The window is narrow. Ground at the bottom of the frame sits about
+   * `viewSize * 0.7` nearer than the camera target and ground at the top about
+   * the same amount further, with tall things at the top further again. So the
+   * near plane sits just in front of the target and the far plane well past the
+   * top of the frame: any tighter and the middle distance goes milky.
+   */
+  fogRange(): { near: number; far: number } {
+    return {
+      near: this.distance - this.viewSize * 0.1,
+      far: this.distance + this.viewSize * 3.2,
+    }
   }
 
   update(): void {

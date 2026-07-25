@@ -265,14 +265,19 @@ export const grass = (rng: Rng) =>
       const v = y / n
       for (let x = 0; x < n; x++) {
         const u = x / n
-        const b = bare(u, v)
-        // Soil surfaces where `bare` peaks. The multiplier sets how quickly it
-        // takes over, and the dither turns that ramp into a stipple.
-        if ((b - 0.7) * 7 > dither(x, y)) {
-          put(x, y, shade(RAMP.dirt, 0.15 + fine(u, v) * 0.6))
+        // Soil surfaces where `bare` peaks. The steep multiplier is deliberate:
+        // a wide dithered ramp between mid green and tan is not a soft edge, it
+        // is a field of red pixels, because a 50/50 stipple of two saturated
+        // complementary hues resolves to neither of them. Keep the stipple a
+        // few texels wide and darken both sides as they approach it, so the
+        // boundary reads as worn ground rather than as measles.
+        const soil = (bare(u, v) - 0.72) * 16
+        if (soil > dither(x, y)) {
+          put(x, y, shade(RAMP.dirt, 0.02 + clamp(soil, 0, 1) * 0.5 + fine(u, v) * 0.3))
         } else {
-          const t = lush(u, v) * 0.6 + fine(u, v) * 0.34
-          put(x, y, shade(RAMP.grass, 0.06 + t * 0.72))
+          const t = lush(u, v) * 0.75 + fine(u, v) * 0.2
+          const dim = 1 - clamp(soil + 0.6, 0, 1) * 0.5
+          put(x, y, shade(RAMP.grass, (0.16 + t * 0.62) * dim))
         }
       }
     }
@@ -280,27 +285,29 @@ export const grass = (rng: Rng) =>
     // Clumps. This is the layer that turns a speckled field into tile art: each
     // is a small fan of blades with a shadow at the root and the lightest step
     // of the ramp at the tips, so the eye reads discrete plants.
-    const clumps = Math.round((n * n) / 55)
+    const clumps = Math.round((n * n) / 40)
     for (let i = 0; i < clumps; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
       const u = x / n
       const v = y / n
-      if (bare(u, v) > 0.66) continue
+      if (bare(u, v) > 0.7) continue
       const lift = lush(u, v)
-      if (!r.chance(0.18 + lift * 0.95)) continue
+      if (!r.chance(0.2 + lift * 0.9)) continue
 
-      put(x, y + 1, tone(RAMP.grass, 0))
-      const blades = r.int(2, 4)
+      // A root shadow on only a third of them. On all of them it reads as
+      // polka dots, which is the failure mode one step along from speckle.
+      if (r.chance(0.34)) put(x, y + 1, tone(RAMP.grass, 0))
+      const blades = r.int(2, 3)
       for (let bl = 0; bl < blades; bl++) {
-        const bx = x + r.int(-2, 2)
+        const bx = x + r.int(-1, 1)
         const by = y + r.int(-1, 1)
-        const len = r.int(2, 5)
+        const len = r.int(2, 4)
         const lean = r.int(-1, 1)
-        const tip = 3 + Math.round(lift * 2)
+        const tip = 3.4 + lift * 1.6
         for (let k = 0; k < len; k++) {
           const f = k / Math.max(1, len - 1)
-          put(bx + Math.round(lean * f), by - k, tone(RAMP.grass, 1 + f * (tip - 1)))
+          put(bx + Math.round(lean * f), by - k, tone(RAMP.grass, 2 + f * (tip - 2)))
         }
       }
     }
@@ -384,24 +391,28 @@ export const water = (rng: Rng) =>
     const deep = normalized(fbm(r, 4))
     const warp = valueNoise(r, 6)
 
+    // Phase drift is kept small. At 1.6 periods of warp the ripples curled into
+    // closed loops and the pond read as polished marble; a third of a period is
+    // enough to stop them being corduroy and not enough to make them swirl.
+    const ripple = (u: number, v: number) => Math.sin((v * 7 + warp(u, v) * 0.45) * Math.PI * 2)
+
     for (let y = 0; y < n; y++) {
       const v = y / n
       for (let x = 0; x < n; x++) {
         const u = x / n
-        const band = Math.sin((v * 5 + warp(u, v) * 1.6) * Math.PI * 2)
-        let idx = 3 + (band > 0.35 ? 1 : band < -0.4 ? -1 : 0)
-        idx -= Math.round(deep(u, v) * 1.6)
+        const band = ripple(u, v)
+        let idx = 4 + (band > 0.4 ? 1 : band < -0.45 ? -1 : 0)
+        idx -= Math.round(deep(u, v) * 1.4)
         put(x, y, tone(RAMP.water, idx))
       }
     }
 
     // Glints: short horizontal dashes on the crests only, so they read as light
     // catching a wave rather than as scattered white pixels.
-    for (let i = 0; i < Math.round((n * n) / 340); i++) {
+    for (let i = 0; i < Math.round((n * n) / 220); i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      const band = Math.sin((y / n) * 5 * Math.PI * 2 + warp(x / n, y / n) * 1.6 * Math.PI * 2)
-      if (band < 0.55) continue
+      if (ripple(x / n, y / n) < 0.72) continue
       const len = r.int(2, 5)
       for (let k = 0; k < len; k++) put(x + k, y, tone(RAMP.water, 5))
     }
@@ -511,7 +522,7 @@ export const foliage = (rng: Rng) =>
  */
 export const stone = (rng: Rng) =>
   build(PROP, rng, (put, r, n) => {
-    const SEEDS = 7
+    const SEEDS = 10
     const sx: number[] = []
     const sy: number[] = []
     const base: number[] = []
@@ -547,8 +558,11 @@ export const stone = (rng: Rng) =>
         if (g > 0.66) idx += 1
         else if (g < 0.34) idx -= 1
 
-        if (edge < 1.2) idx = 0
-        else if (edge < 2.8) idx = wrapDelta(y - sy[hit]!, n) < 0 ? 5 : 1
+        // Thin joints on purpose. The rocks are dodecahedra, so their UVs
+        // stretch badly across a face and a fat joint turns into a long black
+        // scratch rather than a seam between two blocks.
+        if (edge < 0.8) idx = 0
+        else if (edge < 2) idx = wrapDelta(y - sy[hit]!, n) < 0 ? 5 : 1
 
         put(x, y, tone(RAMP.stone, idx))
       }
@@ -627,22 +641,24 @@ export const straw = (rng: Rng) =>
 
     for (let c = 0; c < n / COURSE; c++) {
       const top = c * COURSE
-      // The shadow line under the course above.
-      for (let x = 0; x < n; x++) {
-        put(x, top, tone(RAMP.straw, 0))
-        put(x, top + 1, tone(RAMP.straw, 0))
-      }
-      // Stalks, in bundles so the course has rhythm rather than fur.
-      for (let bundle = 0; bundle < 9; bundle++) {
+      // The shadow the course above throws down onto this one.
+      for (let x = 0; x < n; x++) put(x, top, tone(RAMP.straw, 0))
+
+      // Stalks, grouped into bundles so a course has rhythm rather than fur,
+      // but each stalk keeps its own tone. Giving a whole bundle one tone was
+      // what made the roof read as a patchwork quilt.
+      for (let bundle = 0; bundle < 13; bundle++) {
         const bx = r.int(0, n - 1)
-        const idx = r.int(2, 5)
+        const bidx = r.range(2.4, 4)
         for (let s = 0; s < r.int(4, 7); s++) {
-          const x = bx + r.int(-3, 3)
-          const len = r.int(9, COURSE + 2)
-          const lean = r.range(-0.25, 0.25)
-          const start = top + 2 + r.int(0, 2)
+          const x = bx + r.int(-2, 2)
+          const len = r.int(10, COURSE + 3)
+          const lean = r.range(-0.2, 0.2)
+          const start = top + 1 + r.int(0, 2)
+          // Dark where it disappears under the course above, lightest at the
+          // cut end, which is the only part of a thatch stalk in full sun.
           for (let k = 0; k < len; k++) {
-            put(x + Math.round(lean * k), start + k, tone(RAMP.straw, idx + (k > len - 3 ? -2 : 0)))
+            put(x + Math.round(lean * k), start + k, tone(RAMP.straw, bidx - 1 + (k / len) * 2.4))
           }
         }
       }
@@ -714,7 +730,9 @@ export const glass = (rng: Rng) =>
     const streak = valueNoise(r, 10)
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
-        const s = streak(((x + y) / 2 / n) * 1, (y * 3) / n)
+        // (x+y)/n advances by exactly one period per tile on both axes, so the
+        // diagonal streaks still wrap.
+        const s = streak((x + y) / n, (y * 3) / n)
         put(x, y, tone(RAMP.glass, 2 + Math.round(s * 3)))
       }
     }

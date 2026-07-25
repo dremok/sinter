@@ -53,7 +53,12 @@ function parseArgs(argv: string[]): Args {
 }
 
 async function startDevServer(): Promise<{ url: string; proc: ChildProcess }> {
-  const proc = spawn('npx', ['vite', '--port', '5199', '--strictPort'], {
+  // No --strictPort, and no fixed port. Several agents run screenshots at the
+  // same time during a parallel art pass, and a pinned port makes every run
+  // after the first die with EADDRINUSE. Vite picks the next free port and
+  // prints it; the regex below reads the real URL back, so this works whether
+  // one shot is running or eight.
+  const proc = spawn('npx', ['vite', '--port', '0'], {
     cwd: resolve(import.meta.dirname, '..'),
     stdio: ['ignore', 'pipe', 'pipe'],
   })
