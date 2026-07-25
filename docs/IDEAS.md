@@ -1321,3 +1321,86 @@ than to a chassis with suspension.
 So the likely split is: horse and bicycle stay analytic and cheap; the car gets
 real physics, because that is where the fun of a car lives. Revisit D13 when
 this happens rather than quietly reintroducing the dependency.
+
+
+## A11. How items are used: four modes
+
+Max's, and it resolves something the affordance system had left vague. Right now
+the only way to use anything is to stand in front of a thing and press a number.
+That covers one case out of four.
+
+### The four modes
+
+**1. Contextual.** The item acts on whatever you are facing, and the prompt says
+so. This is the existing affordance system. Axe on a tree, bucket on a fire,
+ladder on a wall. The item is not "used"; it is *applied*.
+
+Should feel automatic. If you are holding an axe and facing a tree, chopping
+should be the obvious single keypress, not a menu.
+
+**2. Self-contained.** Usable anywhere, at any time, and it opens its own
+interface. Phone, radio, map, lockpicks, camera. See A9.
+
+The world is irrelevant at the moment of use. What matters is the panel.
+
+**3. Projected.** Usable anywhere, aimed at a point or a target, and it leaves
+your hands. Molotov, rock, chili, a thrown torch, anything from a `LAUNCHER`.
+
+This is the mode the game is currently missing entirely, and it is the one that
+adds the most, because it decouples acting from standing next to.
+
+**4. Worn or passive.** Equipped, then always on. Glasses, boots, a cloak, a
+disguise. No use keypress at all; it changes what other things do.
+
+### Why the molotov is the important example
+
+It is the cleanest illustration of the balance D17 was trying to strike, and it
+is worth stating as the general rule:
+
+> **The verb is authored. The consequences are simulated.**
+
+Throwing a molotov is a specific, authored action belonging to a specific item.
+Where it lands, what catches, whether the fire spreads to the tree behind it,
+whether the grass carries it to the palisade, whether rain already soaked the
+ground: none of that is authored. It falls out of `sim/fire.ts` reading
+`FLAMMABLE` and `WET`, exactly as it does today.
+
+That is the shape every authored interaction should have. If an authored action
+also authors its outcome, it is a cutscene. If it hands off to the simulation,
+it is a tool.
+
+This is the answer to the worry recorded in D17 about losing generality: we are
+not adding authored *effects*, we are adding authored *verbs* that feed the
+general systems.
+
+### Consequences for the UI
+
+- Every item needs to answer "what happens if I press use right now?" and the
+  answer must never be silent nothing. If an item does nothing here, say why,
+  the same way the targeting prompt now says "nothing you carry acts on this".
+- The pack should show each item's mode at a glance. A small icon is enough:
+  hand for contextual, screen for self-contained, arc for projected, dot for worn.
+- Projected items need an aim affordance. On an isometric camera the cheapest
+  honest one is a ground reticle under the cursor with an arc preview.
+- Contextual use should not require opening the pack. Holding an axe and facing
+  a tree should be one key. The pack is for merging and inspection, not for
+  every action.
+
+### Implementation shape
+
+`ItemDef` gains a `use` field:
+
+    use?:
+      | { mode: 'contextual' }                      // affordance table decides
+      | { mode: 'panel'; hud: string }              // opens a registered HUD
+      | { mode: 'projected'; range: number; onLand: string }  // named effect
+      | { mode: 'worn'; slot: string }
+
+`onLand` names an entry in the interactions table rather than a function, so
+throwing stays data. The effect it names should almost always be "apply these
+properties at this point and let the simulation continue", not "destroy the
+target".
+
+Molotov, concretely: `{ mode: 'projected', range: 9, onLand: 'shatter_burning' }`,
+where `shatter_burning` sets `HOT 1` and `FLAMMABLE 1` at the impact point. Fire
+does the rest, including spreading to the tree nobody thought about.
