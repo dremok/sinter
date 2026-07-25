@@ -135,6 +135,51 @@ export const SPECS: readonly TextureSpec[] = [
       'separates the soil from the turf here, not chroma.',
   },
   {
+    name: 'grassDry',
+    size: 512,
+    source: 1024,
+    worldUnits: 42.7,
+    prompt:
+      `${STYLE} Dry sun-bleached summer pasture seen from directly above, short ` +
+      'and sparse. Broad soft drifts about a sixth of the image across where it is ' +
+      'thinner or thicker, small individual tufts of dry grass a few pixels across ' +
+      'scattered densely over it, and a scatter of pale bleached stalks. Dull khaki ' +
+      'and olive-tan, dusty, never yellow and never bright.',
+    palette: [...RAMP.dryGrass, ...steps(RAMP.straw, 1, 3)],
+    stretch: 0.85,
+    gamma: 1,
+    sharpen: 0.4,
+    flatten: 0,
+    notes:
+      'One of two variants region.ts blends against the main ground tile by noise. ' +
+      'Half the resolution of `grass` and therefore half the footprint, 42 world ' +
+      'units, which is still nearly two screens wide: a blend partner may not show a ' +
+      'period either. The straw ramp is in the palette for bleached stalks, and it is ' +
+      'held to the dark half so they read as dry rather than as gold.',
+  },
+  {
+    name: 'grassWorn',
+    size: 512,
+    source: 1024,
+    worldUnits: 42.7,
+    prompt:
+      `${STYLE} Ground worn down to bare earth seen from directly above, trampled ` +
+      'and scuffed, with only ragged islands of surviving dry grass across about a ' +
+      'third of it. Broad soft drifts of packed and loose soil about a sixth of the ' +
+      'image across, and a scatter of small pebbles and twigs. Dull grey-brown earth, ' +
+      'dusty, low saturation.',
+    palette: [...RAMP.dirt, ...steps(RAMP.dryGrass, 1, 4)],
+    stretch: 0.8,
+    gamma: 1,
+    sharpen: 0.4,
+    flatten: 0,
+    notes:
+      'The other blend partner: this one is soil first and grass second, which is the ' +
+      'inverse of `grass`. palette.ts is emphatic that `dirt` must stay clear of the ' +
+      'tints region.ts uses for tracks and the yard, so the stretch is held back a ' +
+      'little to keep this tile from reaching as light as a track does.',
+  },
+  {
     name: 'sand',
     size: 256,
     source: 1024,
@@ -409,6 +454,28 @@ export const SPECS: readonly TextureSpec[] = [
       'textures.ts sets crust plate size directly, which is the one control that ' +
       'matters, and its hearth reads as fire from across the map.',
   },
+  {
+    name: 'fruit',
+    size: 64,
+    source: 1024,
+    worldUnits: 5.3,
+    prompt:
+      `${STYLE} The skin of a ripe red apple, close up, filling the frame. Smooth ` +
+      'and waxy, with soft mottled blushes of deeper and lighter red drifting across ' +
+      'it and a scatter of tiny pale lenticel flecks. Deep muted red, matte, not shiny, ' +
+      'no highlight anywhere.',
+    palette: [...RAMP.fruit],
+    stretch: 0.8,
+    gamma: 1,
+    sharpen: 0.35,
+    flatten: 0.9,
+    notes:
+      'The apple recipe asks kitbash for `ember`, a fire ramp, so a Red Apple renders ' +
+      'pumpkin orange. This is the material that fixes it. Flattened hard and matte ' +
+      'twice over in the prompt: a highlight baked into a small round fruit is the ' +
+      'most obviously wrong thing a cel-shaded object can carry, because it stays put ' +
+      'while the sun moves.',
+  },
 ]
 
 export const SPEC_BY_NAME = new Map(SPECS.map((s) => [s.name, s]))
@@ -419,7 +486,7 @@ export const SPEC_BY_NAME = new Map(SPECS.map((s) => [s.name, s]))
  * shared style string. It is hashed alongside each spec, so bumping it is how a
  * pipeline change invalidates the cache without anyone editing fourteen prompts.
  */
-export const PIPELINE_VERSION = 12
+export const PIPELINE_VERSION = 13
 
 /** The fal.ai endpoint. PATINA is fal's tiling material model; see ASSET_PIPELINE. */
 export const MODEL = 'fal-ai/patina/material'

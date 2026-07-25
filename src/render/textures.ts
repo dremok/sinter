@@ -458,8 +458,8 @@ function ground(look: Ground) {
       // has the same feature size in world units, not half of it.
       const k = n / GROUND
       const low = normalized(fbm(r, Math.max(2, Math.round(4 * k))))
-      const mid = normalized(fbm(r, Math.max(4, Math.round(13 * k))))
-      const near = normalized(fbm(r, Math.max(6, Math.round(30 * k))))
+      const mid = normalized(fbm(r, Math.max(4, Math.round(22 * k))))
+      const near = normalized(fbm(r, Math.max(6, Math.round(55 * k))))
       const patch = normalized(fbm(r, Math.max(3, Math.round(9 * k)), 3))
 
       for (let y = 0; y < n; y++) {
@@ -478,7 +478,7 @@ function ground(look: Ground) {
           const idx = clamp(
             look.base +
               low(u, v) * look.span +
-              (mid(u, v) - 0.5) * 3.0 +
+              (mid(u, v) - 0.5) * 3.4 +
               (near(u, v) - 0.5) * 1.4,
             0,
             4.9,

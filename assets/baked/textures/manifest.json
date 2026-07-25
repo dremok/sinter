@@ -159,6 +159,26 @@
       "dominance": 0.356
     }
   },
+  "grassDry": {
+    "hash": "1926749c50cb6eeb",
+    "size": 512,
+    "worldUnits": 42.7,
+    "model": "fal-ai/patina/material",
+    "seed": 9167,
+    "bytes": 25869,
+    "phase": [
+      1,
+      1
+    ],
+    "generatedAt": "2026-07-25",
+    "metrics": {
+      "seamX": 0.977,
+      "seamY": 1.122,
+      "busyness": 0.014,
+      "used": 8,
+      "dominance": 0.352
+    }
+  },
   "plank": {
     "hash": "56a989377b6e619b",
     "size": 64,
