@@ -140,6 +140,23 @@ export interface Region {
    * without anybody writing that down.
    */
   standables: { x: number; z: number; radius: number; top: number }[]
+  /**
+   * What is here and what it is for.
+   *
+   * D22 asks that a region expose its meaning rather than just its geometry, so
+   * that systems ask the region instead of knowing the map. Nothing consumes
+   * this yet; it exists so that when something does — an NPC who says where the
+   * mill is, a generator validating that home has water within reach, a spawn
+   * rule that wants somewhere `work` shaped — it asks rather than hardcodes a
+   * coordinate that generation would immediately invalidate.
+   */
+  places: Place[]
+}
+
+export interface Place {
+  id: string
+  kind: 'home' | 'water' | 'work' | 'landmark' | 'exit'
+  at: THREE.Vector3
 }
 
 /**
@@ -280,7 +297,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     rut: flatMat(tex.sand, 0x836444),
     ash: flatMat(tex.stone, 0x6a5949),
     parched: flatMat(tex.grass, 0xd9c67e),
-    wheat: flatMat(tex.straw, 0xc9ab63),
+    wheat: flatMat(tex.straw, 0xe7d296),
     tilled: flatMat(tex.sand, 0x6f5237),
     shore: flatMat(tex.sand, 0xd9bf8e),
     water: toonUnique({
@@ -314,7 +331,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     reed: toonUnique({ color: 0xa2b27a, map: tiled(tex.straw, 0.6, 0.6) }),
     tuft: toonUnique({ color: 0x8a9354, map: tiled(tex.straw, 0.7, 0.7) }),
     tuftPale: toonUnique({ color: 0xa9a271, map: tiled(tex.straw, 0.7, 0.7) }),
-    wheatStalk: toonUnique({ color: 0xd6bb70, map: tiled(tex.straw, 0.6, 0.6) }),
+    wheatStalk: toonUnique({ color: 0xecd68c, map: tiled(tex.straw, 0.6, 0.6) }),
     cloth: toonUnique({ map: tiled(tex.cloth, 1.2, 1.2) }),
     clothBlue: toonUnique({ color: 0x8fa8c4, map: tiled(tex.cloth, 1.2, 1.2) }),
     clothRed: toonUnique({ color: 0xc48b7a, map: tiled(tex.cloth, 1.2, 1.2) }),
@@ -2665,9 +2682,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * the clearing.
    */
   const millRng = rng.fork('mill')
-  const MILL = { x: 18.9, z: 4.9 }
+  const MILL = { x: 18.9, z: 4.75 }
   {
-    const h = heightAt(MILL.x, MILL.z + 3.0)
+    const h = heightAt(MILL.x, MILL.z - 3.0)
     const g = new THREE.Group()
 
     const base = new THREE.Mesh(new THREE.BoxGeometry(4.4, 1.5, 3.6), M.rubbleWall)
@@ -2724,14 +2741,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     hoist.castShadow = true
     g.add(hoist)
 
-    g.position.set(MILL.x, h, MILL.z + 3.0)
+    g.position.set(MILL.x, h, MILL.z - 3.0)
     g.rotation.y = -0.22
     group.add(g)
     occluders.push(occluder(g, 2.4, ridge + 0.4))
-    solid(g, new THREE.Vector3(MILL.x, h + 1.5, MILL.z + 3.0), 'The mill', { WOODEN: 0.6, STONE: 0.5, FLAMMABLE: 0.35, RIGID: 0.9 }, 2.3)
+    solid(g, new THREE.Vector3(MILL.x, h + 1.5, MILL.z - 3.0), 'The mill', { WOODEN: 0.6, STONE: 0.5, FLAMMABLE: 0.35, RIGID: 0.9 }, 2.3)
 
     // The wheel, standing in the water where the brook actually runs.
-    const wheelY = heightAt(MILL.x, MILL.z) + BROOK_D * 0.52 + 0.65
+    const wheelY = heightAt(MILL.x - 0.5, MILL.z - 0.9) + BROOK_D * 0.52 + 0.6
     const wheel = new THREE.Group()
     for (const r of [1.5, 1.15]) {
       const rim = new THREE.Mesh(new THREE.TorusGeometry(r, 0.11, 5, 14), M.log)
@@ -2752,14 +2769,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
     const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.6, 8).rotateX(Math.PI / 2), M.log)
     wheel.add(axle)
-    wheel.position.set(MILL.x - 0.4, wheelY, MILL.z + 0.55)
+    wheel.position.set(MILL.x - 0.5, wheelY, MILL.z - 0.9)
     wheel.rotation.y = -0.22
     group.add(wheel)
 
     // A millstone nobody has moved in years, and sacks against the wall.
     const stoneWheel = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 0.26, 14), M.stone)
-    const sx = MILL.x + 2.9
-    const sz = MILL.z + 4.6
+    const sx = MILL.x + 2.7
+    const sz = MILL.z - 1.5
     stoneWheel.position.set(sx, heightAt(sx, sz) + 0.16, sz)
     stoneWheel.rotation.set(0.05, 0.4, 0.08)
     stoneWheel.castShadow = true
@@ -2771,8 +2788,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     group.add(hub)
 
     for (let i = 0; i < 4; i++) {
-      const x = MILL.x - 2.4 + millRng.range(-0.5, 0.5)
-      const z = MILL.z + 4.4 + i * 0.55 + millRng.range(-0.2, 0.2)
+      const x = MILL.x - 2.5 + millRng.range(-0.5, 0.5)
+      const z = MILL.z - 2.3 + i * 0.5 + millRng.range(-0.2, 0.2)
       const sack = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.36, 0.72, 8), M.cloth)
       sack.position.set(x, heightAt(x, z) + 0.36, z)
       sack.rotation.set(millRng.range(-0.12, 0.12), millRng.range(0, 3), millRng.range(-0.12, 0.12))
@@ -2818,8 +2835,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         const inside =
           ((x - FIELD.x) / FIELD.rx) ** 2 + ((z - FIELD.z) / FIELD.rz) ** 2 < 0.92
         if (!inside) continue
-        if (!fieldRng.chance(0.55)) continue
-        const hgt = fieldRng.range(0.75, 1.25)
+        if (!fieldRng.chance(0.8)) continue
+        const hgt = fieldRng.range(0.55, 0.9)
         const stalk = new THREE.Mesh(stalkGeo, fieldRng.chance(0.7) ? M.wheatStalk : M.tuftPale)
         stalk.scale.set(1, hgt, 1)
         stalk.position.set(x, heightAt(x, z) + hgt * 0.46, z)
@@ -2879,13 +2896,13 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     footing.position.y = 0.15
     footing.receiveShadow = true
     g.add(footing)
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(w, wallH, dep), M.plankDark)
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(w, wallH, dep), M.plank)
     walls.position.y = 0.3 + wallH / 2
     walls.castShadow = true
     walls.receiveShadow = true
     g.add(walls)
     for (let i = 0; i < 7; i++) {
-      const stud = new THREE.Mesh(new THREE.BoxGeometry(0.16, wallH, 0.1), M.plank)
+      const stud = new THREE.Mesh(new THREE.BoxGeometry(0.16, wallH, 0.1), M.plankDark)
       stud.position.set(-w / 2 + 0.5 + i * ((w - 1) / 6), 0.3 + wallH / 2, dep / 2 + 0.03)
       g.add(stud)
     }
@@ -2897,7 +2914,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     for (const sx of [-1, 1]) {
       for (let i = 0; i < 5; i++) {
         const f = 1 - (i + 0.5) / 5
-        const step = new THREE.Mesh(new THREE.BoxGeometry(0.16, (ridge - eave) / 5 + 0.03, dep * f), M.plankDark)
+        const step = new THREE.Mesh(new THREE.BoxGeometry(0.16, (ridge - eave) / 5 + 0.03, dep * f), M.plank)
         step.position.set((sx * w) / 2, eave + ((i + 0.5) * (ridge - eave)) / 5, 0)
         g.add(step)
       }
@@ -2980,8 +2997,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     [
       [10.8, 10.4],
       [14.0, 8.6],
-      [17.0, 7.2],
-      [19.2, 6.0],
+      [17.2, 7.4],
+      [18.4, 6.6],
     ],
     0.58,
     M.track,
@@ -2995,12 +3012,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const PLACED: Record<string, [number, number]> = {
     torch: [1.5, 8.2],
     flint: [4.9, 5.2],
-    horseshoe: [-1.1, 3.4],
+    horseshoe: [3.6, -3.4],
     straw: [-6.6, 9.5],
-    rope: [-7.7, 9.9],
+    rope: [15.8, 8.6],
     bucket: [-6.2, 4.3],
-    plank: [-14.0, -1.2],
-    oil: [6.2, 1.0],
+    plank: [-2.6, -3.6],
+    oil: [22.2, 3.4],
     apple: [9.4, 6.2],
     axe: [10.0, 12.1],
 
@@ -3015,11 +3032,11 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     knife: [8.6, 12.8],
     // On the lean-to shelf, which is where a jar you do not want indoors goes.
     poison: [11.6, 13.6],
-    // Dropped at the water's edge and never found. Not near any door.
+    // Dropped at the water's edge and never found. Nowhere near the mill.
     key: [-9.2, 1.2],
-    // Well into the west wood, off every track. The one thing in Band 0 worth
-    // going to look for rather than tripping over.
-    sword: [-13.4, -8.6],
+    // Left in the barn, at the far end of the field track. The one thing in
+    // Band 0 worth going to look for rather than tripping over.
+    sword: [-25.6, 18.6],
   }
 
   /**
@@ -3135,5 +3152,20 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     gate: new THREE.Vector3(0, gateH, PAL_Z),
     fadeOccluders,
     standables,
+    places: [
+      { id: 'hearth', kind: 'home', at: new THREE.Vector3(HOME.x, heightAt(HOME.x, HOME.z), HOME.z) },
+      { id: 'well', kind: 'water', at: new THREE.Vector3(3.0, heightAt(3.0, 11.3), 11.3) },
+      { id: 'pond', kind: 'water', at: new THREE.Vector3(POND.x, WATER_LEVEL, POND.z) },
+      { id: 'ford', kind: 'water', at: new THREE.Vector3(FORD.x, heightAt(FORD.x, FORD.z), FORD.z) },
+      { id: 'mill', kind: 'work', at: new THREE.Vector3(MILL.x, heightAt(MILL.x, MILL.z), MILL.z) },
+      { id: 'barn', kind: 'work', at: new THREE.Vector3(BARN.x, heightAt(BARN.x, BARN.z), BARN.z) },
+      { id: 'field', kind: 'work', at: new THREE.Vector3(FIELD.x, heightAt(FIELD.x, FIELD.z), FIELD.z) },
+      { id: 'block', kind: 'work', at: new THREE.Vector3(10.4, heightAt(10.4, 10.9), 10.9) },
+      { id: 'oldoak', kind: 'landmark', at: new THREE.Vector3(10.6, heightAt(10.6, 8.8), 8.8) },
+      { id: 'grave', kind: 'landmark', at: new THREE.Vector3(9.3, heightAt(9.3, 10.0), 10.0) },
+      { id: 'arch', kind: 'landmark', at: new THREE.Vector3(-1.2, heightAt(-1.2, -13.6), -13.6) },
+      { id: 'tower', kind: 'landmark', at: new THREE.Vector3(-8.6, heightAt(-8.6, -17.5), -17.5) },
+      { id: 'gate', kind: 'exit', at: new THREE.Vector3(0, gateH, PAL_Z) },
+    ],
   }
 }

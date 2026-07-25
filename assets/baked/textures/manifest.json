@@ -176,19 +176,19 @@
     }
   },
   "straw": {
-    "hash": "da98b8261e8b9027",
+    "hash": "34e14bd2234935f5",
     "size": 64,
     "worldUnits": 5.3,
     "model": "fal-ai/patina/material",
-    "seed": 9074,
-    "bytes": 1195,
+    "seed": 32831,
+    "bytes": 1180,
     "generatedAt": "2026-07-25",
     "metrics": {
-      "seamX": 0.846,
-      "seamY": 0.782,
-      "busyness": 0.0742,
+      "seamX": 0.648,
+      "seamY": 0.467,
+      "busyness": 0.0734,
       "used": 5,
-      "dominance": 0.459
+      "dominance": 0.496
     }
   },
   "water": {

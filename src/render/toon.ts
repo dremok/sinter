@@ -303,6 +303,23 @@ vec3 toSrgb( vec3 c ) {
 void main() {
   vec3 c = texture2D( tFrame, vUv ).rgb;
 
+  /**
+   * Exposure, in linear light, before anything else touches the frame.
+   *
+   * The grade had been doing its desaturation job and quietly costing a third
+   * of a stop while doing it: mean luminance had slid from 103 to about 70,
+   * nearly half the frame sat below L=64, and the first percentile had reached
+   * 1, which is pure black. Nothing in the picture was bright.
+   *
+   * Worth being precise about what was actually wrong, because the two are easy
+   * to confuse: reducing chroma was correct and is why the frame stopped being
+   * a wall of one green. Reducing luminance was not, and was never asked for.
+   * A dark frame and a low-chroma frame look similar in a thumbnail and are
+   * completely different problems. This lifts the second without touching the
+   * first.
+   */
+  c *= 1.28;
+
   // Highlight shoulder, in linear light, driven by the brightest channel and
   // applied to all three equally.
   //
@@ -312,7 +329,7 @@ void main() {
   // one factor keeps the hue and the saturation and only spends the value, so a
   // very hot rock stays a very hot orange rock.
   float peak = max( c.r, max( c.g, c.b ) );
-  float knee = 0.76;
+  float knee = 0.88;
   float head = 1.0 - knee;
   float rolled = min( peak, knee ) + head * ( 1.0 - exp( -max( peak - knee, 0.0 ) / head ) );
   c *= peak > 1e-4 ? rolled / peak : 1.0;
@@ -332,7 +349,11 @@ void main() {
   // making shadow read as shadow: outdoors a shadow is lit by a broad grey-blue
   // sky, so it goes flat as well as cool. Saturating everything equally is what
   // leaves dark grass looking like dark grass instead of like grass in shade.
-  c = clamp( ( c - 0.40 ) * 1.16 + 0.42, 0.0, 1.0 );
+    // Then lift the black point off zero. p1 had reached 1: the darkest percent
+  // of the frame was pure black, where the baseline sat at 23. Shadow with no
+  // information in it is a hole, not a shadow.
+  c = ( c - 0.40 ) * 1.22 + 0.45;
+  c = clamp( c * 0.94 + 0.038, 0.0, 1.0 );
   float g = dot( c, LUMA );
   c = clamp( mix( vec3( g ), c, mix( 0.82, 1.22, smoothstep( 0.04, 0.58, l ) ) ), 0.0, 1.0 );
 
@@ -353,7 +374,7 @@ void main() {
   // Ascending, then inverted: GLSL leaves smoothstep undefined when the first
   // edge is the larger one, however reliably a given driver happens to handle it.
   float v = 1.0 - smoothstep( 0.11, 0.55, dot( d, d ) );
-  c = mix( c * vec3( 0.83, 0.88, 0.99 ), c, mix( 1.0, v, uVignette ) );
+  c = mix( c * vec3( 0.90, 0.93, 1.00 ), c, mix( 1.0, v, uVignette ) );
 
   gl_FragColor = vec4( c, 1.0 );
 }

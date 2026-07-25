@@ -116,10 +116,12 @@ import type { Bitmap } from './png'
  * accepted: a fractional one needs edge handling to stay seamless, and every
  * size this tool asks for divides cleanly anyway.
  */
-export function reduce(src: Bitmap, size: number): Bitmap {
+export function reduce(src: Bitmap, size: number, phase: [number, number] = [0, 0]): Bitmap {
   if (src.width !== src.height) throw new Error('expected a square source')
   if (src.width % size !== 0) throw new Error(`${src.width} does not reduce evenly to ${size}`)
   const f = src.width / size
+  if (f === 1 && phase[0] === 0 && phase[1] === 0) return src
+  if (phase[0] !== 0 || phase[1] !== 0) src = roll(src, phase[0], phase[1])
   if (f === 1) return src
 
   const out = new Uint8Array(size * size * 4)

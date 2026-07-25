@@ -240,9 +240,10 @@ export const SPECS: readonly TextureSpec[] = [
     prompt:
       `${STYLE} A wall of sawn wooden planks laid horizontally, about sixteen narrow ` +
       'boards stacked from top to bottom of the image. Clear dark gaps between the ' +
-      'boards, each board a distinctly different tone from the ones above and below, ' +
-      'some noticeably darker, long straight lengthwise grain, a few staggered butt ' +
-      'joints where boards end. Warm pale yellow-brown, dry and weathered.',
+      'boards, long straight lengthwise grain, a few staggered butt joints where ' +
+      'boards end. The boards alternate between lighter and darker at random, evenly ' +
+      'over the whole image, with no overall progression from the top of the image to ' +
+      'the bottom. Warm pale yellow-brown, dry and weathered.',
     palette: [...RAMP.wood],
     stretch: 0.85,
     gamma: 1,

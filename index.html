@@ -9,10 +9,11 @@
        * UI surface.
        *
        * Everything here is DOM over the WebGL canvas. Three type roles and no
-       * more: a slab display face carries names and headers, a humanist sans
-       * carries labels and copy, and monospace is reserved for numerals so
-       * columns of digits line up. All three are system stacks, because the
-       * game has to boot with the network unplugged.
+       * more: a slab display face carries names, headers and every figure a
+       * player reads, a humanist sans carries labels and copy, and monospace is
+       * left to key legends and the debug block, which are the only places a
+       * typewriter is the right answer. All three are system stacks, because
+       * the game has to boot with the network unplugged.
        */
       :root {
         --ink: #f0e6d3;
@@ -84,7 +85,10 @@
       }
       #carry[hidden] { display: none; }
       #carry svg { display: block; opacity: 0.85; }
-      #carry-n { font: 600 13px/1 var(--mono); color: var(--ink); }
+      /* Display face, not mono. A single figure standing on its own has no
+         column to align with, so tabular numerals buy nothing and cost the one
+         piece of typography the panel is built on. */
+      #carry-n { font: 400 14px/1 var(--display); color: var(--ink); }
 
       /* ---------------------------------------------------------- debug hud */
       /*
@@ -127,20 +131,12 @@
       .muted { color: var(--dim); }
 
       /*
-       * A prompt whose only content is muted is a negative: the thing is named
-       * but nothing you carry acts on it. That is ambient information, not a
-       * notification, so it loses the plate, the accent and most of its weight
-       * rather than sitting in the frame shouting no.
+       * A prompt that names a thing but offers no key is not an offer, and it
+       * used to sit in the frame permanently saying no. Greying it back only
+       * made it illegible, which is a worse answer than not drawing it: see
+       * `Ui.prompt`, which now shows the pill only when there is something to
+       * press. `.muted` stays because main.ts still writes it.
        */
-      #prompt:has(.muted) {
-        background: rgba(14, 11, 9, 0.55);
-        box-shadow: none;
-        opacity: 0.62;
-      }
-      #prompt:has(.muted) b { font-weight: 400; color: var(--ink-2); }
-      /* The negative line is written in main.ts. House style is sentence case
-         and nothing in this UI starts lowercase, so it starts here. */
-      #prompt .muted::first-letter { text-transform: uppercase; }
 
       /* -------------------------------------------------------------- keys */
       /*
@@ -182,7 +178,7 @@
 
       .held-cycle { display: flex; flex-direction: column; align-items: center; gap: 3px; }
       .held-cycle .key + .key { margin-left: 0; }
-      .held-pos { font: 600 10px/1 var(--mono); color: var(--ink-2); }
+      .held-pos { font: 400 11px/1 var(--display); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
       .held-icon {
         width: 34px; height: 34px; flex: none; border-radius: 3px;
@@ -194,7 +190,7 @@
       .held-name { font: 400 14px/1.15 var(--display); color: var(--ink); }
       .held-use { font: 400 11px/1.35 var(--ui); color: var(--dim); margin-top: 2px; }
       .held-aim { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
-      .held-reach { font: 600 10px/1 var(--mono); color: var(--ink-2); letter-spacing: 0.02em; }
+      .held-reach { font: 400 12px/1 var(--display); color: var(--ink-2); letter-spacing: 0.01em; }
       .held-dot { color: var(--dim); font-size: 10px; }
 
       .held-mode {
@@ -283,7 +279,7 @@
         color: #f4e9d3; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
       }
       .inv-count { font: 500 11px/1 var(--ui); letter-spacing: 0.06em; color: var(--dim); }
-      .inv-count b { font: 600 12px/1 var(--mono); color: var(--ink-2); font-weight: 600; }
+      .inv-count b { font: 400 13px/1 var(--display); color: var(--ink-2); }
 
       /* Dashed, so every divider in the panel is the same stitch as the frame. */
       .rule { height: 0; margin: 0 22px; flex: none; border-top: 1px dashed var(--stitch); }
@@ -405,7 +401,7 @@
       .card-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 7px; }
       .card-mode { color: var(--ink-2); }
       .card:hover .card-mode { color: var(--ink); }
-      .card-slot { font: 700 9px/1 var(--mono); letter-spacing: 0.1em; color: var(--warm); }
+      .card-slot { font: 400 12px/1 var(--display); color: var(--warm); }
 
       /*
        * Revealed on hover. Ten of these reading "Hold" down the list turned the
@@ -466,11 +462,18 @@
       .bench-hint[hidden] { display: none; }
 
       .slots { display: grid; grid-template-columns: 1fr 18px 1fr; gap: 9px; align-items: center; }
+      /*
+       * A socket cut into the bench, not a dashed box. It used to be a dashed
+       * rectangle with a dashed tile inside it, and two placeholders nested
+       * inside each other read as unfinished. The well is furniture and the one
+       * dashed mark inside it is the placeholder.
+       */
       .slot {
-        height: 58px; border-radius: 3px; padding: 5px;
+        height: 58px; border: 0; border-radius: 3px; padding: 5px;
         display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
         text-align: center; cursor: pointer;
-        border: 1px dashed rgba(232, 224, 208, 0.2); background: rgba(0, 0, 0, 0.25);
+        background: rgba(0, 0, 0, 0.3);
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45), inset 0 4px 9px rgba(0, 0, 0, 0.4);
       }
       .slot img { width: 22px; height: 22px; }
       .slot span {
@@ -481,11 +484,11 @@
          without a third copy of the word "empty". */
       .slot:not(.filled)::after {
         content: ''; width: 22px; height: 22px; border-radius: 2px;
-        border: 1px dashed rgba(232, 224, 208, 0.18);
+        border: 1px dashed rgba(232, 224, 208, 0.24);
       }
       .slot.filled {
-        border: 1px solid rgba(224, 163, 92, 0.45);
-        background: linear-gradient(rgba(224, 163, 92, 0.13), rgba(224, 163, 92, 0.04));
+        background: linear-gradient(rgba(224, 163, 92, 0.15), rgba(224, 163, 92, 0.05));
+        box-shadow: inset 0 0 0 1px rgba(224, 163, 92, 0.5);
       }
       .plus { text-align: center; color: var(--dim); font: 400 15px/1 var(--display); }
 
@@ -612,16 +615,23 @@
     <div id="held"></div>
 
     <!--
-      The always-true verbs, and only those. Camera rotation is gone from
-      main.ts, so Q and E are gone from here. The number keys are deliberately
-      absent: they act on whatever you are facing and only exist while the
-      prompt above is offering them, and a legend entry that is dead most of
-      the time teaches the player to stop reading the legend.
+      Every verb that is true all the time, in the order you learn them: move,
+      take, drop, choose what is in hand, use it, open the pack. Q and E cycle
+      the held item now that camera rotation is gone; "Hold" is the same word
+      the pack card uses for the same act, so the two never teach different
+      names for one thing.
+
+      The number keys are deliberately absent. They act on whatever you are
+      facing and exist only while the prompt above is offering them, and a
+      legend entry that is dead most of the time teaches the player to stop
+      reading the legend.
     -->
     <div id="controls">
       <span class="ctrl"><span><span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span></span><span>Move</span></span>
       <span class="ctrl"><span class="key">F</span><span>Take</span></span>
       <span class="ctrl"><span class="key">G</span><span>Drop</span></span>
+      <span class="ctrl"><span><span class="key">Q</span><span class="key">E</span></span><span>Hold</span></span>
+      <span class="ctrl"><span class="key">R</span><span>Use</span></span>
       <span class="ctrl"><span class="key">Tab</span><span>Pack</span></span>
     </div>
 
