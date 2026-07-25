@@ -12,35 +12,11 @@
  */
 
 import * as THREE from 'three'
-import type { ItemDef, MaterialKind, PartKind, PartSpec } from '../items/catalog'
+import type { ItemDef, MaterialKind, PartSpec } from '../items/catalog'
 import { MATERIAL_COLOR } from './palette'
 import { toonUnique } from './toon'
 import { loadedTextures, tiled } from './textures'
-
-const geometries: Record<PartKind, THREE.BufferGeometry> = {
-  rod: new THREE.CylinderGeometry(0.5, 0.5, 1, 8),
-  blade: new THREE.BoxGeometry(1, 1, 1),
-  box: new THREE.BoxGeometry(1, 1, 1),
-  sphere: new THREE.SphereGeometry(0.5, 12, 9),
-  disc: new THREE.CylinderGeometry(0.5, 0.5, 1, 14),
-  cone: new THREE.CylinderGeometry(0.5, 0.38, 1, 12),
-  shard: new THREE.IcosahedronGeometry(0.5, 0),
-  wrap: new THREE.SphereGeometry(0.5, 9, 6),
-  ring: new THREE.TorusGeometry(0.4, 0.12, 6, 14),
-  leafy: new THREE.IcosahedronGeometry(0.5, 1),
-}
-
-// A blade is a box squashed along one edge, which reads as tapered from the
-// isometric angle without needing custom geometry.
-{
-  const g = geometries.blade as THREE.BoxGeometry
-  const pos = g.attributes.position!
-  for (let i = 0; i < pos.count; i++) {
-    if (pos.getX(i) > 0) pos.setY(i, pos.getY(i) * 0.25)
-  }
-  pos.needsUpdate = true
-  g.computeVertexNormals()
-}
+import { partGeometry } from './parts'
 
 const materials = new Map<MaterialKind, THREE.MeshToonMaterial>()
 
@@ -89,7 +65,7 @@ function materialFor(kind: MaterialKind): THREE.MeshToonMaterial {
 }
 
 function buildPart(spec: PartSpec): THREE.Mesh {
-  const mesh = new THREE.Mesh(geometries[spec.part], materialFor(spec.material))
+  const mesh = new THREE.Mesh(partGeometry(spec.part), materialFor(spec.material))
   mesh.scale.set(spec.scale[0], spec.scale[1], spec.scale[2])
   mesh.position.set(spec.at[0], spec.at[1], spec.at[2])
   if (spec.rot) mesh.rotation.set(spec.rot[0], spec.rot[1], spec.rot[2])

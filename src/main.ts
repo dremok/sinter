@@ -4,6 +4,7 @@ import { Clock, TICK_DT } from './core/clock'
 import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
 import { sizeToPixelBuffer, toonUnique } from './render/toon'
+import { loadParts } from './render/parts'
 import { Character } from './render/character'
 import { BOUNDS, buildRegion } from './world/region'
 import { queries, world, type Entity } from './ecs/world'
@@ -36,6 +37,10 @@ const PACK = params.get('pack')
 
 const rng = createRng(SEED)
 const clock = new Clock()
+
+// The kitbash library has to be in memory before anything assembles an item.
+// Top-level await, so the headless harness still sees a single settled frame.
+await loadParts()
 
 // ---------------------------------------------------------------- rendering
 

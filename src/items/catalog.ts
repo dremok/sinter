@@ -14,17 +14,36 @@
 
 import type { Properties } from '../props/registry'
 
+/**
+ * Part names from `assets/parts/parts.glb`, authored by
+ * `tools/blender/build_parts.py`. Adding one means adding a builder there and
+ * re-running the script; the game throws at load if a recipe names a part the
+ * library does not have, which is deliberate.
+ */
 export type PartKind =
-  | 'rod'
-  | 'blade'
-  | 'box'
-  | 'sphere'
-  | 'disc'
-  | 'cone'
-  | 'shard'
-  | 'wrap'
-  | 'ring'
-  | 'leafy'
+  | 'haft_short'
+  | 'haft_long'
+  | 'blade_axe'
+  | 'blade_knife'
+  | 'head_hammer'
+  | 'bucket_body'
+  | 'flask_body'
+  | 'jar_body'
+  | 'plank_board'
+  | 'crate_box'
+  | 'ring_band'
+  | 'horseshoe'
+  | 'rope_coil'
+  | 'stone_shard'
+  | 'apple_body'
+  | 'straw_bale'
+  | 'rag_wrap'
+  | 'torch_head'
+  | 'leaf_cluster'
+  | 'stopper'
+  | 'nail_spike'
+  | 'disc_flat'
+  | 'bar_stock'
 
 export type MaterialKind =
   | 'wood'
@@ -82,8 +101,8 @@ add({
   epithet: 'Tarred',
   noun: 'Torch',
   parts: [
-    { part: 'rod', scale: [0.07, 0.8, 0.07], at: [0, -0.1, 0], material: 'wood' },
-    { part: 'wrap', scale: [0.22, 0.26, 0.22], at: [0, 0.34, 0], material: 'cloth' },
+    { part: 'haft_short', scale: [1, 1, 1], at: [0, -0.26, 0], material: 'wood' },
+    { part: 'torch_head', scale: [1.15, 1.15, 1.15], at: [0, 0.2, 0], material: 'cloth' },
   ],
 })
 
@@ -94,7 +113,7 @@ add({
   props: { STONE: 1, SHARP: 0.6, HEAVY: 0.28 },
   epithet: 'Flinted',
   noun: 'Flake',
-  parts: [{ part: 'shard', scale: [0.24, 0.28, 0.18], at: [0, 0, 0], material: 'stone' }],
+  parts: [{ part: 'stone_shard', scale: [1.15, 1.05, 1.15], at: [0, -0.1, 0], material: 'stone' }],
 })
 
 add({
@@ -105,7 +124,7 @@ add({
   epithet: 'Iron-shod',
   noun: 'Shoe',
   parts: [
-    { part: 'ring', scale: [0.34, 0.1, 0.34], at: [0, 0, 0], rot: [1.57, 0, 0], material: 'steel' },
+    { part: 'horseshoe', scale: [1.3, 1.3, 1.3], at: [0, 0, 0], rot: [1.57, 0, 0], material: 'steel' },
   ],
 })
 
@@ -117,8 +136,8 @@ add({
   epithet: 'Corded',
   noun: 'Cord',
   parts: [
-    { part: 'ring', scale: [0.34, 0.11, 0.34], at: [0, 0, 0], material: 'cloth' },
-    { part: 'ring', scale: [0.28, 0.1, 0.28], at: [0.02, 0.09, 0.01], rot: [0.2, 0.4, 0], material: 'cloth' },
+    { part: 'rope_coil', scale: [1, 1, 1], at: [0, -0.04, 0], material: 'cloth' },
+    { part: 'rope_coil', scale: [0.82, 0.82, 0.82], at: [0.02, 0.06, 0.01], rot: [0.25, 0.5, 0], material: 'cloth' },
   ],
 })
 
@@ -129,7 +148,7 @@ add({
   props: { WOODEN: 1, FLAMMABLE: 0.6, PLATFORM: 0.8, RIGID: 0.85 },
   epithet: 'Planked',
   noun: 'Board',
-  parts: [{ part: 'box', scale: [1.05, 0.08, 0.26], at: [0, 0, 0], material: 'wood' }],
+  parts: [{ part: 'plank_board', scale: [1.15, 1, 1.15], at: [0, 0, 0], material: 'wood' }],
 })
 
 add({
@@ -140,9 +159,9 @@ add({
   epithet: 'Brimming',
   noun: 'Pail',
   parts: [
-    { part: 'cone', scale: [0.32, 0.36, 0.32], at: [0, 0, 0], material: 'wood' },
-    { part: 'disc', scale: [0.28, 0.04, 0.28], at: [0, 0.15, 0], material: 'water' },
-    { part: 'ring', scale: [0.36, 0.05, 0.36], at: [0, 0.19, 0], rot: [1.57, 0, 0], material: 'steel' },
+    { part: 'bucket_body', scale: [1.1, 1.1, 1.1], at: [0, -0.16, 0], material: 'wood' },
+    { part: 'disc_flat', scale: [1.25, 1, 1.25], at: [0, 0.11, 0], material: 'water' },
+    { part: 'ring_band', scale: [1.3, 1, 1.3], at: [0, 0.13, 0], rot: [1.57, 0, 0], material: 'steel' },
   ],
 })
 
@@ -154,8 +173,8 @@ add({
   epithet: 'Keen',
   noun: 'Axe',
   parts: [
-    { part: 'rod', scale: [0.08, 0.78, 0.08], at: [0, -0.08, 0], material: 'wood' },
-    { part: 'blade', scale: [0.44, 0.34, 0.1], at: [0.16, 0.32, 0], rot: [0, 0, -0.25], material: 'steel' },
+    { part: 'haft_long', scale: [1, 1, 1], at: [0, -0.46, 0], material: 'wood' },
+    { part: 'blade_axe', scale: [1.15, 1.15, 1.15], at: [0.09, 0.32, 0], rot: [0, 0, -0.16], material: 'steel' },
   ],
 })
 
@@ -167,8 +186,8 @@ add({
   epithet: 'Thatched',
   noun: 'Bale',
   parts: [
-    { part: 'box', scale: [0.46, 0.34, 0.34], at: [0, 0, 0], material: 'straw' },
-    { part: 'ring', scale: [0.3, 0.07, 0.3], at: [0, 0, 0], rot: [0, 0, 1.57], material: 'cloth' },
+    { part: 'straw_bale', scale: [1.25, 1.25, 1.25], at: [0, -0.14, 0], material: 'straw' },
+    { part: 'ring_band', scale: [0.9, 1, 0.9], at: [0, 0.02, 0], rot: [0, 0, 1.57], material: 'cloth' },
   ],
 })
 
@@ -180,8 +199,8 @@ add({
   epithet: 'Oiled',
   noun: 'Flask',
   parts: [
-    { part: 'sphere', scale: [0.24, 0.3, 0.24], at: [0, -0.02, 0], material: 'glass' },
-    { part: 'rod', scale: [0.08, 0.16, 0.08], at: [0, 0.2, 0], material: 'clay' },
+    { part: 'flask_body', scale: [1, 1, 1], at: [0, -0.15, 0], material: 'glass' },
+    { part: 'stopper', scale: [1, 1, 1], at: [0, 0.14, 0], material: 'clay' },
   ],
 })
 
@@ -193,8 +212,8 @@ add({
   epithet: 'Sweet',
   noun: 'Apple',
   parts: [
-    { part: 'sphere', scale: [0.26, 0.25, 0.26], at: [0, 0, 0], material: 'ember' },
-    { part: 'rod', scale: [0.02, 0.11, 0.02], at: [0, 0.14, 0], material: 'wood' },
+    { part: 'apple_body', scale: [1.15, 1.15, 1.15], at: [0, -0.11, 0], material: 'ember' },
+    { part: 'nail_spike', scale: [0.5, 0.45, 0.5], at: [0, 0.09, 0], material: 'wood' },
   ],
 })
 

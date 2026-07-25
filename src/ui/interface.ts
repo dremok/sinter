@@ -10,7 +10,7 @@
 
 import type { ItemDef } from '../items/catalog'
 import { isDiscovered, merge, mergeId } from '../items/merge'
-import { itemSilhouette } from '../render/kitbash'
+import { itemIcon } from '../render/icons'
 import { ALL_PROPERTIES, meta, ranked, type PropertyId } from '../props/registry'
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T
@@ -195,9 +195,10 @@ export class Ui {
       card.className = 'card' + (index === this.slotA || index === this.slotB ? ' picked' : '')
       card.addEventListener('click', () => this.pick(index))
 
-      const swatch = document.createElement('div')
+      const swatch = document.createElement('img')
       swatch.className = 'swatch'
-      swatch.style.background = itemSilhouette(def)
+      swatch.src = itemIcon(def)
+      swatch.alt = ''
 
       const body = document.createElement('div')
       const name = document.createElement('div')
@@ -246,9 +247,10 @@ export class Ui {
       // Known pairs show their result. Undiscovered ones stay a gamble, which
       // is what keeps the irreversibility meaningful.
       const known = merge(a.id, b.id)
-      const swatch = document.createElement('div')
+      const swatch = document.createElement('img')
       swatch.className = 'swatch'
-      swatch.style.background = itemSilhouette(known)
+      swatch.src = itemIcon(known)
+      swatch.alt = ''
       const label = document.createElement('span')
       label.textContent = known.name
       result.append(swatch, label)

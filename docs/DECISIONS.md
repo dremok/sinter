@@ -165,3 +165,30 @@ Max's read on the first art pass was exact: "the missing part is nice textures, 
 This is explicitly a placeholder for the fal.ai material bake in `docs/ASSET_PIPELINE.md`. The seam is `textures()` and `tiled()`, so the bake can replace the insides of that file without touching a call site.
 
 Two constraints worth keeping whatever generates them: `NearestFilter` always, since linear filtering turns a 32px tile to porridge; and roughly constant texel density per world unit, since mismatched density is what makes textured 3D read as wallpaper.
+
+
+---
+
+## D15: icons are rendered from the mesh, never authored
+**Date:** 2026-07-25
+
+Max asked whether there would be too many merges to create an icon for each. The answer is that it is not a scale problem, it is an impossibility, and the numbers are worth writing down so nobody proposes it again.
+
+The catalog is closed under merging, so results merge again. Ten base items give 45 pairs. Those 55 items give 1,485. The next round gives over a million, the one after that hundreds of billions. There is no authored or generated icon set that covers a space with no upper bound.
+
+So `render/icons.ts` renders each icon on demand from the same kitbash assembly that appears in the world, once per item, cached as a data URL. One small offscreen draw the first time an item is seen, nothing after. A merge result's icon therefore shows the parts it inherited from both parents, which is the readability argument in D6 finally visible in the UI rather than only in the world.
+
+It uses its own renderer and scene rather than borrowing the main one. Sharing would mean saving and restoring camera, size and render target around every icon, and getting that wrong corrupts a frame rather than an icon.
+
+This is also the strongest argument for the Blender parts library: roughly two dozen authored parts give correct icons for unboundedly many items, forever.
+
+---
+
+## D16: the parts library is built headlessly from a committed script
+**Date:** 2026-07-25
+
+`tools/blender/build_parts.py` runs under `blender --background` and writes `assets/parts/parts.glb`. There is no Blender MCP connection involved; a committed script is better than an interactive session anyway, because the library is reproducible, reviewable in a diff, and rebuildable by anyone with Blender installed.
+
+Conventions the script enforces, all from `docs/ASSET_PIPELINE.md`, and all of which cause silent, permanent assembly errors if they drift: Z up and metres; the object origin at the part's attachment point rather than its centroid; sockets as named empties; no materials, since material is chosen per recipe at assembly time; and a bevel on everything, because hard 90 degree edges read as untextured boxes under cel shading.
+
+The game throws at load if a recipe names a part the library does not contain. That is deliberate: a missing part should fail loudly at boot, not render as an invisible hole.
