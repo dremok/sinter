@@ -300,6 +300,131 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   gateGlow.position.set(0, gateY + 1.8, -13)
   group.add(gateGlow)
 
+
+  // ------------------------------------------------------------------ home
+  // The permanent home base (D21). Hand-placed, because the player sees it
+  // every run and it has to reward recognition rather than novelty. The hearth
+  // is a real entity carrying HOT, so home is mechanically the origin of fire
+  // in Band 0 rather than scenery that happens to look warm.
+  const HOME = { x: 0, z: 13.5 }
+
+  function hut(x: number, z: number, turn: number): void {
+    const h = heightAt(x, z)
+    const g = new THREE.Group()
+
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.7, 2.2), toonUnique({ map: tiled(tex.plank, 2.5, 1.7) }))
+    walls.position.y = 0.85
+    walls.castShadow = true
+    walls.receiveShadow = true
+    g.add(walls)
+
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(2.25, 1.35, 4), toonUnique({ map: tiled(tex.straw, 2.2, 2.2) }))
+    roof.position.y = 2.35
+    roof.rotation.y = Math.PI / 4
+    roof.castShadow = true
+    g.add(roof)
+
+    const door = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.05, 0.1), toonUnique({ map: tiled(tex.bark, 0.6, 1) }))
+    door.position.set(0, 0.52, 1.12)
+    g.add(door)
+
+    g.position.set(x, h, z)
+    g.rotation.y = turn
+    group.add(g)
+
+    world.add({
+      transform: { pos: new THREE.Vector3(x, h + 0.9, z), ry: turn },
+      mesh: g,
+      label: 'Home',
+      props: { WOODEN: 0.8, FLAMMABLE: 0.3, RIGID: 0.9 },
+      blocker: { radius: 1.7 },
+    })
+  }
+
+  hut(HOME.x - 4.6, HOME.z + 1.6, 0.25)
+  hut(HOME.x + 4.8, HOME.z + 2.4, -0.5)
+
+  // The hearth. Always lit, never consumed.
+  {
+    const hx = HOME.x
+    const hz = HOME.z
+    const h = heightAt(hx, hz)
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.75, 0.2, 6, 14).rotateX(Math.PI / 2),
+      toonUnique({ map: tiled(tex.stone, 1.6, 1.6) }),
+    )
+    ring.position.set(hx, h + 0.14, hz)
+    ring.castShadow = true
+    ring.receiveShadow = true
+    group.add(ring)
+
+    const coals = new THREE.Mesh(
+      new THREE.CircleGeometry(0.62, 12).rotateX(-Math.PI / 2),
+      toonUnique({ map: tiled(tex.ember, 1.2, 1.2), emissive: new THREE.Color(0xff5a1a), emissiveIntensity: 0.9 }),
+    )
+    coals.position.set(hx, h + 0.12, hz)
+    group.add(coals)
+
+    const glow = new THREE.PointLight(0xff8a3d, 9, 9, 2)
+    glow.position.set(hx, h + 0.7, hz)
+    group.add(glow)
+
+    // HOT but not FLAMMABLE, so the fire sim treats it as a permanent ignition
+    // source that never burns out. This is what makes "go home and light your
+    // torch" a real move rather than a hint.
+    world.add({
+      transform: { pos: new THREE.Vector3(hx, h + 0.3, hz), ry: 0 },
+      mesh: ring,
+      label: 'The hearth',
+      props: { HOT: 1, LUMINOUS: 0.9, STONE: 0.8 },
+    })
+  }
+
+  // Well: free WATER, so water is a tool rather than a lucky find.
+  {
+    const wx = HOME.x + 2.6
+    const wz = HOME.z - 1.4
+    const h = heightAt(wx, wz)
+    const g = new THREE.Group()
+    const kerb = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.62, 0.68, 0.7, 10),
+      toonUnique({ map: tiled(tex.stone, 1.3, 0.7) }),
+    )
+    kerb.position.y = 0.35
+    kerb.castShadow = true
+    const water = new THREE.Mesh(
+      new THREE.CircleGeometry(0.5, 12).rotateX(-Math.PI / 2),
+      toonUnique({ map: tiled(tex.water, 1, 1) }),
+    )
+    water.position.y = 0.62
+    g.add(kerb, water)
+    g.position.set(wx, h, wz)
+    group.add(g)
+
+    world.add({
+      transform: { pos: new THREE.Vector3(wx, h + 0.4, wz), ry: 0 },
+      mesh: g,
+      label: 'The well',
+      props: { WATER: 1, CONTAINER: 0.8, STONE: 0.9 },
+      blocker: { radius: 0.72 },
+    })
+  }
+
+  // Woodpile: renewable fuel, and a silhouette that says "somebody lives here".
+  for (let i = 0; i < 5; i++) {
+    const lx = HOME.x - 7.4
+    const lz = HOME.z + 0.6 + i * 0.28
+    const h = heightAt(lx, lz)
+    const log = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.17, 0.17, 1.5, 8).rotateZ(Math.PI / 2),
+      toonUnique({ map: tiled(tex.bark, 1.5, 0.9) }),
+    )
+    log.position.set(lx, h + 0.18 + i * 0.22, lz)
+    log.castShadow = true
+    group.add(log)
+  }
+
   // ----------------------------------------------------------------- items
   // Ten items, placed by hand. Between them they afford every route through the
   // palisade: burn it, chop it, climb it, or wet the ground to steer the fire.
@@ -340,7 +465,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   return {
     group,
     heightAt,
-    playerStart: new THREE.Vector3(0, heightAt(0, 13), 13),
+    playerStart: new THREE.Vector3(HOME.x, heightAt(HOME.x, HOME.z - 3), HOME.z - 3),
     gate: new THREE.Vector3(0, gateY, -13),
   }
 }

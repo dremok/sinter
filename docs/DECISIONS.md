@@ -192,3 +192,80 @@ This is also the strongest argument for the Blender parts library: roughly two d
 Conventions the script enforces, all from `docs/ASSET_PIPELINE.md`, and all of which cause silent, permanent assembly errors if they drift: Z up and metres; the object origin at the part's attachment point rather than its centroid; sockets as named empties; no materials, since material is chosen per recipe at assembly time; and a bevel on everything, because hard 90 degree edges read as untextured boxes under cel shading.
 
 The game throws at load if a recipe names a part the library does not contain. That is deliberate: a missing part should fail loudly at boot, not render as an invisible hole.
+
+
+---
+
+## D17: authored interactions become a first-class layer, alongside properties
+**Date:** 2026-07-25
+
+**This amends rule 2 in `CLAUDE.md`, which previously said no game code may branch on an item id, ever.**
+
+Max's call, after playing it: everything being general made the game feel like a chore. A specific item having a specific effect on a specific obstacle is more fun than a property threshold being met. He is right that pure generality was buying less enjoyment than it cost.
+
+What changes: authored, item-specific interactions are now legitimate content, not a smell.
+
+What does not change: they live in a declared table (`src/items/interactions.ts`), never as `if (item.id === ...)` scattered through `sim/`. The simulation itself stays property-driven. This is the part worth defending, and the reason is practical rather than ideological:
+
+- A declared table can be listed, counted, tested for reachability, and shown in a codex. Scattered conditionals cannot.
+- The general layer is what stops the game collapsing into "every obstacle needs its one key". Fire still spreads by `FLAMMABLE`, water still soaks by `WATER`. An authored interaction is a bonus on top of a world that already responds.
+- When the catalog grows past what anyone can hand-author, the property layer is what still works. Authored entries become the highlights, not the mechanism.
+
+So the rule becomes: **the simulation reads properties; authored interactions are data.** An obstacle may now have a specific intended answer, as long as the general answers still work too.
+
+Practically, an obstacle should aim for one authored solution that is satisfying to discover, plus at least one property-driven solution that nobody wrote down. If an obstacle has only the authored answer, it is a lock with a key, and that is the thing the whole design was built to avoid.
+
+---
+
+## D18: not every pair merges
+**Date:** 2026-07-25
+
+**This reverses D5's "always yields" and rule 3 in `CLAUDE.md`.**
+
+D5 argued that letting pairs fail makes players hoard and stop experimenting. That reasoning was sound in the abstract and wrong in practice: when every pair yields, most results are filler, and filler is worse for experimentation than an honest refusal. Forty five authored pairs read as a recipe book worth exploring. Six hundred derived ones read as noise.
+
+New shape:
+
+- A merge either produces an authored result, or it does not merge.
+- A refusal is free. Nothing is consumed, nothing is lost, and the bench says so plainly.
+- Irreversibility is unchanged and still the point. When a merge does happen, both inputs are gone.
+- Some items never merge at all. A key, a letter, a person's belongings. Flagging an item `noMerge` is now a normal thing to do.
+
+The risk D5 identified is real and is handled differently: since refusals cost nothing, experimenting is free, so players have no reason to hoard. The old design made experimenting expensive and then had to guarantee a payoff to compensate.
+
+---
+
+## D19: NPCs speak, and the game is no longer wordless
+**Date:** 2026-07-25
+
+**This reverses the "no narration, no voice acting, the game is wordless" part of D7.**
+
+NPCs now have dialogue, with options. Some progress requires the right thing said while carrying the right item.
+
+Still true from D7: no voice acting. Dialogue is text. ElevenLabs stays scoped to music, ambience and property-mapped sound effects.
+
+The cost being accepted: dialogue is authored content that does not scale the way generated items do, and it has to be written per NPC per band. Band 3 in particular said "items get shorter descriptions, not longer" and the same restraint applies to speech there. An NPC in The Static should say less, not more.
+
+The gain: a guard with a disposition who can be talked around is a far better obstacle than a wall with a hit point count, and it is what makes the palisade example in `docs/DESIGN.md` finally real. Bribery, distraction, disguise and threat all need somebody to be bribed.
+
+---
+
+## D20: no quest markers, no destination hints
+**Date:** 2026-07-25
+
+The alpha displayed "Get past the palisade" at the top of the screen. Removed, and nothing like it comes back.
+
+The game has no quest log, no waypoints, no objective text, and no arrow pointing anywhere. Progress is distance from home, plus stats and skills earned along the way. Where to go is the player's decision and the world's job to suggest, through sightlines, light, and what looks worth walking toward.
+
+This is a constraint on level design rather than a UI preference. If a player cannot tell where to go, the answer is to build the world so that it reads, not to add a marker.
+
+---
+
+## D21: a permanent home base
+**Date:** 2026-07-25
+
+Every run starts from the same home: a hut, a hearth, a fence, a few familiar faces. The player always departs from here and the surrounding region is always the safest ground in the game.
+
+Why it earns its place, given D4 says the world regenerates completely on death: home is the fixed point that makes distance mean something. "Three regions out" is only a meaningful statement if there is a somewhere to be out from. It also gives the tutorial band a natural shape, gives NPCs a place to be found again, and gives a returning player something recognisable after a run ends.
+
+Open question, deliberately unresolved: whether home itself is generated from the run seed or is hand-authored and identical every time. Hand-authored is better for recognition and worse for replay. Leaning hand-authored for the layout with generated detail on top.

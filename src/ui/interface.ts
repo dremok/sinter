@@ -295,10 +295,6 @@ export class Ui {
     if (html !== null) el.innerHTML = html
   }
 
-  objective(goal: string, sub: string): void {
-    const el = $('objective')
-    el.innerHTML = `<div class="goal">${goal}</div><div class="sub">${sub}</div>`
-  }
 
   flash(): void {
     const el = $('flash')

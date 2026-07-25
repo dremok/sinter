@@ -950,3 +950,164 @@ Written down so nobody rediscovers them and thinks they are new. Add to this lis
 5. Write the test first. Property derivation and simulation rules are pure and easy to test, and they are the game.
 6. Run `npm run shot` before and after if it is visible at all.
 7. Delete the entry from this file, and note it in `PROJECT_STATUS.md`.
+
+
+---
+
+# Part A: Post-pivot content (added 2026-07-25)
+
+Written after the pivot recorded as D17 through D21. Everything below assumes:
+merges are curated rather than total, item-specific interactions are legitimate
+content, NPCs speak, there is a permanent home, and there are no quest markers.
+
+Same rules as the rest of this document: nothing here is committed to, and
+anything built should be deleted from here and carried by the code instead.
+
+## A1. Home
+
+Hand-authored layout, generated detail on top. The player sees it every run, so
+it has to reward recognition rather than novelty.
+
+| Feature | What it is for |
+|---|---|
+| The hearth | Where a run begins. Also the only guaranteed source of `HOT` in Band 0 |
+| The codex shelf | Every merge and interaction discovered, across all runs. The real progression |
+| The well | Free `WATER`. Makes water a tool rather than a lucky find |
+| Kitchen garden | Slow-growing `SEED` plants. Something that changes between runs without being told to |
+| Woodpile | Renewable `WOODEN` and `FLAMMABLE` stock |
+| The gate | The one road out. Everything past it is a region away from home |
+| A grave marker | Names the last character who died, and how far out. Progress made visible with no UI |
+
+NPCs who live here and are always present:
+
+- **The Keeper.** Elderly, runs the hearth. Explains nothing unless asked, and only answers what is asked. First place a player learns that dialogue has options.
+- **Wren, the smith's daughter.** Bored, curious, will trade. The tutorial merge partner: she suggests combinations without ever calling them recipes.
+- **The Ferryman.** Sits by the gate. Will not tell you where to go. Will tell you what he has seen come back.
+
+## A2. Items that do not merge
+
+Marking an item `noMerge` is normal now. Candidates, and why each is better inert:
+
+| Item | Why it should not merge |
+|---|---|
+| Sealed letter | Its value is who you show it to. Fusing it into a "letter axe" destroys that |
+| Brass key | Opens one thing. A key that becomes a hybrid is just a worse key |
+| Signet ring | Identity. It proves who you are, and hybridising it makes it prove nothing |
+| Grave token | Carried from home. Sentimental, and the player should feel the refusal |
+| Living animal | You do not fuse a goat into a plank. If this ever becomes possible it should be Band 3 only, and horrifying |
+| The codex itself | Obviously |
+
+The refusal message matters as much as the merge. It should say something about
+the object rather than "these cannot be combined".
+
+## A3. Merge results worth building toward
+
+Written as chains rather than pairs, because a chain is what makes a recipe book
+feel deep. Each row is: inputs, result, and what it opens up.
+
+**Fire chain**
+- flint + iron → fire striker → the base of everything hot
+- striker + straw → tinder kit → portable ignition
+- torch + oil → pitch torch → burns long enough to cross a region at night
+- pitch torch + rope → fire flail → reaches things you cannot stand next to
+- lantern + firefly jar → cold lamp → light without ignition, for places where fire kills you
+
+**Reach chain**
+- plank + rope → rope ladder → over walls
+- ladder + hook → grapple ladder → over walls with nothing to lean on
+- pole + hook → boat hook → pulls things toward you across water
+- rope + weight → plumb line → measures depth, finds the bottom of a shaft
+
+**Quiet chain**
+- cloth + fat → muffled boots → guards do not hear you
+- soot + oil → face black → guards do not see you at night
+- bell + wax → dead bell → carry it past something that listens
+
+**Social chain**
+- coin + cloth → purse → bribery becomes possible as an act rather than a check
+- wax + signet → forged seal → an authored interaction with exactly one official
+- wine + herb → dosed wine → gets somebody to sleep without killing them
+- letter + forged seal → false writ → the single most valuable thing in Band 1
+
+## A4. Specific interactions
+
+The new authored layer. Format: item, target, effect. Each one needs at least one
+property-driven alternative to exist alongside it, or the obstacle is a lock.
+
+| Item | Target | Effect | Unauthored alternative |
+|---|---|---|---|
+| Brass key | The mill door | Opens it | Burn the door, or the wall it sits in |
+| Crowbar | Nailed shutters | Pries them off | Break them, or go through the roof |
+| Bellows | Any fire | Turns a small fire into a spreading one | Add fuel and wait |
+| Salt | Slug-thing in the cellar | Kills it outright | Fire, water, or a heavy object |
+| Fishing net | Anything `LIVING` and small | Catches it alive | Trap it, corner it, or bait it |
+| Signal horn | The ferryman across the water | He comes and gets you | Swim, raft, or bridge it |
+| Lodestone | The lock on the granary | Draws the iron pin | Break it, or find the key |
+| Mirror | Anything that must not see you | Redirects its attention | Darkness, distance, or a distraction |
+
+## A5. NPCs and dialogue
+
+Structure per NPC: disposition, drives, one thing they want, one thing they fear,
+and at least two ways to get what you need from them.
+
+**The Gate Guard (Band 0, the palisade)**
+
+- Disposition: neutral. Greed 0.6, alertness 0.4, boredom 0.8
+- Wants: to be somewhere else. Fears: his sergeant
+- Routes through:
+  - Bribe with anything `VALUABLE` above his greed
+  - Bore him into waving you through, by talking long enough with the right dull options
+  - Show a false writ (authored interaction)
+  - Distract him with anything `LOUD` thrown elsewhere
+  - Or ignore him entirely and burn the wall down, which the simulation already allows
+
+Dialogue sketch, showing gating:
+
+    "Nobody through after dark. Sergeant's orders."
+      > "Whose orders?"                          [always]
+      > "It's worth a coin to me."                [needs VALUABLE >= 0.5]
+      > "Sergeant sent me."                       [needs false writ]
+      > "There's a fire behind you."              [true only if something is burning]
+      > (say nothing, wait)                       [always; boredom rises]
+
+The fourth option being *true or not* is the interesting part. Lying when nothing
+is burning should cost disposition. The world should be checkable.
+
+**Wren (home)** teaches merging without a tutorial. She asks what you found, and
+suggests one combination per run based on what you are carrying, phrased as
+curiosity rather than instruction.
+
+**The Ferryman (home gate)** is the anti-quest-marker. Asked where to go, he
+describes what he has seen people bring back, and never where they went.
+
+## A6. Obstacles suited to the new shape
+
+Each with an authored answer and at least one emergent one.
+
+- **A locked mill.** Key opens it. Or burn it, or pry the shutters, or flood the race and walk in through the wheel housing.
+- **A bridge with a toll.** Pay it. Or bore the collector, or cross upstream, or freeze the water, or float across.
+- **A dog that will not let you past.** Feed it. Or frighten it, or befriend it over several visits, or simply outrun it.
+- **A cellar full of something that hunts by sound.** Dead bell. Or muffled boots, or throw something loud the other way, or kill it, or never go down there.
+- **A sleeping household.** Dosed wine so they stay asleep. Or move slowly, or go in through the roof, or wake them and talk your way out.
+
+## A7. Skills and stats, since progress is now defined as these
+
+D20 says progress is distance plus stats plus skills. That needs actual content.
+
+Candidate stats: **Vigour** (carry, survive), **Wits** (dialogue options, spotting
+things), **Hands** (merging speed, tool effectiveness), **Nerve** (how far the
+world can get before it starts costing you).
+
+Candidate skills, all earned by doing rather than by spending points:
+
+| Skill | Earned by | Gives |
+|---|---|---|
+| Firecraft | Lighting things | Fires you start spread further |
+| Haggling | Successful bribes | Greed thresholds drop |
+| Reading | Finding written things | Written items become legible and gate new dialogue |
+| Quiet step | Getting past without being seen | Larger stealth radius |
+| Butchery | Using edged tools on living things | More from what you take |
+| Cold blood | Surviving Band 2 | Fear effects reduced, which is what gates Band 3 |
+
+The gate to Band 3 should be a skill threshold rather than an item, so that
+reaching it is re-earned but genuinely easier each run.

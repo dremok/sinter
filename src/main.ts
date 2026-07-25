@@ -476,10 +476,12 @@ function stepSimulation(): void {
     onStructureFail: onFail,
   })
 
+  // No objective text and no marker (D20). Crossing is acknowledged once, in
+  // the same transient channel as everything else, and then the player is on
+  // their own again.
   if (!crossed && player.pos.z < -10) {
     crossed = true
-    ui.objective('Through.', 'The wood on the far side is older. Keep going.')
-    ui.toast('Onward', 'You are past the palisade')
+    ui.toast('Onward', 'The wood on the far side is older')
   }
 }
 

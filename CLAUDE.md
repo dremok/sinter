@@ -4,33 +4,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## SINTER
 
-Isometric procedural adventure/RPG. Every item can be merged with every other item, irreversibly. The further you wander from home, the stranger the world gets.
+Isometric procedural adventure/RPG. You leave home, gather things, and combine some of them irreversibly. The further you wander from home, the stranger the world gets.
 
 Read `docs/DESIGN.md` before writing gameplay code. Read `docs/ARCHITECTURE.md` before writing engine code. Read `PROJECT_STATUS.md` at the start of every session.
 
-## The three rules that must never be broken
+## The three rules
 
-These are not style preferences. Violating any of them collapses the game into something much smaller than it is meant to be. If you find yourself about to break one, stop and reconsider the approach instead.
+These shape the whole design. Two of them were amended on 2026-07-25 after playtesting, and the amendments are recorded as D17 and D18 in `docs/DECISIONS.md`. Read those before arguing with the versions below.
 
-### 1. Obstacles are facts, not locks
+### 1. Obstacles are facts, and at least one way past is not authored
 
-An obstacle is never "needs item X". An obstacle is a set of physical and social facts about the world. Anything that changes those facts gets you past it.
+An obstacle is a set of physical and social facts about the world. Anything that changes those facts gets you past it.
 
-A palisade is not a door that wants a key. It is: `WOODEN`, `4m tall`, `guarded by an agent with a disposition`, `on the far bank of a river`. Burn it, climb it, chop it, ram it with a car, bridge the river, freeze the river, bribe the guard, distract the guard, tunnel under, plant a sapling and wait for it to grow, stack crates. None of those solutions are authored per obstacle. They fall out of the simulation.
+A palisade is: `WOODEN`, `4m tall`, `guarded by an agent with a disposition`, `on the far bank of a river`. Burn it, climb it, chop it, bridge the river, bribe the guard, distract the guard.
 
-The test: if a designer had to write down the solution to an obstacle in advance, it is wrong.
+The amendment: an obstacle **may** now have a specific authored answer that is satisfying to discover, and that answer may name a specific item. What it may not have is *only* that. Every obstacle needs at least one route that nobody wrote down, or it is a lock with a key and the design has collapsed into an ordinary adventure game.
 
-### 2. No game code branches on an item ID
+The test: if the only way through is the one a designer wrote, it is wrong.
 
-All world interaction is mediated by **properties**. Fire spreads to things that are `FLAMMABLE`, not to things whose id is `wooden_fence`. Water conducts to things that are `CONDUCTIVE`. Guards are swayed by things that are `VALUABLE`.
+### 2. The simulation reads properties. Authored interactions are data
 
-`if (item.id === 'key')` is a bug. Always. If you need new behavior, add a property and a rule that reads it. Never a special case.
+All world interaction in `sim/` is mediated by **properties**. Fire spreads to things that are `FLAMMABLE`, not to things whose id is `wooden_fence`. This is what lets an item work with every mechanic on the day it is created.
 
-This is what makes the item catalog scale. Item number 4,000 works with every mechanic in the game on the day it is generated, because it is just a bag of properties, and the mechanics only ever read properties.
+The amendment: item-specific interactions are now legitimate content. They belong in the declared table in `src/items/interactions.ts`, never as `if (item.id === ...)` inside a system.
 
-### 3. Merges are irreversible and always yield
+The difference matters. A table can be listed, counted, tested for reachability and shown to the player in a codex. Scattered conditionals can only be discovered by reading every file. If you find yourself adding an id check to anything under `sim/`, that is still a bug.
 
-Exactly two inputs, exactly one output. Both inputs are destroyed permanently. Every pair produces something (sometimes something bad). There is no unmerge, no workshop refund, no undo. Deciding *whether* to merge is the core strategic tension, and it only exists if the loss is real.
+### 3. Merges are irreversible, and not every pair merges
+
+Exactly two inputs, exactly one output. Both inputs destroyed permanently. No unmerge, no refund, no undo. Deciding *whether* to merge is the core tension and it only exists if the loss is real.
+
+The amendment: a pair that has no authored result simply does not merge. The bench says so and nothing is consumed. Refusing is free, so experimenting is free, which is what stops players hoarding. Some items never merge at all, and marking one `noMerge` is normal.
+
+The old rule guaranteed every pair yielded something. In practice that produced filler, and filler reads as noise rather than as discovery.
 
 ## Stack
 
@@ -38,13 +44,13 @@ Exactly two inputs, exactly one output. Both inputs are destroyed permanently. E
 |---|---|---|
 | Language | TypeScript | |
 | Rendering | Three.js, orthographic camera | Orthographic projection gives true isometric for free |
-| Physics | Rapier (`@dimforge/rapier3d-compat`) | Rust/WASM, fast, and deterministic for a fixed build, which a seeded roguelike needs |
+| Physics | Rapier, currently unused | Out of the runtime since D13; returns for crates, rope and vehicles |
 | ECS | miniplex | Ergonomic and TS-native; the property simulation is naturally an ECS problem |
 | Build | Vite | |
 | Tests | Vitest | |
 | Visual check | Playwright | See "Verify your own work" below |
 | Item art | Parametric kitbash + fal.ai textures | See `docs/ASSET_PIPELINE.md` |
-| Audio | ElevenLabs (music, ambience, SFX) | No narration, no voice acting. The game is wordless |
+| Audio | ElevenLabs (music, ambience, SFX) | No voice acting. NPC dialogue is text, see D19 |
 
 A full engine (Babylon, PlayCanvas, Godot) was considered and rejected deliberately. The reasoning is recorded in `docs/DECISIONS.md`. Do not quietly migrate to one.
 
@@ -79,8 +85,8 @@ Do not report a visual or gameplay change as done because the code looks right. 
 ```bash
 npm run shot                                          # seed hearth-0, 240 ticks
 npm run shot -- --seed hearth-7 --ticks 600
-npm run shot -- --ticks 380 --at 0,-8 --ignite 0,-14 --out .shots/fire-after.png
-npm run shot -- --at 0,-11 --pack branch,flint,ember --slots 0,1
+npm run shot -- --ticks 380 --at 0,-4 --ignite 0,-8 --out .shots/fire-after.png
+npm run shot -- --at 0,-11 --pack axe,flint,torch --slots 0,1
 ```
 
 `npm run shot` boots the game headless at a fixed seed, simulates forward a set number of ticks, and writes a PNG. Read that PNG. If you changed how fire spreads, take a shot before and after and compare them.

@@ -20,13 +20,13 @@ import * as THREE from 'three'
 /**
  * Vertical resolution of the internal buffer.
  *
- * A middle ground. True SNES was 224 lines, and rendering at that height made
- * a held item about ten pixels tall, which is not enough to tell a flask from a
- * hatchet, and upscaling it 4.5x to a modern display read as blur rather than
- * as pixel art. At 400 the upscale is under 3x, item silhouettes survive, and
- * the pixel grid is still clearly visible.
+ * Raised twice on playtest feedback: 240 was unreadable, 400 was still too
+ * soft. At 720 the upscale to a 1080p display is 1.5x, which keeps edges hard
+ * and the hand-drawn textures legible without the frame reading as pixellated.
+ * The look now comes from the textures and the cel ramp rather than from
+ * throwing resolution away.
  */
-export const PIXEL_HEIGHT = 400
+export const PIXEL_HEIGHT = 720
 
 let ramp: THREE.DataTexture | null = null
 
