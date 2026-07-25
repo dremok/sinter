@@ -139,7 +139,7 @@ sc.far = SUN_REACH + SHADOW_EXTENT + 12
 sc.updateProjectionMatrix()
 scene.add(sun, sun.target)
 
-const fill = new THREE.DirectionalLight(new THREE.Color(BAND0.skyLight).lerp(new THREE.Color(0x3f6fc0), 0.72), 0.62)
+const fill = new THREE.DirectionalLight(new THREE.Color(BAND0.skyLight).lerp(new THREE.Color(0x3f6fc0), 0.72), 1.0)
 scene.add(fill, fill.target)
 
 const sunOffset = new THREE.Vector3()
@@ -152,6 +152,13 @@ function placeLights(): void {
   sun.position.copy(iso.target).add(sunOffset)
   // Opposite side, and much lower, so it fills what the key leaves dark instead
   // of doubling it. A fill at the same elevation just washes the whole frame.
+  //
+  // It is the strongest of the three lights on a shaded wall and nearly the
+  // weakest on a sunlit one, which is not a contradiction: it casts no shadow,
+  // so it is the only light that reaches geometry the key is blocked from, and
+  // the ramp puts key-lit faces in the fill's own shadow band at 0.26. That is
+  // what lets it rescue the dark side of a building without flattening the
+  // frame, and why raising it is the right answer to a black wall.
   fill.target.position.copy(iso.target)
   fill.position.set(iso.target.x - sunOffset.x * 0.9, iso.target.y + 12, iso.target.z - sunOffset.z * 0.9)
 }

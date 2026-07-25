@@ -324,7 +324,7 @@ void main() {
   // reach: a shadow map zeroes the key light, so the ramp's blue band never
   // gets to apply there.
   float l = dot( c, LUMA );
-  c *= mix( vec3( 0.68, 0.85, 1.38 ), vec3( 1.09, 1.00, 0.87 ), smoothstep( 0.0, 0.68, l ) );
+  c *= mix( vec3( 0.80, 0.92, 1.30 ), vec3( 1.09, 1.00, 0.87 ), smoothstep( 0.0, 0.68, l ) );
 
   // Contrast about a mid pivot, then saturation, weighted by brightness.
   //

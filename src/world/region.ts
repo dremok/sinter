@@ -70,6 +70,8 @@ interface Occluder {
   opacity: number
   /** Cloned, transparent-capable materials, made only when one is first needed. */
   faded: { mesh: THREE.Mesh; solid: THREE.Material; ghost: THREE.MeshToonMaterial }[] | null
+  /** Outline shells, hidden while ghosting rather than faded. See fadeOccluders. */
+  hulls?: THREE.Mesh[] | null
 }
 
 export interface Region {
@@ -252,7 +254,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     thatch: toonUnique({ color: 0xf2dda6, map: tiled(tex.straw, 2.2, 2.2) }),
     thatchOld: toonUnique({ color: 0xd9be82, map: tiled(tex.straw, 2.2, 2.2) }),
     straw: toonUnique({ map: tiled(tex.straw, 0.7, 0.7) }),
-    reed: toonUnique({ color: 0x9fb862, map: tiled(tex.straw, 0.6, 0.6) }),
+    reed: toonUnique({ color: 0xa2b27a, map: tiled(tex.straw, 0.6, 0.6) }),
     tuft: toonUnique({ color: 0x8a9354, map: tiled(tex.straw, 0.7, 0.7) }),
     tuftPale: toonUnique({ color: 0xa9a271, map: tiled(tex.straw, 0.7, 0.7) }),
     cloth: toonUnique({ map: tiled(tex.cloth, 1.2, 1.2) }),
@@ -260,7 +262,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     clothRed: toonUnique({ color: 0xc48b7a, map: tiled(tex.cloth, 1.2, 1.2) }),
     steel: toonUnique({ map: tiled(tex.steel, 0.8, 0.8) }),
     clay: toonUnique({ map: tiled(tex.clay, 1, 1) }),
-    lily: toonUnique({ color: 0x4f9c3c, map: tiled(tex.foliage, 1, 1) }),
+    lily: toonUnique({ color: 0x5e8f52, map: tiled(tex.foliage, 1, 1) }),
     hen: toonUnique({ color: 0xf0e4d0, map: tiled(tex.cloth, 0.5, 0.5) }),
     henDark: toonUnique({ color: 0xb08a5e, map: tiled(tex.cloth, 0.5, 0.5) }),
     comb: toonUnique({ color: 0xd05040 }),
@@ -273,7 +275,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const pineMats = [0x1f5230, 0x1a4628, 0x27603a].map((hex) =>
     toonUnique({ color: hex, map: tiled(tex.foliage, 3, 3) }),
   )
-  const birchMats = [0xa8d465, 0xbadf7c].map((hex) =>
+  const birchMats = [0xaecb83, 0xbfd797].map((hex) =>
     toonUnique({ color: hex, map: tiled(tex.foliage, 3, 3) }),
   )
 
@@ -1891,7 +1893,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     layPatch(gx, gz, 1.9, M.tilled, homeRng, 0.12, 14, 0.075)
 
     const cabbageGeo = new THREE.SphereGeometry(0.2, 6, 5)
-    const cabbageMat = toonUnique({ color: 0x7fb04e, map: tiled(tex.foliage, 0.7, 0.7) })
+    const cabbageMat = toonUnique({ color: 0x87a767, map: tiled(tex.foliage, 0.7, 0.7) })
     for (let row = 0; row < 4; row++) {
       const z = gz - 1.35 + row * 0.85
       for (let i = 0; i < 6; i++) {
@@ -2236,7 +2238,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     const bz = 8.2
     layPatch(bx, bz, 1.3, M.tilled, homeRng, 0.14, 12, 0.075)
     const podGeo = new THREE.ConeGeometry(0.13, 0.5, 5)
-    const podMat = toonUnique({ color: 0x76a54a, map: tiled(tex.foliage, 0.7, 0.7) })
+    const podMat = toonUnique({ color: 0x7e9d61, map: tiled(tex.foliage, 0.7, 0.7) })
     for (let i = 0; i < 9; i++) {
       const x = bx + homeRng.range(-0.95, 0.95)
       const z = bz + homeRng.range(-0.95, 0.95)
@@ -2440,9 +2442,31 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
       if (!o.faded) {
         o.faded = []
+        o.hulls = []
         o.object.traverse((child) => {
           const mesh = child as THREE.Mesh
           if (!mesh.isMesh) return
+
+          // Outline hulls are collected separately and HIDDEN while ghosting
+          // rather than faded with everything else.
+          //
+          // An inverted hull is a slightly larger shell drawn with BackSide, so
+          // what you normally see of it is the rim poking past the body. The
+          // body being opaque is what hides the rest of it. Ghost the body with
+          // depthWrite off and the hull's interior back faces are suddenly
+          // visible, and they fill the entire silhouette with flat dark. The
+          // tree went transparent and the player still could not be seen
+          // through it, because they were behind the outline rather than
+          // behind the tree.
+          //
+          // Fading the hull too does not fix it; two translucent dark layers
+          // still read as a dark shape. An outline around something you are
+          // deliberately seeing through has no job to do, so it goes away.
+          if (mesh.userData.outlineHull === true) {
+            o.hulls!.push(mesh)
+            return
+          }
+
           const solid = mesh.material as THREE.Material
           const ghost = (solid as THREE.MeshToonMaterial).clone()
           ghost.transparent = true
@@ -2450,6 +2474,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
           o.faded!.push({ mesh, solid, ghost })
         })
       }
+
+      // Hulls follow the body: gone the moment it starts ghosting, back the
+      // moment it is fully solid again.
+      if (o.hulls) for (const h of o.hulls) h.visible = o.opacity >= 0.999
 
       const solid = o.opacity > 0.995
       for (const f of o.faded) {
@@ -2546,6 +2574,20 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * clears a trunk in the fewest metres and keeps the item near where it was
    * authored to be.
    */
+  function reachable(x: number, z: number): boolean {
+    if (x < BOUNDS.minX + 1 || x > BOUNDS.maxX - 1) return false
+    if (z < BOUNDS.minZ + 1 || z > BOUNDS.maxZ - 1) return false
+    // Not underwater, and not inside something the player is pushed out of.
+    if (heightAt(x, z) < WATER_LEVEL + 0.1) return false
+    for (const b of queries.blockers) {
+      const dx = b.transform.pos.x - x
+      const dz = b.transform.pos.z - z
+      const r = b.blocker.radius + 0.5
+      if (dx * dx + dz * dz < r * r) return false
+    }
+    return true
+  }
+
   function findVisible(x: number, z: number): [number, number] {
     if (!hiddenFromCamera(x, heightAt(x, z) + 0.45, z)) return [x, z]
     for (let step = 1; step <= 7; step++) {
@@ -2560,11 +2602,13 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       ] as const) {
         const nx = x + ax * d
         const nz = z + az * d
-        if (nx < BOUNDS.minX + 1 || nx > BOUNDS.maxX - 1) continue
-        if (nz < BOUNDS.minZ + 1 || nz > BOUNDS.maxZ - 1) continue
+        if (!reachable(nx, nz)) continue
         if (!hiddenFromCamera(nx, heightAt(nx, nz) + 0.45, nz)) return [nx, nz]
       }
     }
+    // Nothing clear within four metres. Leave it where it was authored: the
+    // runtime fade still reveals it, and moving an item a long way from where
+    // it was meant to be is a worse bug than the one being fixed.
     return [x, z]
   }
 
