@@ -1678,17 +1678,32 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
     // The doorway. Near black, with one warm plane behind it: somebody is in.
     const doorX = -w * 0.24
-    const opening = new THREE.Mesh(new THREE.BoxGeometry(1.06, 1.9, 0.16), M.doorway)
-    opening.position.set(doorX, 1.25, dep / 2 + 0.02)
+    // Pale surrounds. The opening is near-black and the wall is dark timber,
+    // so on its own the door was dark on dark and simply did not read from the
+    // one angle the player ever gets. A light frame is what separates them.
+    const jambMat = M.rubbleWall
+    for (const sx of [-1, 1]) {
+      const jamb = new THREE.Mesh(new THREE.BoxGeometry(0.22, 2.35, 0.3), jambMat)
+      jamb.position.set(doorX + sx * 0.73, 1.17, dep / 2 + 0.06)
+      jamb.castShadow = true
+      g.add(jamb)
+    }
+    const head = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.26, 0.34), jambMat)
+    head.position.set(doorX, 2.42, dep / 2 + 0.08)
+    head.castShadow = true
+    g.add(head)
+
+    const opening = new THREE.Mesh(new THREE.BoxGeometry(1.26, 2.2, 0.16), M.doorway)
+    opening.position.set(doorX, 1.35, dep / 2 + 0.02)
     g.add(opening)
     const inside = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.8, 1.5),
-      toonUnique({ color: 0xff9a48, emissive: new THREE.Color(0xff7a2a), emissiveIntensity: 0.55 }),
+      new THREE.PlaneGeometry(1.0, 1.8),
+      toonUnique({ color: 0xffb066, emissive: new THREE.Color(0xff8a34), emissiveIntensity: 0.9 }),
     )
-    inside.position.set(doorX, 1.06, dep / 2 + 0.045)
+    inside.position.set(doorX, 1.16, dep / 2 + 0.045)
     g.add(inside)
     const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.2, 0.26), M.log)
-    lintel.position.set(doorX, 2.28, dep / 2 + 0.06)
+    lintel.position.set(doorX, 2.62, dep / 2 + 0.06)
     lintel.castShadow = true
     g.add(lintel)
     // The leaf, standing open against the wall beside it.
@@ -1703,15 +1718,19 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.add(stepStone)
 
     for (const wx of [w * 0.24, -w * 0.42]) {
-      const win = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.46, 0.08), M.doorway)
-      win.position.set(wx, 1.72, dep / 2 + 0.05)
+      const surround = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.86, 0.1), M.rubbleWall)
+      surround.position.set(wx, 1.78, dep / 2 + 0.04)
+      g.add(surround)
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.62, 0.08), M.doorway)
+      win.position.set(wx, 1.78, dep / 2 + 0.07)
       g.add(win)
-      const sill = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.08, 0.16), M.log)
-      sill.position.set(wx, 1.46, dep / 2 + 0.08)
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.1, 0.2), M.log)
+      sill.position.set(wx, 1.4, dep / 2 + 0.1)
+      sill.castShadow = true
       g.add(sill)
       for (const s of [-1, 1]) {
-        const shutter = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.52, 0.07), M.plankDark)
-        shutter.position.set(wx + s * 0.4, 1.72, dep / 2 + 0.08)
+        const shutter = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.7, 0.07), M.plankDark)
+        shutter.position.set(wx + s * 0.62, 1.78, dep / 2 + 0.1)
         shutter.rotation.y = s * 0.4
         g.add(shutter)
       }

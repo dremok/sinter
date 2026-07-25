@@ -84,9 +84,20 @@ surface read as wallpaper, which is the failure D14 names. If higher-resolution
 textures are ever wanted, `TEXELS_PER_UNIT` has to move with them, and that is an
 art decision affecting every surface at once, not a swap of one file.
 
-Total on disk: see the table in `docs/ASSET_PIPELINE.md`. Every file is indexed
-PNG with at most fourteen colours, all of them steps of a ramp in
-`src/render/palette.ts`, which is why they compress as hard as they do.
+### Why every pixel is a palette step
+
+The model decides structure and `src/render/palette.ts` decides colour. Every
+texel is snapped to the nearest step of a small palette assembled from the ramps
+in that file, measured in Oklab with chroma weighted so that a brown patch inside
+a grass tile chooses the dirt ramp and value chooses the step within it.
+
+That makes three things true by construction rather than by inspection. The
+committed art cannot be off-palette, so "too saturated, hurts my eyes" cannot
+come back through this door. The ramps stay the single source of colour, so
+editing `palette.ts` and re-running the bake restyles the whole set. And
+posterising to six or ten steps restores the hard edges that averaging sixteen
+source pixels into one destroyed, which is the only reason a 1024px generation
+survives reduction to a 64px tile at all.
 
 ## The loader contract
 

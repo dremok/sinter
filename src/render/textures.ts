@@ -397,8 +397,8 @@ const LUSH: Ground = {
   size: GROUND,
   main: RAMP.grass,
   accent: RAMP.dryGrass,
-  base: 0.85,
-  span: 3.3,
+  base: 0.5,
+  span: 1.6,
   tuft: 1400,
   litter: 11000,
 }
@@ -407,8 +407,8 @@ const DRY: Ground = {
   size: GROUND_VARIANT,
   main: RAMP.dryGrass,
   accent: RAMP.straw,
-  base: 1.1,
-  span: 3.0,
+  base: 0.8,
+  span: 1.5,
   tuft: 2600,
   litter: 5000,
 }
@@ -417,8 +417,8 @@ const WORN: Ground = {
   size: GROUND_VARIANT,
   main: RAMP.dirt,
   accent: RAMP.dryGrass,
-  base: 1.0,
-  span: 2.8,
+  base: 0.7,
+  span: 1.4,
   tuft: 9000,
   litter: 2600,
 }
@@ -459,6 +459,7 @@ function ground(look: Ground) {
       const k = n / GROUND
       const low = normalized(fbm(r, Math.max(2, Math.round(4 * k))))
       const mid = normalized(fbm(r, Math.max(4, Math.round(13 * k))))
+      const near = normalized(fbm(r, Math.max(6, Math.round(30 * k))))
       const patch = normalized(fbm(r, Math.max(3, Math.round(9 * k)), 3))
 
       for (let y = 0; y < n; y++) {
@@ -466,11 +467,22 @@ function ground(look: Ground) {
         for (let x = 0; x < n; x++) {
           const u = x / n
           // Low carries most of the swing; mid adds about one step on top.
-          // The mid band needs real amplitude, not a nudge. Ramp steps are
-          // snapped, so a swing of half a step mostly rounds away and does
-          // nothing; at 1.8 it reliably moves the field a step and the patches
-          // it makes are the thing that reads as texture inside one view.
-          const idx = clamp(look.base + low(u, v) * look.span + (mid(u, v) - 0.5) * 1.8, 0, 4.9)
+          // Three bands, and the amplitudes are tuned against a measurement
+          // rather than by eye: the spread of luminance inside a 144-texel
+          // window, which is about the twelve world units a player sees at
+          // once. The previous tile scored a median of 10.3 there and an art
+          // review called it "a single flat olive"; the fal.ai bake, which the
+          // same review liked, scores 17.7. Ramp steps are snapped, so a band
+          // with less than about a step of swing mostly rounds away and does
+          // nothing at all.
+          const idx = clamp(
+            look.base +
+              low(u, v) * look.span +
+              (mid(u, v) - 0.5) * 3.0 +
+              (near(u, v) - 0.5) * 1.4,
+            0,
+            4.9,
+          )
           // A second ramp dithered in at the *same* index, so what changes is
           // hue and not value. Confined to a narrow band: a 50/50 stipple of
           // two hues over a whole region is invisible in greyscale, which is
