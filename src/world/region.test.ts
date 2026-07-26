@@ -17,7 +17,16 @@
 
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { PALISADE, occluderHides, type OccluderInView, type TargetInView } from './region'
+import { PLAYER_RADIUS } from '../core/body'
+import {
+  BOUNDS,
+  GROUND_SIZE,
+  PALISADE,
+  moorEdge,
+  occluderHides,
+  type OccluderInView,
+  type TargetInView,
+} from './region'
 
 /**
  * The rig from `IsoCamera` at its only azimuth: orthographic, looking at the
@@ -156,5 +165,61 @@ describe('palisade layout', () => {
     // Nothing else may be load-bearing for the gate. If this shrinks below the
     // pillars, their collision silently becomes the first post's again.
     expect(PALISADE.gateHalf).toBeGreaterThanOrEqual(PALISADE.pillarAt + PALISADE.pillarRadius)
+  })
+
+  it('runs the wall past both edges of the region', () => {
+    // The failure this catches is invisible to every other check in the repo.
+    // `verify:collision` asks whether there is a gap WITHIN the run of rocks
+    // that seals each end of the palisade, and a run that simply stops early
+    // has no gap in it at all: it has open ground beyond it. The reach used to
+    // be a hardcoded 29.5 on both sides, which was right for one pair of bounds
+    // and became a walk-around the moment the region grew east.
+    //
+    // Half a player clear of the edge, because the clamp in main.ts stops them
+    // AT the bound and a wall that ends exactly there leaves a body's width.
+    expect(PALISADE.spurTo(1)).toBeGreaterThan(BOUNDS.maxX + PLAYER_RADIUS)
+    expect(PALISADE.spurTo(-1)).toBeGreaterThan(-BOUNDS.minX + PLAYER_RADIUS)
+  })
+})
+
+/**
+ * The region against the ground it is drawn on, and against itself.
+ *
+ * These are the invariants that broke while the region was being widened, and
+ * none of them is visible to `npm run typecheck`, to `verify:collision`, or to
+ * a screenshot taken anywhere except the one place the fault happens to be.
+ */
+describe('region bounds', () => {
+  it('leaves the terrain mesh wider than anything visible from inside', () => {
+    // The tree line is laid at the bounds plus about ten metres of depth, and
+    // the camera sees a good way past the player, so the heightfield has to
+    // reach further than either. Doubling the bounds and forgetting this puts a
+    // literal edge of the world in shot.
+    const reach = Math.max(-BOUNDS.minX, BOUNDS.maxX, -BOUNDS.minZ, BOUNDS.maxZ)
+    expect(reach + 24).toBeLessThan(GROUND_SIZE / 2)
+  })
+
+  it('never starts the moor on the near side of the wall', () => {
+    // The far side is a different ground, and the whole point of it being a
+    // different ground is that the palisade is what separates them. Moor
+    // showing INSIDE the clearing says the world changed before the player got
+    // past the obstacle, which is the one statement the wall exists to make.
+    //
+    // The number is the contract `moorEdge` promises, not a value read off the
+    // curve: the wall is at z = -8 and the edge stays a metre and a half clear
+    // of it. Today's amplitudes satisfy that on their own and the clamp inside
+    // the function never fires; asserting the promise rather than the curve is
+    // what makes widening the wobble fail here instead of in a screenshot.
+    for (let x = BOUNDS.minX - 6; x <= BOUNDS.maxX + 6; x += 0.25) {
+      expect(moorEdge(x), `moor reaches z = ${moorEdge(x)} at x = ${x}`).toBeLessThanOrEqual(-9.5)
+    }
+  })
+
+  it('keeps the moor edge inside the region it is drawn over', () => {
+    // The other end of the same curve. An edge below minZ means a column of the
+    // sheet is inverted, which draws a strip of moor with its winding reversed.
+    for (let x = BOUNDS.minX - 6; x <= BOUNDS.maxX + 6; x += 0.25) {
+      expect(moorEdge(x)).toBeGreaterThan(BOUNDS.minZ + 4)
+    }
   })
 })

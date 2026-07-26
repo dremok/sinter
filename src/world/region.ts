@@ -56,7 +56,12 @@ import { footprintOf } from './measure'
  */
 export const BOUNDS = { minX: -28, maxX: 37, minZ: -36, maxZ: 20 }
 
-const GROUND_SIZE = 132
+/**
+ * The terrain mesh, which has to stay comfortably larger than anything the
+ * player can see from inside BOUNDS. Exported so that growing the region and
+ * forgetting this is a failing test rather than a visible edge of the world.
+ */
+export const GROUND_SIZE = 132
 /** Half-unit quads. Coarser than this and the banks read as facets. */
 const GRID = 220
 
@@ -126,6 +131,29 @@ const FORD = { x: 0.1, z: -1.25 }
 /** The hearth, and the centre everything at home is laid out around. */
 const HOME = { x: 0, z: 13.4 }
 
+/**
+ * The charcoal burner's kiln, on the rise past the mill.
+ *
+ * The region grew east and new ground has to be worth walking to, so the far
+ * end of the water gets a place rather than more field. What makes it readable
+ * from home is the same thing that makes home readable from out here: a column
+ * of smoke. There are exactly two fires in this region, and one of them is past
+ * everything else, which is a sightline and a reason in the same object.
+ */
+const KILN = { x: 30.5, z: 0.6 }
+
+/**
+ * Everything that is permanently HOT, and therefore everything loose fuel has
+ * to stay clear of.
+ *
+ * Stated once as a rule rather than as a radius typed next to each fire. A
+ * kiln and a hearth both burn forever and never burn out, so a clump of dry
+ * grass within the fire's reach of either is a wildfire on the first tick of
+ * every run at that seed. Home already had this as a hardcoded distance from
+ * one coordinate; there are two now and there will be more.
+ */
+const HEARTHS: readonly { x: number; z: number }[] = [HOME, KILN]
+
 /** Shortest distance from a point to a polyline, on the ground plane. */
 function distToPath(x: number, z: number, pts: readonly (readonly [number, number])[]): number {
   let best = Infinity
@@ -146,15 +174,34 @@ function distToPath(x: number, z: number, pts: readonly (readonly [number, numbe
 const PAL_Z = -8
 
 /**
- * Where the clearing stops being the clearing.
+ * Where the clearing stops being the clearing, per column of x.
  *
- * Not the wall itself. There are four metres of ordinary ground on the far side
- * of the palisade so that getting through it does not feel like walking into a
+ * Not the wall itself. There is a stretch of ordinary ground on the far side of
+ * the palisade so that getting through it does not feel like stepping into a
  * different game; the change happens as you climb, which is slower and reads as
  * the world rather than as a boundary. Anything that belongs to home — bright
  * scrub, flowers — stops here, and the moor starts.
+ *
+ * Clamped, and that is the whole reason this is a function rather than a sum of
+ * sines written inline somewhere. Brown moor showing inside the clearing says
+ * the world changed before the player got past the obstacle, and that is the
+ * one statement the palisade exists to make; the ground is not allowed to make
+ * it first.
+ *
+ * The band of ordinary ground it leaves past the wall runs from about a metre
+ * and a half to about nine, which is what stops the change reading as a line
+ * painted along the palisade. The three amplitudes CAN sum past the margin, so
+ * the clamp does fire, on the short stretches of x where all three peak at
+ * once; take it away and moor appears inside the clearing there.
  */
-const MOOR_EDGE = -12
+export function moorEdge(x: number): number {
+  const raw =
+    -13.2 +
+    2.2 * Math.sin(x * 0.21 + 1.3) +
+    1.4 * Math.sin(x * 0.47 - 0.6) +
+    0.8 * Math.sin(x * 0.93 + 2.1)
+  return Math.min(PAL_Z - 1.5, raw)
+}
 
 /**
  * A tall opaque thing that can stand between the camera and the player.
@@ -281,6 +328,20 @@ export const PALISADE = {
   /** Radius of a gate pillar, which stands at +-1.35. */
   pillarRadius: 0.45,
   pillarAt: 1.35,
+  /**
+   * How far the rock spur at each end has to run, so the wall cannot simply be
+   * walked around.
+   *
+   * This was a hardcoded 29.5 on both sides, which was correct for exactly one
+   * pair of bounds and silently wrong the moment the region grew east. A wall
+   * that stops short of the edge is not an obstacle, it is a detour, and
+   * `verify:collision` cannot see it: that check asks whether there is a gap
+   * WITHIN a run of circles, and a run that ends early has no gap in it. So the
+   * reach is data, and there is a test.
+   */
+  spurTo(side: -1 | 1): number {
+    return (side < 0 ? -BOUNDS.minX : BOUNDS.maxX) + 2
+  },
   /** Post centres, outward from the gate on both sides. */
   posts(): number[] {
     const out: number[] = []
@@ -368,6 +429,33 @@ export interface Place {
   id: string
   kind: 'home' | 'water' | 'work' | 'landmark' | 'exit'
   at: THREE.Vector3
+  /**
+   * Straight-line metres from home.
+   *
+   * `kind` alone is not enough to place anything against, and this is the gap
+   * that showed it: the mill and the burner's camp are both `work`, and they
+   * are twenty metres apart in what they mean. Something strange found beside
+   * the hearth spends the whole effect at once; the same object found at the
+   * far edge is the genre gradient doing its job. That rule needs a number.
+   *
+   * Straight line rather than walking distance, deliberately. Walking distance
+   * would fold in whether the palisade is still standing, which changes during
+   * a run, and a placement rule evaluated at generation time must not depend on
+   * something the player can burn down.
+   */
+  distance: number
+  /**
+   * The same fact as a fraction: 0 at home, 1 at the furthest place in this
+   * region.
+   *
+   * Both are here because they answer different questions and only one of them
+   * survives generation. Metres are the fact, and a rule written in metres
+   * ("past 30m") silently means something different in a region twice the size,
+   * which D22 says is exactly the kind of thing that must not be baked in. A
+   * rule written as "the outer third" means the same thing in every region
+   * this generator will ever produce.
+   */
+  remoteness: number
 }
 
 /**
@@ -439,7 +527,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     h += bump(x, z, 10.6, 8.4, 4.6, 1.6)
     h -= bump(x, z, -3.0, 1.0, 5.6, 1.0)
     h += bump(x, z, -15.0, -0.5, 4.2, 0.9)
-    h += bump(x, z, 31.0, -2.0, 4.6, 1.7)
+    h += bump(x, z, KILN.x, KILN.z, 4.6, 1.7)
     h += smoothstep(-5, -22, z) * 3.0
     // Purely additive past the old edge, so nothing at z > -22 moves. The
     // palisade, the crossing and everything derived from a bank are all on the
@@ -657,13 +745,30 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
      * These moved off green entirely. Moorland genuinely is brown, and brown
      * next to that clearing is unmistakable from across the region.
      */
-    moor: flatMat(tex.grass, 0x6d6353),
-    peat: flatMat(tex.sand, 0x4c4335),
-    dryMoor: flatMat(tex.straw, 0x8d8467),
+    // Built on the DRY ground tile, not the meadow one. A tint multiplies the
+    // texture, so tinting the meadow brown only ever gives dark olive, which is
+    // what green in shadow looks like and therefore says nothing at all. The
+    // dry tile is already the colour of dead grass, so a grey-brown over it
+    // lands where it was aimed.
+    moor: flatMat(tex.grassDry, 0x96896c),
+    // Lightened from near-black. Dark ground with a hard edge does not read as
+    // wet, it reads as a hole punched in the terrain, which is the same fault
+    // the contact-shadow blobs had.
+    peat: flatMat(tex.sand, 0x6a5e49),
+    dryMoor: flatMat(tex.grassDry, 0xbcb08d),
     /** The margin the mere left behind when it dropped. */
     bleach: flatMat(tex.sand, 0xbcb6a2),
-    /** The road past the wall. Nobody has laid a barrow of gravel on it. */
-    oldTrack: flatMat(tex.sand, 0x94886d),
+    /**
+     * The road past the wall: pale grit rather than the warm dirt of the tracks
+     * at home.
+     *
+     * Pushed a long way clear of the moor's own tone, because the first attempt
+     * at this sat at 0x94886d against a moor at 0x96896c and the two were the
+     * same colour. The road out is the ONLY guidance on that side, D20 having
+     * removed every other kind, and it was invisible against the ground it
+     * crossed for the whole length of the climb.
+     */
+    oldTrack: flatMat(tex.sand, 0xcbc1a2),
     // Darker than the mud it sits in. Water lighter than its own bank inverts
     // the natural relationship and reads as a hole punched in the render.
     water: toonUnique({
@@ -700,6 +805,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     plankDark: toonUnique({ color: 0x8c6038, map: tiled(tex.plank, 2.4, 1.6) }),
     stone: toonUnique({ map: tiled(tex.stone, 2.4, 2.4) }),
     stoneDark: toonUnique({ color: 0x8a8c92, map: tiled(tex.stone, 2.4, 2.4) }),
+    // Set stone, not fallen stone. Darker and warmer than the boulders so a
+    // menhir does not read as one more rock, and tiled tall so the grain runs
+    // up it rather than round it.
+    menhir: toonUnique({ color: 0x8b8477, map: tiled(tex.stone, 1.1, 3.0) }),
     // Warm grey. The lighting ramp turns anything neutral bright blue on its
     // shadow side, and a blue plinth under a cottage reads as painted plastic.
     rubbleWall: toonUnique({ color: 0xb2a08a, map: tiled(tex.stone, 1.4, 1.4) }),
@@ -995,30 +1104,109 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     group.add(pad)
   }
 
-  // A fallen trunk half in the water. You walk along this rather than through
-  // it: it is low, it is flat on top once it has settled, and a log lying at
-  // the water's edge invites exactly one thing.
+  /**
+   * A fallen trunk half in the water. You walk along this rather than through
+   * it: it is low, it is flat on top once it has settled, and a log lying at
+   * the water's edge invites exactly one thing.
+   *
+   * This is the object that read as a beam floating in mid-air in the ordinary
+   * home view, and the diagnosis is worth keeping because the obvious fix was
+   * the wrong one. It was not floating a metre up. Its shadow was welded to it
+   * with no lit ground in the gap, which a body a metre up under this sun could
+   * not do. It was 0.11m clear at one end and 0.27m BURIED at the other, and it
+   * read as airborne for three separate reasons:
+   *
+   *   - one height sample, taken at the middle, for a 5.4m log, plus a
+   *     hard-coded 0.12 rad tilt that had nothing to do with the ground under
+   *     it. That is 0.65m of rise laid across ground level to within 0.26m, and
+   *     it is the plank crossing's bug at a twentieth of the size.
+   *   - it sat TANGENT to the terrain, so its underside was a single unbroken
+   *     straight line for most of a screen width with no point of contact
+   *     anywhere along it. The log seats at the hearth already carry this note
+   *     and it was never applied here.
+   *   - its top was the palest surface in that part of the frame, so it read as
+   *     a lit object in front of a background rather than as something lying in
+   *     one.
+   *
+   * So: the tilt comes from the two ends, the log is bedded rather than rested,
+   * and the top is broken up. Lowering it would have fixed none of that.
+   */
   {
     const a = 0.55
     const rad = pondRadius(a)
     const bx = POND.x + Math.cos(a) * rad - 0.6
     const bz = POND.z + Math.sin(a) * rad - 0.4
-    const len = 5.4
-    const girth = 0.31
+    const LEN = 5.4
+    const GIRTH = 0.31
     const yaw = a + 0.3
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, len, 7), M.log)
-    trunk.rotation.set(0, yaw, Math.PI / 2 - 0.12)
-    const by = heightAt(bx, bz) + 0.2
+
+    // The long axis on the ground plane, in the frame a footprint uses: local
+    // +x maps to (cos ry, -sin ry).
+    const ax = Math.cos(yaw)
+    const az = -Math.sin(yaw)
+    const half = LEN / 2 - GIRTH
+    const groundAt = (t: number): number => heightAt(bx + ax * t, bz + az * t)
+
+    const h0 = groundAt(-half)
+    const h1 = groundAt(half)
+    /**
+     * Sunk by half its own radius, everywhere along it.
+     *
+     * This is the part that actually stops it reading as airborne. A cylinder
+     * resting exactly on the terrain touches along a mathematical line and the
+     * renderer draws that line as a hard edge with grass on one side and lit
+     * wood on the other; sink it and the terrain cuts the wood the whole way,
+     * so there is no edge left to read as a gap. It also means the log cannot
+     * hover at one end when the ground turns out not to be flat.
+     */
+    const BED = GIRTH * 0.5
+    const by = (h0 + h1) / 2 - BED
+
+    // Rotating about Z by (PI/2 - phi) lays the cylinder down and gives its
+    // axis a rise of sin(phi). phi comes from the drop between the two ends.
+    const phi = Math.atan2(h0 - h1, 2 * half)
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, LEN, 7), M.log)
+    trunk.rotation.set(0, yaw, Math.PI / 2 - phi)
     trunk.position.set(bx, by, bz)
     trunk.castShadow = true
+    trunk.receiveShadow = true
     group.add(trunk)
 
-    // A capsule, because that is the shape of a log: a segment grown by its own
-    // girth. This used to be seven discs laid along its length.
-    standables.push({
-      ...box(bx, bz, len / 2 - girth, 0, yaw, girth * 1.5),
-      top: by + girth,
-    })
+    /** Height of the log's own axis at a point along it. */
+    const axisAt = (t: number): number => by + (t * (h1 - h0)) / (2 * half)
+
+    // Damp and moss along the top, thickest at the end that lies in the water.
+    // The pale unbroken top was a third of why this read as a lit object rather
+    // than as something lying in the grass.
+    for (const [t, w, wet] of [
+      [-half * 0.72, 1.5, true],
+      [-half * 0.1, 1.0, true],
+      [half * 0.55, 0.8, false],
+    ] as const) {
+      const patch = new THREE.Mesh(new THREE.BoxGeometry(w, 0.05, GIRTH * 1.5), wet ? M.moss : M.thatchOld)
+      patch.position.set(bx + ax * t, axisAt(t) + GIRTH * 0.86, bz + az * t)
+      patch.rotation.y = yaw
+      group.add(patch)
+    }
+
+    /**
+     * Three rectangles rather than one, because the log follows a slope now.
+     *
+     * A single flat surface over a tilted 5.4m log is either buried at the high
+     * end or floating at the low one. Each third takes its height from the log
+     * where it actually is, and is then floored at the highest ground beneath
+     * it, so the checked failure — a walkable surface under the terrain — is
+     * impossible by construction rather than by luck.
+     */
+    for (const t of [-half * (2 / 3), 0, half * (2 / 3)]) {
+      const sx = bx + ax * t
+      const sz = bz + az * t
+      const seg = half / 3
+      standables.push({
+        ...box(sx, sz, seg, 0, yaw, GIRTH * 1.5),
+        top: Math.max(axisAt(t) + GIRTH, groundUnder(sx, sz, seg, GIRTH * 1.5, yaw) + 0.06),
+      })
+    }
   }
 
   const boulderGeo = new THREE.DodecahedronGeometry(1, 0)
@@ -1527,7 +1715,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   const SOUTH: readonly Species[] = ['oak', 'birch', 'oak', 'scrub', 'birch', 'dead', 'pine']
   const FLANK: readonly Species[] = ['oak', 'pine', 'oak', 'birch', 'scrub']
-  const NORTH: readonly Species[] = ['pine', 'pine', 'dead', 'pine', 'oak']
+  // Past the wall the wood is older and half of it is standing dead. Pines still
+// carry the mass, because a tree line made only of bare trunks is see-through
+// and stops enclosing anything.
+const NORTH: readonly Species[] = ['pine', 'dead', 'dead', 'pine', 'dead']
 
   // Behind home the wood is held back, so the huts have air around them. Every
   // run overshoots its own corner, so the four walls meet rather than leaving a
@@ -1571,7 +1762,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     if (distToPath(x, z, BROOK) < 2.6) continue
     // Scrub is bright, soft and green, and it is the clearing's. The far side
     // gets its own low cover, which is grey.
-    if (z < MOOR_EDGE) continue
+    if (z < moorEdge(x)) continue
     if (Math.hypot(x - HOME.x, z - HOME.z) < 13.5) continue
     if (Math.hypot(x - POND.x, z - POND.z) < pondRadius(Math.atan2(z - POND.z, x - POND.x)) + 0.6) continue
     if (Math.abs(z - PAL_Z) < 2.5) continue
@@ -1662,7 +1853,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       const x = cx + grassRng.range(-2.4, 2.4)
       const z = cz + grassRng.range(-2.4, 2.4)
       if (Math.hypot(x - POND.x, z - POND.z) < pondRadius(Math.atan2(z - POND.z, x - POND.x)) + 0.8) continue
-      if (Math.hypot(x - HOME.x, z - HOME.z) < 8.5) continue
+      // Not within a permanent fire's reach. See HEARTHS.
+      if (HEARTHS.some((c) => Math.hypot(x - c.x, z - c.z) < 8.5)) continue
       if (nearTrack(x, z, 1.3)) continue
 
       const h = heightAt(x, z)
@@ -1725,7 +1917,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       // Nothing flowers past the wall. Everything else — pebbles, sticks,
       // mushrooms — is as at home, because the ground itself has not stopped
       // being ground.
-      if (kind < 0.45 && z < MOOR_EDGE) continue
+      if (kind < 0.45 && z < moorEdge(x)) continue
 
       if (kind < 0.45) {
         const mat = flowerMats[grassRng.int(0, flowerMats.length - 1)]!
@@ -2004,8 +2196,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // symmetric. A single hardcoded limit here is a hole at the end of the wall
   // the moment the region grows on one side, and a wall you can walk around is
   // not an obstacle at all.
-  for (const side of [-1, 1]) {
-    const limit = (side < 0 ? -BOUNDS.minX : BOUNDS.maxX) + 2.0
+  for (const side of [-1, 1] as const) {
+    const limit = PALISADE.spurTo(side)
     let x = side * 7.6
     while (Math.abs(x) < limit) {
       const z = PAL_Z + palRng.range(-0.4, 0.4)
@@ -2139,6 +2331,17 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
     t.position.set(x, h, z)
     group.add(t)
+    // Registered, and deliberately NOT pinned. It is the tallest thing past the
+    // wall by three metres and it was not in this list at all, so standing
+    // anywhere behind it left the player completely invisible with no way to
+    // turn the camera and no way for anything to fade. A screenshot taken at
+    // the holding is a screenshot of a tower with nobody in it.
+    //
+    // Pinning is for landmarks whose whole job is to be aimed at from far off,
+    // and for buildings, which ghost into an unreadable pile of overlapping
+    // boxes. Three solid cylinders ghost cleanly, and being unable to see your
+    // own character is worse than a tower going faint for a moment.
+    occluders.push(occluder(t, 2.3, 7.7))
     solidRound(t, h + 2, 'The tower', { STONE: 1, HEAVY: 1, RIGID: 1 })
   }
 
@@ -2169,12 +2372,11 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // One sheet, not a scatter of patches. The far side is a different ground
     // and it has to cover; patches over grass read as patches on grass, which
     // is what the first attempt at this looked like.
-    const wobble = (x: number): number =>
-      MOOR_EDGE +
-      2.4 * Math.sin(x * 0.21 + 1.3) +
-      1.5 * Math.sin(x * 0.47 - 0.6) +
-      0.9 * Math.sin(x * 0.93 + 2.1)
-    layField(BOUNDS.minX - 4, BOUNDS.maxX + 4, BOUNDS.minZ - 5, wobble, M.moor, 0.038)
+    // Reaches well past the bounds on every side, not just to them. The tree
+    // line is clumped on purpose and you see between the clumps, so a sheet
+    // that stops at the edge leaves bright green clearing showing through the
+    // trunks on the far side of the wall, which is the one place it must not.
+    layField(BOUNDS.minX - 12, BOUNDS.maxX + 14, BOUNDS.minZ - 12, moorEdge, M.moor, 0.038)
 
     // Wet ground in the low places and bleached grass on the exposed ones. Kept
     // small enough that a fan's chord still hugs the terrain.
@@ -2183,7 +2385,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       // Biased outward, so the ground keeps changing as you climb rather than
       // changing once at a line.
       const t = beyondRng.next() ** 0.6
-      const z = MOOR_EDGE - t * (MOOR_EDGE - (BOUNDS.minZ - 1))
+      const edge = moorEdge(x)
+      const z = edge - t * (edge - (BOUNDS.minZ - 1))
       // Not on top of the mere: the pale margin there is the point of it.
       if (Math.hypot(x - MERE.x, z - MERE.z) < mereRadius(Math.atan2(z - MERE.z, x - MERE.x)) + 1) continue
       const wet = beyondRng.chance(0.45)
@@ -2192,16 +2395,16 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   }
 
   /**
-   * Low cover, in place of the scrub that stops at MOOR_EDGE. Grey, woody and
-   * knee high: the same silhouette as the bracken at home in a colour that is
-   * nobody's idea of spring.
+   * Low cover, in place of the scrub that stops at the moor edge. Grey, woody
+   * and knee high: the same silhouette as the bracken at home, in a colour that
+   * is nobody's idea of spring.
    */
   const heathMats = [0x6d6a58, 0x7b6f66, 0x5f6553].map((c) =>
     toonUnique({ color: c, map: tiled(tex.foliage, 1.4, 1.4) }),
   )
   for (let c = 0; c < 60; c++) {
     const cx = beyondRng.range(BOUNDS.minX, BOUNDS.maxX)
-    const cz = beyondRng.range(BOUNDS.minZ, MOOR_EDGE)
+    const cz = beyondRng.range(BOUNDS.minZ, moorEdge(cx))
     if (nearTrack(cx, cz, 2.2)) continue
     for (let k = 0; k < beyondRng.int(3, 8); k++) {
       const x = cx + beyondRng.range(-1.7, 1.7)
@@ -2249,7 +2452,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         const rr = rad * f + (f === 0.94 ? ragged[i % seg]! : 0)
         const x = MERE.x + Math.cos(a) * rr
         const z = MERE.z + Math.sin(a) * rr
-        verts.push(x, heightAt(x, z) + 0.045, z)
+        // Well clear of the moor sheet at 0.038. The dish is two metres deep,
+        // so a fan ring and a grid cell disagree by more than a millimetre
+        // across it, and the loser flickers.
+        verts.push(x, heightAt(x, z) + 0.08, z)
         uvs.push(...worldUv(x, z))
       }
     }
@@ -2359,8 +2565,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * a ruin you cannot get into is a box.
    */
   {
-    const cx = -15.0
-    const cz = -24.5
+    // Well clear of the tower. At its first position, nine metres from it, the
+    // tower stood between the camera and the whole ruin from the one angle the
+    // player ever gets, so the place was a screenshot of a tower. Two landmarks
+    // need room between them or the nearer one eats the further one.
+    const cx = -20.5
+    const cz = -26.5
     const turn = 0.42
     const W = 5.6
     const D = 3.8
@@ -2370,7 +2580,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     /** Local (right, forward) in the holding's own frame, to world. */
     const at = (lx: number, lz: number): [number, number] => [cx + lx * c + lz * s, cz - lx * s + lz * c]
 
-    layPatch(cx, cz, 4.6, M.peat, beyondRng, 0.3, 20, 0.042)
+    layPatch(cx, cz, 4.6, M.peat, beyondRng, 0.3, 20, 0.055)
 
     // Four runs of low rubble wall, with the south one broken for the doorway.
     const walls: [number, number, number, number][] = [
@@ -2383,23 +2593,39 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     for (const [lx, lz, w, d] of walls) {
       const [x, z] = at(lx, lz)
       const g = new THREE.Group()
-      // Courses rather than one box, because a ruin is a wall that has lost its
-      // top and the ragged line is the whole read.
-      const courses = 3
-      for (let i = 0; i < courses; i++) {
-        const f = 1 - i * beyondRng.range(0.05, 0.16)
-        const course = new THREE.Mesh(
-          new THREE.BoxGeometry(w * f, WALL / courses, d * (i === 0 ? 1 : 0.86)),
-          M.rubbleWall,
-        )
-        course.position.set(
-          beyondRng.range(-0.06, 0.06),
-          (i + 0.5) * (WALL / courses),
-          beyondRng.range(-0.05, 0.05),
-        )
-        course.castShadow = true
-        course.receiveShadow = true
-        g.add(course)
+      // Two courses, not three. Three of them at 0.28m each is a stack of thin
+      // bands and from 35 degrees above it reads as slats, which is what the
+      // first version of this looked like: a venetian blind lying in a field.
+      // One solid mass with a shorter, narrower course on top is a wall that
+      // has lost its height, which is what a footing is.
+      const low = WALL * beyondRng.range(0.6, 0.72)
+      const base = new THREE.Mesh(new THREE.BoxGeometry(w, low, d), M.rubbleWall)
+      base.position.y = low / 2
+      base.castShadow = true
+      base.receiveShadow = true
+      g.add(base)
+
+      const capW = w * beyondRng.range(0.5, 0.86)
+      const cap = new THREE.Mesh(
+        new THREE.BoxGeometry(capW, WALL - low, d * 0.88),
+        M.rubbleWall,
+      )
+      cap.position.set(beyondRng.range(-1, 1) * (w - capW) * 0.4, low + (WALL - low) / 2, 0)
+      cap.castShadow = true
+      cap.receiveShadow = true
+      g.add(cap)
+
+      // Individual stones along the top, so the line the eye follows is the
+      // ragged one rather than the box's.
+      for (let i = 0; i < Math.round(Math.max(w, d) * 2.2); i++) {
+        const along = beyondRng.range(-0.5, 0.5)
+        const sc = beyondRng.range(0.16, 0.3)
+        const st = new THREE.Mesh(beyondRng.chance(0.5) ? boulderGeo : rubbleGeo, M.rubbleWall)
+        st.scale.set(sc, sc * 0.7, sc)
+        st.position.set(along * w, low + beyondRng.range(-0.06, 0.12), along * d)
+        st.rotation.set(beyondRng.range(0, 3), beyondRng.range(0, 3), beyondRng.range(0, 3))
+        st.castShadow = true
+        g.add(st)
       }
       g.position.set(x, heightAt(x, z), z)
       g.rotation.y = turn
@@ -2493,8 +2719,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       const x = STONE_ROW.x0 + (STONE_ROW.x1 - STONE_ROW.x0) * t + beyondRng.range(-0.7, 0.7)
       const z = STONE_ROW.z0 + (STONE_ROW.z1 - STONE_ROW.z0) * t + beyondRng.range(-0.9, 0.9)
       const h = heightAt(x, z)
-      const w = beyondRng.range(0.72, 1.15)
-      const thick = beyondRng.range(0.34, 0.5)
+      const w = beyondRng.range(0.9, 1.35)
+      const thick = beyondRng.range(0.5, 0.7)
 
       // The one the road runs through is lying down. Measured against the track
       // rather than counted out, so moving either does not silently bury a
@@ -2505,7 +2731,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         // Bedded on the highest ground it covers, so no corner of a stone this
         // long ends up under the hill it fell on.
         const y = groundUnder(x, z, w / 2, len / 2, yaw)
-        const down = new THREE.Mesh(new THREE.BoxGeometry(w, thick, len), M.stone)
+        const down = new THREE.Mesh(new THREE.BoxGeometry(w, thick, len), M.menhir)
         down.position.set(x, y + thick * 0.45, z)
         down.rotation.set(beyondRng.range(-0.06, 0.06), yaw, beyondRng.range(-0.05, 0.05))
         down.castShadow = true
@@ -2517,7 +2743,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
       const hgt = beyondRng.range(2.4, 3.7)
       const g = new THREE.Group()
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, thick), M.stone)
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, thick), M.menhir)
       slab.position.y = hgt / 2
       slab.rotation.set(beyondRng.range(-0.09, 0.09), 0, beyondRng.range(-0.13, 0.13))
       slab.castShadow = true
@@ -4246,6 +4472,432 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
   }
 
+  // ------------------------------------------------------- the burner's camp
+  /**
+   * Where the region's charcoal comes from, and the far end of the one line the
+   * eye can already follow: the water runs east from the pond, through the
+   * ford, past the mill, and this is what is at the end of it.
+   *
+   * The camp is a set of facts about a working trade and nothing here is a
+   * solution to anything. A kiln that is alight is permanently HOT, the same
+   * way the hearth is, because a smouldering earth kiln does not go out; that
+   * makes fire obtainable at the far side of the region as well as at home,
+   * which is a consequence of building a charcoal camp rather than a shortcut
+   * anybody wrote down. HEARTHS is what keeps loose fuel out of its reach.
+   *
+   * Two kilns on purpose: one alight under its turf, one still being built with
+   * the billets bare. Between them they explain what the place is without a
+   * word, which is the whole job now that D20 has taken the words away.
+   */
+  const campRng = rng.fork('camp')
+  // On the dry ground tile again, and for the same reason the moor is: a
+  // brown tint over the meadow texture stays green, and a five metre green
+  // dome is a hill with a chimney in it rather than a kiln under turf.
+  const turfMat = toonUnique({ color: 0x7c7350, map: tiled(tex.grassDry, 1.4, 1.4) })
+  const earthMat = toonUnique({ color: 0x7a6449, map: tiled(tex.sand, 1.2, 1.2) })
+  {
+    const base = heightAt(KILN.x, KILN.z)
+
+    // The working floor: years of ash and charcoal dust, trodden flat.
+    layPatch(KILN.x, KILN.z, 6.0, M.yard, campRng, 0.32, 26, 0.05)
+    layPatch(KILN.x, KILN.z, 3.9, M.ash, campRng, 0.34, 24, 0.062)
+    layPatch(KILN.x - 4.6, KILN.z + 3.4, 1.9, M.ash, campRng, 0.36, 16, 0.058)
+
+    // The lit kiln. A stack of billets sealed under turf, with the smoke
+    // leaving through the crown and nothing else showing.
+    {
+      const g = new THREE.Group()
+      const R = 2.3
+      const TOP = 1.9
+
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2
+        const hgt = campRng.range(0.42, 0.6)
+        const billet = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, hgt, 6), M.log)
+        billet.position.set(Math.cos(a) * (R - 0.12), hgt / 2, Math.sin(a) * (R - 0.12))
+        billet.rotation.set(Math.cos(a) * 0.1, campRng.range(0, 3), -Math.sin(a) * 0.1)
+        billet.castShadow = true
+        g.add(billet)
+      }
+
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(R, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.5),
+        turfMat,
+      )
+      dome.scale.set(1, TOP / R, 1)
+      dome.castShadow = true
+      dome.receiveShadow = true
+      g.add(dome)
+
+      // The earth collar rammed round the foot, which is what seals it.
+      const collar = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.16, R + 0.34, 0.42, 14), earthMat)
+      collar.position.y = 0.21
+      collar.castShadow = true
+      collar.receiveShadow = true
+      g.add(collar)
+
+      // Vent holes round the base, and the crown open at the top.
+      for (let i = 0; i < 7; i++) {
+        const a = (i / 7) * Math.PI * 2 + 0.3
+        const vent = new THREE.Mesh(new THREE.CircleGeometry(0.11, 6), M.doorway)
+        vent.position.set(Math.cos(a) * (R + 0.26), 0.3, Math.sin(a) * (R + 0.26))
+        vent.rotation.y = -a + Math.PI / 2
+        g.add(vent)
+      }
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.26, 9), M.doorway)
+      crown.position.y = TOP - 0.06
+      g.add(crown)
+
+      g.position.set(KILN.x, base, KILN.z)
+      group.add(g)
+      // Not pinned. The smoke is the landmark and it is a separate object, so
+      // the mound may go faint without taking the thing you were walking
+      // toward with it. A 2m dome five metres wide hides a player completely,
+      // and a screenshot of a kiln with nobody in it is the tower's mistake.
+      occluders.push(occluder(g, R + 0.3, TOP + 0.2))
+      solidBuilt(g, base + 0.9, 'The kiln', {
+        HOT: 0.9,
+        LUMINOUS: 0.2,
+        HEAVY: 1,
+        RIGID: 0.5,
+      })
+
+      // Deliberately NOT parented to the kiln, unlike the one on the house.
+      // That one is on a pinned building and can never fade; this mound can,
+      // and a column of smoke that dissolves along with it takes the only
+      // long-range guidance in the east with it.
+      const smoke = createSmokeColumn({ scale: 1.15, seed: 41, drift: [0.34, -0.22] })
+      smoke.object3D.position.set(KILN.x, base + TOP + 0.1, KILN.z)
+      group.add(smoke.object3D)
+    }
+
+    /**
+     * The next one, half built: billets stood on end against a centre pole,
+     * with no turf on it yet. This is the lit kiln with its lid off, and it is
+     * the only explanation of the place there is going to be.
+     */
+    {
+      const cx = KILN.x - 5.2
+      const cz = KILN.z + 2.6
+      const h = heightAt(cx, cz)
+      const g = new THREE.Group()
+
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 2.4, 6), M.log)
+      pole.position.y = 1.2
+      pole.castShadow = true
+      g.add(pole)
+
+      for (let ring = 0; ring < 2; ring++) {
+        const rad = 0.58 + ring * 0.5
+        const lean = 0.2 + ring * 0.16
+        const n = 12 + ring * 9
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2 + campRng.range(-0.06, 0.06)
+          const len = 2.1 - ring * 0.3
+          const billet = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, len, 6), M.log)
+          billet.position.set(Math.cos(a) * rad, len * 0.47, Math.sin(a) * rad)
+          billet.rotation.set(Math.sin(a) * lean, campRng.range(0, 3), -Math.cos(a) * lean)
+          billet.castShadow = true
+          g.add(billet)
+        }
+      }
+
+      g.position.set(cx, h, cz)
+      group.add(g)
+      occluders.push(occluder(g, 1.6, 2.2))
+      solidBuilt(g, h + 0.9, 'A raised stack', {
+        WOODEN: 1,
+        FLAMMABLE: 0.7,
+        RIGID: 0.6,
+        HEAVY: 0.6,
+      })
+    }
+
+    /** Somebody sleeps out here for the week a kiln takes. */
+    {
+      // East of the kiln, not north of it. At its first offset the shelter sat
+      // at z = -7.1, which is inside the rock spur that seals the east end of
+      // the palisade: a hut built into a wall of boulders, invisible from the
+      // one angle the player gets. Nothing in the collision checks can see
+      // that, because neither object is destructible and each is correct on its
+      // own; only the picture shows it.
+      const sx = KILN.x + 2.8
+      const sz = KILN.z - 3.6
+      const h = heightAt(sx, sz)
+      const g = new THREE.Group()
+
+      /**
+       * Two slopes to a ridge, not one lean-to plane.
+       *
+       * The lean-to version of this is in the history of this file twice now:
+       * the first shed was a mono-pitch and the comment on `shed` says exactly
+       * why it was replaced. A single plane at this pitch either faces the sun
+       * or it does not, and the toon ramp has no middle, so it comes out as one
+       * flat slab of blue-grey slate whatever it is textured with. Two slopes
+       * always give the eye a lit face and a dark one, which is what reads as a
+       * roof rather than as a panel lying on some sticks.
+       */
+      const RIDGE_Y = 1.55
+      const HALF = 1.15
+      const PITCH = Math.atan2(RIDGE_Y, HALF)
+      const SLOPE = Math.hypot(RIDGE_Y, HALF)
+
+      for (const s of [-1, 1]) {
+        const fork = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, RIDGE_Y + 0.2, 6), M.log)
+        fork.position.set(0, (RIDGE_Y + 0.2) / 2, s * 1.5)
+        fork.castShadow = true
+        g.add(fork)
+      }
+      const ridge = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.075, 0.075, 3.4, 6).rotateX(Math.PI / 2),
+        M.log,
+      )
+      ridge.position.set(0, RIDGE_Y + 0.1, 0)
+      ridge.castShadow = true
+      g.add(ridge)
+
+      for (const s of [-1, 1]) {
+        const half = new THREE.Mesh(new THREE.BoxGeometry(SLOPE, 0.16, 3.2), turfMat)
+        half.position.set((s * HALF) / 2, RIDGE_Y / 2, 0)
+        // -s * PITCH, and the sign matters. Rotating about Z maps local +X to
+        // (cos, sin), and the direction from the ridge down to the eave is
+        // (HALF, -RIDGE_Y), whose angle is -PITCH. The complement tilts both
+        // halves UP and outward instead, which builds a table with a slab on
+        // it: exactly what the first version of this looked like.
+        half.rotation.z = -s * PITCH
+        half.castShadow = true
+        half.receiveShadow = true
+        g.add(half)
+
+        // Rafter ends showing under the eave, which is the whole reason a
+        // turf roof reads as built rather than as a heap.
+        for (let i = 0; i < 5; i++) {
+          const rz = -1.3 + i * 0.65
+          const rafter = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, SLOPE + 0.2, 5), M.log)
+          rafter.position.set((s * HALF) / 2, RIDGE_Y / 2 - 0.08, rz)
+          rafter.rotation.z = -s * PITCH
+          rafter.castShadow = true
+          g.add(rafter)
+        }
+      }
+
+      // Turf lumps along the ridge, holding it down.
+      for (let i = 0; i < 6; i++) {
+        const sod = new THREE.Mesh(rubbleGeo, turfMat)
+        const sc = campRng.range(0.16, 0.28)
+        sod.scale.set(sc, sc * 0.6, sc)
+        sod.position.set(campRng.range(-0.12, 0.12), RIDGE_Y + 0.16, -1.4 + i * 0.56)
+        sod.rotation.set(campRng.range(0, 3), campRng.range(0, 3), campRng.range(0, 3))
+        g.add(sod)
+      }
+
+      // Bracken to lie on, at the open end.
+      for (let i = 0; i < 6; i++) {
+        const b = new THREE.Mesh(brackenGeo, campRng.pick(brackenMats))
+        const s = campRng.range(0.4, 0.7)
+        b.scale.set(s, s * 0.5, s)
+        b.position.set(campRng.range(-0.5, 0.5), 0.12, campRng.range(0.6, 1.4))
+        b.rotation.set(1.3, campRng.range(0, 3), 0)
+        g.add(b)
+      }
+
+      g.position.set(sx, h, sz)
+      g.rotation.y = -0.42
+      group.add(g)
+      occluders.push(occluder(g, 1.7, 1.9))
+      solidBuilt(g, h + 0.8, 'The shelter', {
+        WOODEN: 0.8,
+        FLAMMABLE: 0.5,
+        RIGID: 0.6,
+      })
+    }
+
+    /** Cordwood, cut to length and stacked to season. Well clear of the kiln. */
+    for (const [dx, dz, turn] of [
+      [-3.0, -4.2, 0.26],
+      [-5.4, -2.4, 1.02],
+    ] as const) {
+      const bx = KILN.x + dx
+      const bz = KILN.z + dz
+      const foot = heightAt(bx, bz)
+      const pile = new THREE.Group()
+      for (let row = 0; row < 4; row++) {
+        for (let i = 0; i < 4 - Math.floor(row / 3); i++) {
+          const lz = -0.55 + i * 0.34 + (row % 2) * 0.15
+          const log = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.16, 0.16, 1.35, 8).rotateZ(Math.PI / 2),
+            M.log,
+          )
+          log.position.set(campRng.range(-0.06, 0.06), 0.18 + row * 0.31, lz)
+          log.rotation.y = campRng.range(-0.05, 0.05)
+          log.castShadow = true
+          log.receiveShadow = true
+          pile.add(log)
+        }
+      }
+      for (const s of [-1, 1]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.5, 0.12), M.log)
+        post.position.set(0, 0.75, s * 0.8)
+        post.castShadow = true
+        pile.add(post)
+      }
+      pile.position.set(bx, foot, bz)
+      pile.rotation.y = turn
+      group.add(pile)
+      solidBuilt(pile, foot + 0.7, 'Cordwood', {
+        WOODEN: 1,
+        FLAMMABLE: 0.75,
+        RIGID: 0.6,
+        HEAVY: 0.6,
+      })
+    }
+
+    /**
+     * A butt of water beside the kiln. Not a fire extinguisher and not put here
+     * as one: it is what a burner keeps to damp a hole that has opened up.
+     * WATER at the far end of the region is a fact, and what a player does with
+     * it is not this file's business.
+     */
+    {
+      const wx = KILN.x - 2.9
+      const wz = KILN.z - 3.3
+      const h = heightAt(wx, wz)
+      const butt = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.42, 1.0, 12), M.plankDark)
+      butt.position.set(wx, h + 0.5, wz)
+      butt.castShadow = true
+      group.add(butt)
+      for (const y of [0.22, 0.8]) {
+        const hoop = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.08, 12), M.steel)
+        hoop.position.set(wx, h + y, wz)
+        group.add(hoop)
+      }
+      const top = new THREE.Mesh(new THREE.CircleGeometry(0.4, 12).rotateX(-Math.PI / 2), M.water)
+      top.position.set(wx, h + 0.94, wz)
+      group.add(top)
+      solidRound(butt, h + 0.5, 'The water butt', { WATER: 1, CONTAINER: 0.8, WOODEN: 0.7 })
+    }
+
+    /** Charcoal, drawn from the last burn and heaped where it fell. */
+    {
+      const hx = KILN.x + 4.4
+      const hz = KILN.z + 1.9
+      const h = heightAt(hx, hz)
+      const heap = new THREE.Group()
+      for (let i = 0; i < 22; i++) {
+        const a = campRng.range(0, Math.PI * 2)
+        const rad = campRng.range(0, 1) ** 0.6 * 0.95
+        const s = campRng.range(0.13, 0.3)
+        const lump = new THREE.Mesh(campRng.chance(0.5) ? boulderGeo : rubbleGeo, M.charred)
+        lump.scale.set(s, s * 0.7, s * campRng.range(0.8, 1.5))
+        lump.position.set(
+          Math.cos(a) * rad,
+          0.1 + (1 - rad / 0.95) * 0.34,
+          Math.sin(a) * rad,
+        )
+        lump.rotation.set(campRng.range(0, 3), campRng.range(0, 3), campRng.range(0, 3))
+        lump.castShadow = true
+        heap.add(lump)
+      }
+      heap.position.set(hx, h, hz)
+      group.add(heap)
+      solidRound(heap, h + 0.3, 'Charcoal', { WOODEN: 0.3, FLAMMABLE: 0.9, HEAVY: 0.3 })
+
+      // Sacks of it, ready to go down to the mill track.
+      for (let i = 0; i < 3; i++) {
+        const x = hx + 1.5 + campRng.range(-0.4, 0.4)
+        const z = hz - 0.7 + i * 0.55
+        const sack = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 0.68, 8), M.cloth)
+        sack.position.set(x, heightAt(x, z) + 0.34, z)
+        sack.rotation.set(campRng.range(-0.1, 0.1), campRng.range(0, 3), campRng.range(-0.1, 0.1))
+        sack.castShadow = true
+        group.add(sack)
+      }
+    }
+
+    // Loose lumps and scorched ground across the floor, so the ash patch is not
+    // a flat decal with objects standing on it.
+    for (let i = 0; i < 34; i++) {
+      const a = campRng.range(0, Math.PI * 2)
+      const rad = campRng.range(1.2, 5.6)
+      const x = KILN.x + Math.cos(a) * rad
+      const z = KILN.z + Math.sin(a) * rad
+      const s = campRng.range(0.07, 0.19)
+      const lump = new THREE.Mesh(campRng.chance(0.5) ? boulderGeo : rubbleGeo, M.charred)
+      lump.scale.set(s, s * 0.65, s * campRng.range(0.7, 1.4))
+      lump.position.set(x, heightAt(x, z) + s * 0.3, z)
+      lump.rotation.set(campRng.range(0, 3), campRng.range(0, 3), campRng.range(0, 3))
+      group.add(lump)
+    }
+
+    // A rake and a long shovel, stood against the shelter end.
+    for (const [dx, dz, ry, long] of [
+      [3.9, -2.6, 0.5, true],
+      [4.3, -2.2, -0.3, false],
+    ] as const) {
+      const x = KILN.x + dx
+      const z = KILN.z + dz
+      const h = heightAt(x, z)
+      const g = new THREE.Group()
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, long ? 2.2 : 1.7, 5), M.log)
+      shaft.position.y = long ? 1.1 : 0.85
+      shaft.castShadow = true
+      g.add(shaft)
+      if (long) {
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.36, 0.05), M.steel)
+        blade.position.y = 2.28
+        g.add(blade)
+      } else {
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.06, 0.06), M.log)
+        head.position.y = 1.66
+        g.add(head)
+      }
+      g.position.set(x, h, z)
+      g.rotation.set(0.3, ry, 0.1)
+      group.add(g)
+    }
+  }
+
+  /**
+   * The coup: the stretch of wood they are cutting, between the mill and the
+   * camp. Stumps, brash and a couple of trunks still on the ground.
+   *
+   * This is what makes the camp read as part of the region instead of a prop
+   * dropped in the corner. Charcoal comes from somewhere, and the somewhere is
+   * on the way.
+   */
+  for (let i = 0; i < 17; i++) {
+    // West of the kiln and short of the wall. The first range overlapped the
+    // camp's own exclusion radius by most of its width, so nearly every stump
+    // was rejected and the coup was three stumps in a corner.
+    const x = campRng.range(19.5, 27.5)
+    const z = campRng.range(-6.0, 2.0)
+    if (distToPath(x, z, BROOK) < BROOK_W + 1.2) continue
+    if (Math.hypot(x - KILN.x, z - KILN.z) < 5.5) continue
+    if (nearTrack(x, z, 1.6)) continue
+    const h = heightAt(x, z)
+    const s = campRng.range(0.7, 1.15)
+
+    const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.36 * s, 0.44 * s, 0.5, 9), M.log)
+    stump.position.set(x, h + 0.24, z)
+    stump.rotation.set(campRng.range(-0.05, 0.05), campRng.range(0, 3), campRng.range(-0.05, 0.05))
+    stump.castShadow = true
+    stump.receiveShadow = true
+    group.add(stump)
+    stand(x, z, 0.4 * s, h + 0.49)
+
+    // Brash: the tops, dragged aside and left.
+    for (let k = 0; k < campRng.int(2, 5); k++) {
+      const bx = x + campRng.range(-1.6, 1.6)
+      const bz = z + campRng.range(-1.6, 1.6)
+      const len = campRng.range(0.7, 1.6)
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, len, 5), M.log)
+      stick.position.set(bx, heightAt(bx, bz) + 0.07, bz)
+      stick.rotation.set(Math.PI / 2, campRng.range(0, 3), campRng.range(-0.2, 0.2))
+      stick.castShadow = true
+      group.add(stick)
+    }
+  }
+
   // The track out to the field and the barn, and the one down to the mill.
   layTrack(
     [
@@ -4270,6 +4922,91 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     M.track,
     trackRng,
   )
+  // On past the mill to the camp. Narrower, because what comes back along it is
+  // sacks rather than carts, and it is the line the eye follows east.
+  layTrack(
+    [
+      [19.8, 5.4],
+      [22.6, 3.4],
+      [25.4, 1.4],
+      [28.2, 0.2],
+      [30.0, 0.0],
+    ],
+    0.5,
+    M.track,
+    trackRng,
+  )
+
+  /**
+   * Distance from home, measured rather than declared.
+   *
+   * Every place is written below as id, kind and position, and the two distance
+   * fields are derived from the `home` place afterwards. Typing them would be a
+   * second description of where things are, and a second description drifts:
+   * that is the same argument `world/measure.ts` makes about collision, and it
+   * is why the mill's distance is not a number anybody can get wrong by moving
+   * the mill.
+   */
+  function withDistance(raw: Omit<Place, 'distance' | 'remoteness'>[]): Place[] {
+    const home = raw.find((pl) => pl.kind === 'home') ?? raw[0]!
+    const flat = (pl: { at: THREE.Vector3 }): number =>
+      Math.hypot(pl.at.x - home.at.x, pl.at.z - home.at.z)
+    // On the ground plane, not through the air. Height here is terrain, and a
+    // place on a five metre rise is not five metres further away.
+    const furthest = Math.max(1e-6, ...raw.map(flat))
+    return raw.map((pl) => ({ ...pl, distance: flat(pl), remoteness: flat(pl) / furthest }))
+  }
+
+  const places: Place[] = withDistance([
+      { id: 'hearth', kind: 'home', at: new THREE.Vector3(HOME.x, heightAt(HOME.x, HOME.z), HOME.z) },
+      { id: 'well', kind: 'water', at: new THREE.Vector3(3.0, heightAt(3.0, 11.3), 11.3) },
+      { id: 'pond', kind: 'water', at: new THREE.Vector3(POND.x, WATER_LEVEL, POND.z) },
+      { id: 'ford', kind: 'water', at: new THREE.Vector3(FORD.x, heightAt(FORD.x, FORD.z), FORD.z) },
+      { id: 'mill', kind: 'work', at: new THREE.Vector3(MILL.x, heightAt(MILL.x, MILL.z), MILL.z) },
+      { id: 'barn', kind: 'work', at: new THREE.Vector3(BARN.x, heightAt(BARN.x, BARN.z), BARN.z) },
+      { id: 'field', kind: 'work', at: new THREE.Vector3(FIELD.x, heightAt(FIELD.x, FIELD.z), FIELD.z) },
+      { id: 'block', kind: 'work', at: new THREE.Vector3(10.4, heightAt(10.4, 10.9), 10.9) },
+      { id: 'oldoak', kind: 'landmark', at: new THREE.Vector3(10.6, heightAt(10.6, 8.8), 8.8) },
+      { id: 'grave', kind: 'landmark', at: new THREE.Vector3(9.3, heightAt(9.3, 10.0), 10.0) },
+      { id: 'arch', kind: 'landmark', at: new THREE.Vector3(-1.2, heightAt(-1.2, -13.6), -13.6) },
+      { id: 'tower', kind: 'landmark', at: new THREE.Vector3(-8.6, heightAt(-8.6, -17.5), -17.5) },
+      { id: 'gate', kind: 'exit', at: new THREE.Vector3(0, gateH, PAL_Z) },
+
+      // Added with the expansion. Every one of these is somewhere the world now
+      // points at, and D22 asks that the region say so rather than leaving a
+      // system to guess from geometry.
+      { id: 'kiln', kind: 'work', at: new THREE.Vector3(KILN.x, heightAt(KILN.x, KILN.z), KILN.z) },
+      { id: 'coup', kind: 'work', at: new THREE.Vector3(25.5, heightAt(25.5, -1.5), -1.5) },
+      { id: 'butt', kind: 'water', at: new THREE.Vector3(KILN.x - 2.9, heightAt(KILN.x - 2.9, KILN.z - 3.3), KILN.z - 3.3) },
+      { id: 'mere', kind: 'water', at: new THREE.Vector3(MERE.x, MERE_LEVEL, MERE.z) },
+      { id: 'holding', kind: 'landmark', at: new THREE.Vector3(-20.5, heightAt(-20.5, -26.5), -26.5) },
+      {
+        id: 'stones',
+        kind: 'landmark',
+        at: new THREE.Vector3(
+          (STONE_ROW.x0 + STONE_ROW.x1) / 2,
+          heightAt((STONE_ROW.x0 + STONE_ROW.x1) / 2, (STONE_ROW.z0 + STONE_ROW.z1) / 2),
+          (STONE_ROW.z0 + STONE_ROW.z1) / 2,
+        ),
+      },
+      /**
+       * The road off the north edge, and the second exit.
+       *
+       * The gate is a way THROUGH the obstacle; this is the way OUT of the
+       * region. D22 forbids assuming exactly one way out, and until now there
+       * was one, so anything reading this list would have concluded the world
+       * ended at the palisade.
+       */
+      {
+        id: 'road',
+        kind: 'exit',
+        at: new THREE.Vector3(
+          BEYOND_TRACK[BEYOND_TRACK.length - 1]![0],
+          heightAt(BEYOND_TRACK[BEYOND_TRACK.length - 1]![0], BOUNDS.minZ),
+          BOUNDS.minZ,
+        ),
+      },
+  ])
 
   // ----------------------------------------------------------------- items
   // Ten items, placed by hand, every one of them somewhere a person would have
@@ -4319,6 +5056,61 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     spare++
     return [id, 1.9 + spare * 0.55, 4.6 - spare * 0.35]
   })
+
+  /**
+   * The things that do not belong here, placed by rule rather than by
+   * coordinate.
+   *
+   * The spine of this game is that the further you wander the stranger it gets,
+   * so where these land is not decoration. A glossy magazine about people
+   * nobody here has heard of, found forty metres from the hearth, spends the
+   * whole effect in one go; found in the footings of a farmstead nobody has
+   * lived in for years, it is the gradient doing its job with no words at all.
+   *
+   * So this is a rule and not a list of positions. Each row asks for a KIND of
+   * place, the rule takes the most remote one still free, and the coordinates
+   * come out of the region. Move the mill, widen the region, or generate the
+   * whole thing from a seed and the rule still means what it meant. Hand-typed
+   * positions for these would have to be found and rewritten every time, which
+   * is exactly what D22 says must not spread into the code.
+   */
+  const STRANGE: readonly { id: string; kind: Place['kind'] }[] = [
+    { id: 'magazine', kind: 'landmark' },
+    { id: 'crossbow', kind: 'work' },
+    { id: 'banana', kind: 'water' },
+    { id: 'rubber_band', kind: 'work' },
+  ]
+  /**
+   * The outer half of the region, as a fraction rather than as metres, so the
+   * rule survives the region changing size. See `Place.remoteness`.
+   */
+  const STRANGE_FROM = 0.55
+  {
+    const used = new Set<string>()
+    /** Most remote free place of a kind, or failing that, of any kind. */
+    const pick = (kind: Place['kind']): Place | undefined => {
+      const free = places.filter((pl) => !used.has(pl.id) && pl.remoteness >= STRANGE_FROM)
+      const byKind = free.filter((pl) => pl.kind === kind)
+      // Falls back to the far end rather than dropping the item, for the same
+      // reason a Band 0 item with no authored position lands on the verge of
+      // the main track: an item that silently fails to exist is invisible, and
+      // one in an obviously odd place gets noticed and fixed.
+      return [...(byKind.length > 0 ? byKind : free)].sort((x, y) => y.remoteness - x.remoteness)[0]
+    }
+
+    for (const { id, kind } of STRANGE) {
+      if (!CATALOG[id]) continue
+      const spot = pick(kind)
+      if (!spot) continue
+      used.add(spot.id)
+      // A stride off the middle of the place, not on top of its landmark.
+      // `findVisible` does the rest, so this can sit inside a ruin and still
+      // come out somewhere the player can reach and see.
+      const a = itemRng.range(0, Math.PI * 2)
+      const r = itemRng.range(1.4, 2.6)
+      layout.push([id, spot.at.x + Math.cos(a) * r, spot.at.z + Math.sin(a) * r])
+    }
+  }
 
   /**
    * Is this spot hidden from the camera by something solid?
@@ -4445,20 +5237,6 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
           return { x: at.x, z: at.z, radius: o.radius, opacity: o.opacity }
         }),
     standables,
-    places: [
-      { id: 'hearth', kind: 'home', at: new THREE.Vector3(HOME.x, heightAt(HOME.x, HOME.z), HOME.z) },
-      { id: 'well', kind: 'water', at: new THREE.Vector3(3.0, heightAt(3.0, 11.3), 11.3) },
-      { id: 'pond', kind: 'water', at: new THREE.Vector3(POND.x, WATER_LEVEL, POND.z) },
-      { id: 'ford', kind: 'water', at: new THREE.Vector3(FORD.x, heightAt(FORD.x, FORD.z), FORD.z) },
-      { id: 'mill', kind: 'work', at: new THREE.Vector3(MILL.x, heightAt(MILL.x, MILL.z), MILL.z) },
-      { id: 'barn', kind: 'work', at: new THREE.Vector3(BARN.x, heightAt(BARN.x, BARN.z), BARN.z) },
-      { id: 'field', kind: 'work', at: new THREE.Vector3(FIELD.x, heightAt(FIELD.x, FIELD.z), FIELD.z) },
-      { id: 'block', kind: 'work', at: new THREE.Vector3(10.4, heightAt(10.4, 10.9), 10.9) },
-      { id: 'oldoak', kind: 'landmark', at: new THREE.Vector3(10.6, heightAt(10.6, 8.8), 8.8) },
-      { id: 'grave', kind: 'landmark', at: new THREE.Vector3(9.3, heightAt(9.3, 10.0), 10.0) },
-      { id: 'arch', kind: 'landmark', at: new THREE.Vector3(-1.2, heightAt(-1.2, -13.6), -13.6) },
-      { id: 'tower', kind: 'landmark', at: new THREE.Vector3(-8.6, heightAt(-8.6, -17.5), -17.5) },
-      { id: 'gate', kind: 'exit', at: new THREE.Vector3(0, gateH, PAL_Z) },
-    ],
+    places,
   }
 }
