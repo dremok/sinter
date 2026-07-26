@@ -2,9 +2,81 @@
 
 Read this first every session. Update it immediately after any significant change.
 
-**Last updated:** 2026-07-25
-**Current milestone:** M0–M2 done, M3 partially done, art pass 3 done
+**Last updated:** 2026-07-26
+**Current milestone:** M0-M2 done, M3 partially done, art pass 3 done, collision rebuilt
 **Target:** playable vertical slice (Band 0 only, ~60 items, ~10 property interactions, 3 real obstacles)
+
+## Pass 4: the collision engine, the campfire, and a face (2026-07-26)
+
+Six player-reported bugs, all fixed and deployed. Every one of them was a
+disagreement between representations rather than a bad number, so the fixes are
+structural and there is a check for each.
+
+**One collision shape, and it is a rectangle.** `core/footprint.ts` is an
+oriented box grown outward by a radius. A circle is `hx = hz = 0`; a wall is a
+long thin box. Blockers and standables both use it. This replaced circles-only,
+which had produced four separate bugs: the barn wall you walked through, the
+~30 circles per building that fixed it, the gate's 1.9m invisible bubble in
+front of a 0.35m plank, and the crossing whose five discs overhung its own ends.
+Blockers went 200 -> 77.
+
+**Nothing types a collision size any more.** `world/measure.ts` measures the
+footprint from the geometry between knee and shoulder height. Hand-typed extents
+are a second description of an object and a second description drifts: the
+cottage grew a chimney standing 0.53m proud of its wall and the footprint did
+not. Two constructors, `solidBuilt` (measured box) and `solidRound` (measured
+circle); the choice between them is a fact about the shape, not a number.
+
+**Crossings are derived from the terrain they cross.** The deck sits at whichever
+bank is higher so it can never bury itself in one, and abutment treads are walked
+outward one riser at a time, never below the ground they sit on.
+
+**The campfire strobe.** The flame picked a new silhouette 7-19 times a second
+and snapped to it. The scrolling alpha mask on the EDGE stays fast, because that
+is what reads as burning; the shape now eases between the same steps at half the
+rate. Measured on consecutive frames: 231px of flame area changing per frame ->
+73px.
+
+**Shadows.** The shadow camera is sized from what the camera can see rather than
+a typed +-16 that was smaller than the visible ground, and it is snapped to its
+own texel grid so edges move a whole texel or not at all. Contact-shadow blobs
+are for small things only; they were being drawn 4.4m across under objects that
+already cast a real shadow, and those were the dark green polygons on the grass.
+
+**Home has room.** Everything moved outward from the hearth. Open ground 75.3%
+-> 80.6%, squeeze points 6 -> 2.
+
+**A head, in two masses.** Cranium with hair, narrower jaw with a lighter face,
+fringe at the brow. It was one pale block with a plate on the front, which reads
+as a helmet. Three things had each been separately concluded impossible and were
+not: face features are excluded from the outline pass (the pass is a fixed
+world-space width, so it was merging them, which is why the face had been two
+pixels for so long); the face plane is tipped back to meet a camera that looks
+down 35 degrees; and a short-range fill parented to the character lights the
+face, which is otherwise on the plane the sun reaches least.
+
+**Worn equipment is visible.** `setEquipment` existed and was never called from
+anywhere, so worn spectacles had never appeared on the character.
+
+### Tools added this pass
+
+| Command | What it answers |
+|---|---|
+| `node tools/probe.mjs x,z [x2,z2 step]` | What is actually at a place, in all three layers that can disagree: terrain height, footprints, drawn meshes. |
+| `node tools/walkmap.mjs [x z half]` | How much free floor there is, one character per half metre. |
+| `npm run verify:still [at frames]` | Flicker, on real consecutive frames captured inside the page. Reports concentration per cell, not frame-wide movement. |
+| `npm run verify:collision` | Both directions: nothing invisible, nothing walk-through, nothing buried, no gaps, nothing destructible standing in for something permanent. |
+| `npm run shot -- --wear glasses` | Screenshot worn kit. Worn kit that cannot be screenshotted cannot be verified. |
+
+Two tooling faults fixed, both of which had been making checks lie:
+`verify:movement` defaulted to a hardcoded `localhost:5199` and started no
+server, so a leftover dev server was answering it; and it asserted distances
+against a wall clock, which measures the machine, because `Clock` caps at five
+ticks per frame.
+
+---
+
+# Earlier passes
 
 ## Latest pass: simplify and make it beautiful
 
