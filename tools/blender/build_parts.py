@@ -926,6 +926,16 @@ def make_stone_shard():
     wedge. A hull gives genuinely flat facets meeting at hard edges, which is
     what flint does and what a jittered sphere cannot fake: the sphere keeps its
     round silhouette no matter how much noise is added to it.
+
+    Then tilted 24 degrees, and that is a VALUE decision rather than a shape
+    one. Flint and rock share the `stone` material, so they arrive the same
+    colour, and measured side by side in the pack their mean luminance differed
+    by 1.3 out of 255. A flat flake resting square presents one big upward face
+    that lands in the brightest toon band, exactly where the rock's broad top
+    sits. Tipping it onto an edge puts its dominant faces at an angle to the key
+    and drops them a band, which is the only lever geometry has over value when
+    the material is fixed. It also looks more like something that was struck off
+    a core and fell where it landed.
     """
     bm = bmesh.new()
     rng = _Lcg(11)
@@ -937,8 +947,14 @@ def make_stone_shard():
         # butt. The first pass tapered to 0.36 and the result was a flat sliver
         # that vanished on the ground; a flake needs bulk to throw a shadow.
         taper = 0.62 + 0.38 * (0.5 - 0.5 * u)
-        bm.verts.new((u * 0.118, v * 0.100 * taper, w * 0.098 * taper))
+        bm.verts.new((u * 0.126, v * 0.104 * taper, w * 0.062 * taper))
     bmesh.ops.convex_hull(bm, input=bm.verts)
+    tilt = math.radians(24.0)
+    ct, st = math.cos(tilt), math.sin(tilt)
+    for v in bm.verts:
+        x, z = v.co.x, v.co.z
+        v.co.x = x * ct - z * st
+        v.co.z = x * st + z * ct
     emit(bm, "stone_shard", "base", bevel_width=0.0)
 
 

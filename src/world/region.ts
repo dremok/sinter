@@ -39,6 +39,7 @@ import { BAND0 } from '../render/palette'
 import { toonUnique } from '../render/toon'
 import { textures, tiled } from '../render/textures'
 import { createSmokeColumn } from '../render/flame'
+import { footprintOf } from './measure'
 
 /** Where the player may walk. Outside this is tree line. */
 export const BOUNDS = { minX: -28, maxX: 28, minZ: -22, maxZ: 20 }
@@ -422,53 +423,68 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * walk through it, which was the whole of the lakeside bug: the logs and the
    * jetty looked solid and were not there at all as far as movement was
    * concerned.
+   *
+   * There are exactly two, and neither takes a size. See `world/measure.ts`.
    */
-  const solid = (
+  /**
+   * A round thing, blocked by a circle measured from it.
+   *
+   * The other half of `solidBuilt`. A barrel, a boulder and a standing stone
+   * are genuinely round, and a box round them puts 17cm of invisible wall on
+   * each corner; a coop and a drying rack are genuinely rectangular, and a
+   * circle round them either misses the ends or bulges past the sides. So the
+   * choice between these two is a fact about the object's shape, which cannot
+   * drift, rather than a number, which can.
+   */
+  const solidRound = (
     mesh: THREE.Object3D,
-    at: THREE.Vector3,
+    y: number,
     label: string,
     props: Entity['props'],
-    radius: number,
   ): void => {
+    const f = footprintOf(mesh)
+    if (!f) return
     world.add({
-      transform: { pos: at, ry: 0 },
+      transform: { pos: new THREE.Vector3(f.x, y, f.z), ry: 0 },
       mesh,
       label,
       props,
-      blocker: circle(at.x, at.z, radius),
+      blocker: circle(f.x, f.z, Math.max(f.hx, f.hz)),
     })
   }
 
   /**
-   * A rectangular thing, blocked with a rectangle.
+   * A built thing, blocked by the shape of the thing.
    *
-   * This used to lay a run of ~30 overlapping circles around each perimeter,
-   * because a circle cannot be a rectangle: small enough not to bulge past the
-   * short walls and it never reaches the ends of the long ones, big enough to
-   * cover the length and it stops people well outside the corners. The run
-   * closed the holes and cost thirty entities per building to do it, and it
-   * still made every wall subtly lumpy.
+   * Nothing is typed here. The footprint is MEASURED from the meshes, in the
+   * band between the player's knee and their shoulder, which is the only part
+   * of an object that can stop them walking. See `world/measure.ts`.
    *
-   * One oriented box is exact, is one entity, and cannot have a gap. See
-   * `core/footprint.ts` for why there is now only one shape in the game.
+   * Two rounds of collision bugs came out of doing it any other way. First a
+   * run of ~30 overlapping circles round each perimeter, because a circle
+   * cannot be a rectangle — thirty entities per building and every wall subtly
+   * lumpy. Then one honest oriented box per building, from hand-typed width
+   * and depth, which is exact right up until somebody adds a chimney standing
+   * 0.53m proud of the west wall and does not also change two numbers eighty
+   * lines away. Max walked through the stack the day after.
+   *
+   * Hand-typed extents are a second description of the building, and a second
+   * description drifts. So there is only one now.
    */
-  function solidFootprint(
+  function solidBuilt(
     mesh: THREE.Object3D,
-    cx: number,
-    cz: number,
-    w: number,
-    dep: number,
-    turn: number,
     y: number,
     label: string,
     props: Entity['props'],
   ): void {
+    const f = footprintOf(mesh)
+    if (!f) return
     world.add({
-      transform: { pos: new THREE.Vector3(cx, y, cz), ry: turn },
+      transform: { pos: new THREE.Vector3(f.x, y, f.z), ry: f.ry },
       mesh,
       label,
       props,
-      blocker: box(cx, cz, w / 2, dep / 2, turn),
+      blocker: f,
     })
   }
   const occluder = (
@@ -894,20 +910,31 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     const abut = ([-1, 1] as const).map((side) => {
       const ax = FORD.x + Math.sin(turn) * side * (SPAN / 2)
       const az = FORD.z + Math.cos(turn) * side * (SPAN / 2)
-      // Both corners, not the middle. A deck 2.36m wide landing on a bank that
-      // slopes across it meets the ground higher at one corner than at the
-      // centre, and the centre is what the first version measured, so a corner
-      // of the boards still ended up under the grass.
-      let ground = heightAt(ax, az)
-      for (const across of [-WIDE / 2, WIDE / 2]) {
-        ground = Math.max(
-          ground,
-          heightAt(ax + Math.cos(turn) * across, az - Math.sin(turn) * across),
-        )
+      // Across the whole width, not just the middle. A deck 2.36m wide landing
+      // on a bank that slopes across it meets the ground higher at one corner
+      // than at the centre, and both numbers matter for different reasons:
+      // the HIGHEST is what the deck must clear or it buries itself in the
+      // bank, and the LOWEST is where the player will be standing when they
+      // try to step up, so it is what decides whether they can.
+      //
+      // Using the high one for both is what made the crossing unclimbable from
+      // home the moment burying was fixed.
+      let high = -Infinity
+      let low = Infinity
+      for (const across of [-WIDE / 2, 0, WIDE / 2]) {
+        const h = heightAt(ax + Math.cos(turn) * across, az - Math.sin(turn) * across)
+        high = Math.max(high, h)
+        low = Math.min(low, h)
       }
-      return { side, x: ax, z: az, ground }
+      // A stride further out as well: the ground the player actually walks in
+      // from, which on a cut bank keeps dropping past the end of the deck.
+      const ox = FORD.x + Math.sin(turn) * side * (SPAN / 2 + 0.7)
+      const oz = FORD.z + Math.cos(turn) * side * (SPAN / 2 + 0.7)
+      low = Math.min(low, heightAt(ox, oz))
+
+      return { side, x: ax, z: az, high, low }
     })
-    const deck = Math.max(bed + BROOK_D * 0.52 + 0.34, ...abut.map((a) => a.ground + 0.05))
+    const deck = Math.max(bed + BROOK_D * 0.52 + 0.34, ...abut.map((a) => a.high + 0.05))
 
     const g = new THREE.Group()
 
@@ -1000,22 +1027,35 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // reached the boards.
     standDeck(FORD.x, FORD.z, WIDE, SPAN, turn, deck + 0.06)
 
-    // Abutments, which is what a bridge has at its ends and what the stonework
-    // here is already drawn as. Generated only where the bank is actually too
-    // far below the deck to step up, so a crossing over level ground gets none.
+    /**
+     * Abutments, which is what a bridge has at its ends, and what the stonework
+     * here is already drawn as.
+     *
+     * Walked outward from the deck rather than divided up in advance: each
+     * tread is one comfortable step below the last, and never below the ground
+     * it sits on. Dividing the total rise into equal parts sounds equivalent
+     * and is not, because the ground under the treads is not a straight line —
+     * the first version put a tread 0.13m INTO the bank, which is the same
+     * "walked through the thing" bug the deck itself had.
+     *
+     * Ends as soon as the ground has come up to meet it, so a crossing over
+     * level banks generates nothing at all.
+     */
+    const RISER = STEP_HEIGHT * 0.8
     for (const a of abut) {
-      const rise = deck + 0.06 - a.ground
-      if (rise <= STEP_HEIGHT) continue
-      const steps = Math.ceil(rise / STEP_HEIGHT)
-      for (let i = 1; i < steps; i++) {
-        const out = SPAN / 2 + 0.25 + (steps - 1 - i) * 0.55
+      let top = deck + 0.06
+      for (let i = 0; i < 4; i++) {
+        const out = SPAN / 2 + 0.28 + i * 0.62
         const sx = FORD.x + Math.sin(turn) * a.side * out
         const sz = FORD.z + Math.cos(turn) * a.side * out
-        const top = a.ground + (rise * i) / steps
-        standDeck(sx, sz, WIDE, 0.7, turn, top)
+        const ground = heightAt(sx, sz)
+        if (top - ground <= RISER) break
 
-        const tread = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.26, 0.8), M.rubbleWall)
-        tread.position.set(sx, top - 0.13, sz)
+        top = Math.max(top - RISER, ground + 0.12)
+        standDeck(sx, sz, WIDE, 0.78, turn, top)
+
+        const tread = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.3, 0.86), M.rubbleWall)
+        tread.position.set(sx, top - 0.15, sz)
         tread.rotation.y = turn
         tread.castShadow = true
         tread.receiveShadow = true
@@ -1182,6 +1222,11 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         canopy.scale.set(rad, (species === 'pine' ? 1.5 : 1.25) * scale, rad)
         canopy.position.y = (species === 'scrub' ? 0.2 : trunkH) + t * rise * scale + 0.35 * scale
         canopy.castShadow = true
+        // Foliage is not solid: you walk under a canopy, and the trunk is what
+        // stops you. Stated here rather than inferred, because a cone's bounding
+        // box is as wide at its tip as at its base and any measurement taken
+        // from that box claims the canopy reaches the ground.
+        canopy.userData.noCollide = true
         tree.add(canopy)
       }
     }
@@ -1690,12 +1735,13 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       label: 'The gate',
       props: { WOODEN: 0.95, FLAMMABLE: 0.7, RIGID: 0.85, HEAVY: 0.6 },
       structure: { hp: 70, maxHp: 70, height: 2.6, label: 'The gate' },
-      // The shape of the gate, which is a wall: as wide as the pillars are
-      // apart and as thin as the leaf is deep. It used to be a circle of this
-      // half-width, which is a 1.9m bubble in front of a 0.17m plank, so the
-      // one landmark the whole region points at could not be walked up to.
-      // Nothing else is load-bearing for it, and when it falls this goes too.
-      blocker: box(0, PAL_Z, GATE_HALF, 0.3),
+      // Measured, like everything else. The gate is a wall: as wide as the
+      // pillars stand apart and as thin as the leaf is deep. It used to be a
+      // CIRCLE of half-width GATE_HALF, which is a 1.9m bubble in front of a
+      // 0.17m plank, so the one landmark the whole region points at could not
+      // be walked up to. Nothing else is load-bearing for it, and when it
+      // falls this goes with it.
+      blocker: footprintOf(g) ?? box(0, PAL_Z, GATE_HALF, 0.3),
     })
   }
 
@@ -1759,7 +1805,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     stoneMesh.rotation.set(beyondRng.range(-0.08, 0.08), beyondRng.range(0, 3), tilt)
     stoneMesh.castShadow = true
     group.add(stoneMesh)
-    solid(stoneMesh, new THREE.Vector3(x, h + 1.1, z), 'Waystone', { STONE: 1, HEAVY: 1, RIGID: 1 }, 0.46)
+    solidRound(stoneMesh, h + 1.1, 'Waystone', { STONE: 1, HEAVY: 1, RIGID: 1 })
   }
 
   {
@@ -1774,14 +1820,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     tall.rotation.y = 0.12
     tall.castShadow = true
     group.add(tall)
-    solid(tall, new THREE.Vector3(ax - 1.9, h + 2.1, az), 'Broken arch', { STONE: 1, HEAVY: 1, RIGID: 1 }, 0.62)
+    solidRound(tall, h + 2.1, 'Broken arch', { STONE: 1, HEAVY: 1, RIGID: 1 })
 
     const stub = new THREE.Mesh(new THREE.BoxGeometry(0.95, 2.3, 0.95), M.stone)
     stub.position.set(ax + 1.9, h + 1.15, az + 0.2)
     stub.rotation.set(0.06, -0.2, 0.05)
     stub.castShadow = true
     group.add(stub)
-    solid(stub, new THREE.Vector3(ax + 1.9, h + 1.15, az + 0.2), 'Broken arch', { STONE: 1, HEAVY: 1, RIGID: 1 }, 0.62)
+    solidRound(stub, h + 1.15, 'Broken arch', { STONE: 1, HEAVY: 1, RIGID: 1 })
 
     const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.8, 0.9), M.stone)
     lintel.position.set(ax + 1.1, h + 2.6, az - 0.1)
@@ -1836,7 +1882,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     }
     t.position.set(x, h, z)
     group.add(t)
-    solid(t, new THREE.Vector3(x, h + 2, z), 'The tower', { STONE: 1, HEAVY: 1, RIGID: 1 }, 2.1)
+    solidRound(t, h + 2, 'The tower', { STONE: 1, HEAVY: 1, RIGID: 1 })
   }
 
   // Dead trunks either side of the road out. The wood on the far side is older.
@@ -2077,7 +2123,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     group.add(g)
     occluders.push(occluder(g, Math.max(w, dep) * 0.62, ridge + 0.9, true))
 
-    solidFootprint(g, x, z, w, dep, turn, h + 0.9, 'Home', {
+    solidBuilt(g, h + 0.9, 'Home', {
       WOODEN: 0.8,
       FLAMMABLE: 0.3,
       RIGID: 0.9,
@@ -2166,7 +2212,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     group.add(g)
     occluders.push(occluder(g, Math.max(w, dep) * 0.5, ridge + 0.3, true))
 
-    solidFootprint(g, x, z, w, dep, turn, h + 0.8, 'The shed', {
+    solidBuilt(g, h + 0.8, 'The shed', {
       WOODEN: 0.9,
       FLAMMABLE: 0.45,
       RIGID: 0.8,
@@ -2374,13 +2420,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.rotation.y = 0.3
     group.add(g)
 
-    world.add({
-      transform: { pos: new THREE.Vector3(wx, h + 0.4, wz), ry: 0 },
-      mesh: g,
-      label: 'The well',
-      props: { WATER: 1, CONTAINER: 0.8, STONE: 0.9 },
-      blocker: circle(wx, wz, 0.78),
-    })
+    solidRound(g, h + 0.4, 'The well', { WATER: 1, CONTAINER: 0.8, STONE: 0.9 })
   }
 
   /**
@@ -2394,13 +2434,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   {
     const bx = 6.2
     const bz = 15.2
+    const base = heightAt(bx, bz)
     const pile = new THREE.Group()
     for (let row = 0; row < 4; row++) {
       for (let i = 0; i < 5 - Math.floor(row / 2); i++) {
-        const lz = bz - 0.9 + i * 0.36 + (row % 2) * 0.16
-        const ly = heightAt(bx, lz) + 0.19 + row * 0.33
+        const lz = -0.9 + i * 0.36 + (row % 2) * 0.16
+        const ly = heightAt(bx, bz + lz) - base + 0.19 + row * 0.33
         const log = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 1.6, 8).rotateZ(Math.PI / 2), M.log)
-        log.position.set(bx + homeRng.range(-0.07, 0.07), ly, lz)
+        log.position.set(homeRng.range(-0.07, 0.07), ly, lz)
         log.rotation.y = homeRng.range(-0.05, 0.05)
         log.castShadow = true
         log.receiveShadow = true
@@ -2410,12 +2451,16 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // Two uprights holding the stack in.
     for (const s of [-1, 1]) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.13, 1.7, 0.13), M.log)
-      post.position.set(bx, heightAt(bx, bz + s * 1.1) + 0.85, bz + s * 1.1)
+      post.position.set(0, heightAt(bx, bz + s * 1.1) - base + 0.85, s * 1.1)
       post.castShadow = true
       pile.add(post)
     }
+    // On the ground, like every other built thing here: `footprintOf` measures
+    // the band between knee and shoulder in the object's OWN frame, so an
+    // object whose origin is not its base measures the wrong slice of itself.
+    pile.position.set(bx, base, bz)
     group.add(pile)
-    solidFootprint(pile, bx, bz - 0.18, 1.74, 2.3, 0, heightAt(bx, bz) + 0.7, 'Woodpile', {
+    solidBuilt(pile, base + 0.7, 'Woodpile', {
       WOODEN: 1,
       FLAMMABLE: 0.75,
       RIGID: 0.6,
@@ -2628,7 +2673,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(rx, h, rz)
     g.rotation.y = 0.4
     group.add(g)
-    solid(g, new THREE.Vector3(rx, h + 0.8, rz), 'Drying rack', { WOODEN: 0.9, FLAMMABLE: 0.6, RIGID: 0.5 }, 0.72)
+    solidBuilt(g, h + 0.8, 'Drying rack', { WOODEN: 0.9, FLAMMABLE: 0.6, RIGID: 0.5 })
   }
 
   /** Chicken coop, a run, and three birds. Living things sell habitation. */
@@ -2662,7 +2707,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(cx, h, cz)
     g.rotation.y = -0.5
     group.add(g)
-    solid(g, new THREE.Vector3(cx, h + 0.5, cz), 'The coop', { WOODEN: 0.9, FLAMMABLE: 0.6, RIGID: 0.7 }, 0.72)
+    solidBuilt(g, h + 0.5, 'The coop', { WOODEN: 0.9, FLAMMABLE: 0.6, RIGID: 0.7 })
 
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * Math.PI * 2
@@ -2710,7 +2755,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       crate.receiveShadow = true
       group.add(crate)
       if (y === 0) {
-        solid(crate, new THREE.Vector3(x, heightAt(x, z) + 0.28, z), 'Crate', { WOODEN: 0.85, FLAMMABLE: 0.55, CONTAINER: 0.6, RIGID: 0.7 }, 0.42)
+        solidBuilt(crate, heightAt(x, z) + 0.28, 'Crate', { WOODEN: 0.85, FLAMMABLE: 0.55, CONTAINER: 0.6, RIGID: 0.7 })
       }
     }
 
@@ -2722,7 +2767,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       barrel.position.set(x, heightAt(x, z) + 0.43, z)
       barrel.castShadow = true
       group.add(barrel)
-      solid(barrel, new THREE.Vector3(x, heightAt(x, z) + 0.43, z), 'Barrel', { WOODEN: 0.9, FLAMMABLE: 0.4, CONTAINER: 0.7, RIGID: 0.7 }, 0.42)
+      solidRound(barrel, heightAt(x, z) + 0.43, 'Barrel', { WOODEN: 0.9, FLAMMABLE: 0.4, CONTAINER: 0.7, RIGID: 0.7 })
       for (const y of [0.2, 0.66]) {
         const hoop = new THREE.Mesh(new THREE.CylinderGeometry(0.37, 0.37, 0.07, 10), M.steel)
         hoop.position.set(x, heightAt(x, z) + y, z)
@@ -2795,7 +2840,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       g.position.set(x, h, z)
       g.rotation.y = 0.9
       group.add(g)
-      solidFootprint(g, x, z, 2.4, 1.0, 0.9, h + 0.5, 'Handcart', {
+      solidBuilt(g, h + 0.5, 'Handcart', {
         WOODEN: 0.9,
         FLAMMABLE: 0.5,
         PLATFORM: 0.5,
@@ -2907,7 +2952,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.rotation.y = -0.3
     group.add(g)
     occluders.push(occluder(g, 1.2, 2.3, true))
-    solidFootprint(g, sx, sz, 1.9, 1.3, -0.3, h + 1, 'The store', {
+    solidBuilt(g, h + 1, 'The store', {
       WOODEN: 0.9,
       FLAMMABLE: 0.5,
       RIGID: 0.8,
@@ -3215,7 +3260,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.rotation.y = -0.22
     group.add(g)
     occluders.push(occluder(g, 2.4, ridge + 0.4, true))
-    solidFootprint(g, MILL.x, MILL.z - 3.0, 4.4, 3.6, -0.22, h + 1.5, 'The mill', {
+    solidBuilt(g, h + 1.5, 'The mill', {
       WOODEN: 0.6,
       STONE: 0.5,
       FLAMMABLE: 0.35,
@@ -3351,7 +3396,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       g.position.set(x, h, z)
       g.rotation.y = 0.5
       group.add(g)
-      solid(g, new THREE.Vector3(x, h + 1.2, z), 'Scarecrow', { WOODEN: 0.5, CLOTH: 0.5, FLAMMABLE: 0.8, RIGID: 0.4 }, 0.4)
+      solidRound(g, h + 1.2, 'Scarecrow', { WOODEN: 0.5, CLOTH: 0.5, FLAMMABLE: 0.8, RIGID: 0.4 })
     }
   }
 
@@ -3435,7 +3480,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.rotation.y = 0.34
     group.add(g)
     occluders.push(occluder(g, 3.4, ridge + 0.4, true))
-    solidFootprint(g, BARN.x, BARN.z, w, dep, 0.34, h + 1.5, 'The barn', {
+    solidBuilt(g, h + 1.5, 'The barn', {
       WOODEN: 0.9,
       FLAMMABLE: 0.5,
       RIGID: 0.85,

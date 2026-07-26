@@ -236,7 +236,11 @@ let blob: THREE.DataTexture | null = null
  *  Small and nearest-filtered, like every other texture here. (D14) */
 function blobTexture(): THREE.DataTexture {
   if (blob) return blob
-  const n = 48
+  // 96 rather than 48. At 48 a metre-wide blob is 2cm per texel, which is fine,
+  // but the same texture was being stretched over discs up to 4.4m across and
+  // point-sampled, so the falloff turned into a staircase and the whole thing
+  // read as a hard-edged dark polygon rather than as shade.
+  const n = 96
   const data = new Uint8Array(n * n * 4)
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {

@@ -122,6 +122,26 @@ try {
     )
   }
 
+  // ------------------------------------------------- nothing solid is uncovered
+  // The other direction, and the one a "collision must not exceed the mesh"
+  // check cannot see: geometry standing at walking height that no footprint
+  // covers. The cottage grew a chimney 0.53m proud of its west wall and the
+  // hand-typed footprint did not, so Max walked through a stone stack.
+  console.log('\nnothing you can see at walking height is walk-through')
+  {
+    const leaks = blockers
+      .filter((b) => b.uncovered > 0.02)
+      .sort((a, b) => b.uncovered - a.uncovered)
+    for (const l of leaks.slice(0, 3)) {
+      console.log(`    worst: ${l.label} (${l.x.toFixed(1)}, ${l.z.toFixed(1)}) leaves ${l.uncovered.toFixed(2)}m uncovered`)
+    }
+    check(
+      'no solid geometry stands outside its own footprint',
+      leaks.length === 0,
+      leaks.slice(0, 4).map((l) => `${l.label} +${l.uncovered.toFixed(2)}m`).join('; '),
+    )
+  }
+
   // ---------------------------------------------------- walkable is above ground
   // A surface the player is meant to stand on that sits under the terrain is a
   // surface they walk THROUGH, and it always looks like a rendering bug.

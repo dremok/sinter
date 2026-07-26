@@ -11,6 +11,7 @@ import { applyOutlines, setOutlineViewport } from './render/outline'
 import { loadParts } from './render/parts'
 import { Character } from './render/character'
 import { BOUNDS, buildRegion } from './world/region'
+import { overhang } from './world/measure'
 import { queries, world, type Entity } from './ecs/world'
 import { fail, ignite, stepFire } from './sim/fire'
 import { spatial } from './sim/spatial'
@@ -120,17 +121,25 @@ const sun = new THREE.DirectionalLight(new THREE.Color(BAND0.sun).lerp(new THREE
 sun.castShadow = true
 
 /**
- * Shadow bounds, sized to what is on screen rather than to the region.
+ * Shadow bounds, DERIVED from what the camera can actually see.
  *
- * The visible ground is about 23 by 22 metres, so ±19 covers it plus the
- * overhang of anything tall enough to cast in from outside the frame. At 2048
- * that is roughly 2cm per texel, which is what makes a fence post read as
- * standing on the ground instead of hovering over a smear.
+ * This was ±16, a flat 32m window, and the visible ground at viewSize 22 on a
+ * 16:9 display is about 39m across and 38m deep. So there was a hard line
+ * running across the world where shadows simply stopped — and because the
+ * shadow camera rides the player, that line slid around the world with them,
+ * which is what Max saw as "some big global shadow moving with the player".
+ *
+ * The frame is a rotated rectangle in world space and the shadow camera is
+ * oriented along the sun, so the honest bound is the circle that contains the
+ * frame, plus room for something tall casting in from just off screen. Derived
+ * rather than typed in, so zooming out can never silently outgrow it again.
  *
  * near/far bracket the sun's actual distance for the same reason: a shadow
  * camera 1 to 90 deep spends most of its depth precision on empty air.
  */
-const SHADOW_EXTENT = 16
+const groundDepth = iso.viewSize / Math.sin(Math.atan(1 / Math.SQRT2))
+const groundWidth = iso.viewSize * (innerWidth / innerHeight)
+const SHADOW_EXTENT = Math.hypot(groundWidth, groundDepth) / 2 + 5
 const SUN_REACH = iso.sunOffset().length()
 sun.shadow.mapSize.set(2048, 2048)
 sun.shadow.bias = -0.0004
@@ -142,6 +151,21 @@ sc.far = SUN_REACH + SHADOW_EXTENT + 12
 sc.updateProjectionMatrix()
 scene.add(sun, sun.target)
 
+/**
+ * Size of one shadow-map texel on the ground, and the basis it is measured in.
+ *
+ * The basis has to be the one three.js builds for the shadow camera itself:
+ * `LightShadow` points an OrthographicCamera at the light's target with the
+ * default up vector, so z runs from target to light and x is perpendicular to
+ * world up. Snapping in any other basis moves the map by a fraction of a texel
+ * and achieves nothing.
+ */
+const SHADOW_TEXEL = (SHADOW_EXTENT * 2) / sun.shadow.mapSize.x
+const shadowZ = new THREE.Vector3()
+const shadowX = new THREE.Vector3()
+const shadowY = new THREE.Vector3()
+const shadowAt = new THREE.Vector3()
+
 const fill = new THREE.DirectionalLight(new THREE.Color(BAND0.skyLight).lerp(new THREE.Color(0x3f6fc0), 0.72), 1.0)
 scene.add(fill, fill.target)
 
@@ -151,8 +175,34 @@ const sunOffset = new THREE.Vector3()
  *  ground the player cannot see and the key stays square to the screen. */
 function placeLights(): void {
   iso.sunOffset(sunOffset)
-  sun.target.position.copy(iso.target)
-  sun.position.copy(iso.target).add(sunOffset)
+
+  /**
+   * Quantise the shadow camera to its own texel grid before moving it.
+   *
+   * A shadow map that follows the player continuously re-rasterises every
+   * shadow in the frame at a slightly different sub-texel offset each frame,
+   * so every shadow edge boils. It is worst on fine detail, which is why Max
+   * saw it first around the hearth: the tripod legs, the pot and the log ends
+   * are all a texel or two wide, so the crawl is the whole shadow rather than
+   * a wobble at its rim.
+   *
+   * Rounding the camera's position to whole texels means a shadow edge either
+   * stays exactly where it is or moves one whole texel. The map stops boiling
+   * and the cost is nothing.
+   */
+  shadowZ.copy(sunOffset).normalize()
+  shadowX.set(0, 1, 0).cross(shadowZ).normalize()
+  shadowY.copy(shadowZ).cross(shadowX)
+  const along = Math.round(iso.target.dot(shadowX) / SHADOW_TEXEL) * SHADOW_TEXEL
+  const up = Math.round(iso.target.dot(shadowY) / SHADOW_TEXEL) * SHADOW_TEXEL
+  shadowAt
+    .copy(shadowX)
+    .multiplyScalar(along)
+    .addScaledVector(shadowY, up)
+    .addScaledVector(shadowZ, iso.target.dot(shadowZ))
+
+  sun.target.position.copy(shadowAt)
+  sun.position.copy(shadowAt).add(sunOffset)
   // Opposite side, and much lower, so it fills what the key leaves dark instead
   // of doubling it. A fill at the same elevation just washes the whole frame.
   //
@@ -496,6 +546,9 @@ function isGroundSurface(mesh: THREE.Mesh): boolean {
   return m?.side === THREE.DoubleSide
 }
 
+/** Widest thing that still gets a contact blob. Above this the shadow map wins. */
+const BLOB_MAX_SIZE = 1.7
+
 const blobs = new Map<Entity, ContactShadow>()
 let playerShadow: ContactShadow | null = null
 const bbox = new THREE.Box3()
@@ -520,7 +573,21 @@ function sitOnGround(e: Entity): void {
 
   const w = bbox.max.x - bbox.min.x
   const d = bbox.max.z - bbox.min.z
-  const radius = Math.min(Math.max(w, d) * 0.42, 2.2)
+
+  /**
+   * Only small things. This used to blob everything up to a 4.4m disc, so every
+   * tree and every building had a chunky dark-green polygon lying under it, on
+   * top of the perfectly good cast shadow the shadow map was already drawing
+   * for the same object. Two shadows for one object is not twice as grounded,
+   * it is a stain: Max read them as green areas lying on the grass.
+   *
+   * The two cases this exists for are both small-object cases — something
+   * standing inside another object's cast shadow, and something whose own
+   * shadow lands several pixels from its base. Anything big enough to cast a
+   * shadow you can identify does not need it and is hurt by it.
+   */
+  if (Math.max(w, d) > BLOB_MAX_SIZE) return
+  const radius = Math.max(w, d) * 0.42
   if (radius < 0.05) return
 
   const cx = (bbox.min.x + bbox.max.x) / 2
@@ -1162,6 +1229,8 @@ interface SolidReport extends Footprint {
   label: string
   destructible: boolean
   seen: { x0: number; x1: number; z0: number; z1: number }
+  /** Metres of walk-into geometry sticking out past the footprint. */
+  uncovered: number
 }
 
 interface ProbeReport {
@@ -1264,6 +1333,9 @@ window.__sinter = {
         destructible: e.structure !== undefined,
         ...e.blocker,
         seen,
+        // Solid geometry at walking height that the footprint does NOT cover.
+        // Above zero means there is something on screen you can walk through.
+        uncovered: e.mesh ? +overhang(e.mesh, e.blocker).toFixed(3) : 0,
       }
     }),
   standables: () => region.standables.map((s) => ({ ...s })),
