@@ -94,7 +94,7 @@
 
 import * as THREE from 'three'
 import type { Rng } from '../core/rng'
-import { RAMP } from './palette'
+import { BAND0, type Band, type Ramps } from './palette'
 
 /**
  * Target texels per world unit. `tiled()` derives every repeat from this and
@@ -380,10 +380,11 @@ function ditherStep(put: Put, x: number, y: number, ramp: readonly string[], f: 
 interface Ground {
   /** Tile size. The main ground gets the big one; variants are blended in patches. */
   size: number
-  /** The ramp the field is mostly made of. */
-  main: readonly string[]
+  /** The ramp the field is mostly made of. Named, not resolved: the same
+   *  `Ground` has to describe a meadow in every band. */
+  main: keyof Ramps
   /** Dithered in where `patch` runs high, at the same ramp index, so hue only. */
-  accent: readonly string[]
+  accent: keyof Ramps
   /** Value range, as ramp-step positions. */
   base: number
   span: number
@@ -395,8 +396,8 @@ interface Ground {
 
 const LUSH: Ground = {
   size: GROUND,
-  main: RAMP.grass,
-  accent: RAMP.dryGrass,
+  main: 'grass',
+  accent: 'dryGrass',
   base: 1.7,
   span: 1.4,
   tuft: 1400,
@@ -405,8 +406,8 @@ const LUSH: Ground = {
 
 const DRY: Ground = {
   size: GROUND_VARIANT,
-  main: RAMP.dryGrass,
-  accent: RAMP.straw,
+  main: 'dryGrass',
+  accent: 'straw',
   base: 1.85,
   span: 1.3,
   tuft: 2600,
@@ -415,8 +416,8 @@ const DRY: Ground = {
 
 const WORN: Ground = {
   size: GROUND_VARIANT,
-  main: RAMP.dirt,
-  accent: RAMP.dryGrass,
+  main: 'dirt',
+  accent: 'dryGrass',
   base: 1.7,
   span: 1.2,
   tuft: 9000,
@@ -452,8 +453,10 @@ const WORN: Ground = {
  * and dithering a gradient this slow just puts stipple everywhere.
  */
 function ground(look: Ground) {
-  return (rng: Rng) =>
+  return (rng: Rng, R: Ramps) =>
     build(look.size, rng, (put, r, n) => {
+      const main = R[look.main]
+      const accent = R[look.accent]
       // Cell counts scale with tile size so a variant at half the resolution
       // has the same feature size in world units, not half of it.
       const k = n / GROUND
@@ -489,7 +492,7 @@ function ground(look: Ground) {
           // what the matched luminances bought, but in colour it is grain.
           const dry = clamp((patch(u, v) - 0.55) * 2.2, 0, 1)
           const dryT = dry < 0.35 ? 0 : dry > 0.65 ? 1 : (dry - 0.35) / 0.3
-          put(x, y, tone(dryT > hashDither(x + 977, y) ? look.accent : look.main, idx))
+          put(x, y, tone(dryT > hashDither(x + 977, y) ? accent : main, idx))
         }
       }
 
@@ -515,7 +518,7 @@ function ground(look: Ground) {
             dx + spread * -dy,
             dy + spread * dx,
             r.int(4, 6),
-            look.main,
+            main,
             2.2,
             3.5,
           )
@@ -531,11 +534,11 @@ function ground(look: Ground) {
         if (patch(x / n, y / n) < 0.7) continue
         if (r.chance(0.55)) {
           const rx = r.range(1.6, 3)
-          blob(put, x, y, rx, rx * 0.8, tone(RAMP.stone, 2))
-          blob(put, x, y - 1, rx * 0.7, rx * 0.4, tone(RAMP.stone, 4))
+          blob(put, x, y, rx, rx * 0.8, tone(R.stone, 2))
+          blob(put, x, y - 1, rx * 0.7, rx * 0.4, tone(R.stone, 4))
         } else {
           const a = r.range(0, Math.PI * 2)
-          stroke(put, x, y, Math.cos(a), Math.sin(a), r.int(5, 9), RAMP.bark, 1, 2)
+          stroke(put, x, y, Math.cos(a), Math.sin(a), r.int(5, 9), R.bark, 1, 2)
         }
       }
     })
@@ -555,14 +558,14 @@ export const grassWorn = ground(WORN)
  * stones. The ripples used to run at full strength across the whole tile and
  * read as wood grain on every path in the game.
  */
-export const sand = (rng: Rng) =>
+export const sand = (rng: Rng, R: Ramps) =>
   build(SHORE, rng, (put, r, n) => {
     const damp = normalized(fbm(r, 5))
 
     for (let y = 0; y < n; y++) {
       const v = y / n
       for (let x = 0; x < n; x++) {
-        ditherStep(put, x, y, RAMP.sand, 1.4 + damp(x / n, v) * 2.9)
+        ditherStep(put, x, y, R.sand, 1.4 + damp(x / n, v) * 2.9)
       }
     }
 
@@ -588,7 +591,7 @@ export const sand = (rng: Rng) =>
           Math.cos(a + wobble),
           Math.sin(a + wobble) * 0.5,
           r.int(4, 9),
-          RAMP.sand,
+          R.sand,
           1,
           2,
         )
@@ -603,8 +606,8 @@ export const sand = (rng: Rng) =>
       const y = r.int(0, n - 1)
       const rx = r.range(1.4, 3)
       const grey = r.chance(0.3)
-      blob(put, x, y, rx, rx * 0.75, tone(grey ? RAMP.stone : RAMP.dirt, 1))
-      blob(put, x, y - 1, rx * 0.7, rx * 0.35, tone(grey ? RAMP.stone : RAMP.dirt, 4))
+      blob(put, x, y, rx, rx * 0.75, tone(grey ? R.stone : R.dirt, 1))
+      blob(put, x, y - 1, rx * 0.7, rx * 0.35, tone(grey ? R.stone : R.dirt, 4))
     }
   })
 
@@ -641,7 +644,7 @@ export const sand = (rng: Rng) =>
  * in the header above: there is no mipmap chain, so anything approaching texel
  * scale will crawl the moment the camera moves.
  */
-export const water = (rng: Rng) =>
+export const water = (rng: Rng, R: Ramps) =>
   build(POOL, rng, (put, r, n) => {
     const deep = normalized(fbm(r, 4))
 
@@ -661,7 +664,7 @@ export const water = (rng: Rng) =>
         // is mostly one mid tone with a few bright crests in it.
         const h = height(u, v)
         const band = h > 0.74 ? 1 : h > 0.54 ? 0 : h > 0.32 ? -1 : -2
-        put(x, y, tone(RAMP.water, 4 + band - Math.round(deep(u, v) * 1.4)))
+        put(x, y, tone(R.water, 4 + band - Math.round(deep(u, v) * 1.4)))
       }
     }
 
@@ -684,8 +687,8 @@ export const water = (rng: Rng) =>
       const dx = -gy / len
       const dy = gx / len
       const half = r.int(3, 6)
-      stroke(put, x, y, dx, dy, half, RAMP.water, 5, 5)
-      stroke(put, x, y, -dx, -dy, half, RAMP.water, 5, 5)
+      stroke(put, x, y, dx, dy, half, R.water, 5, 5)
+      stroke(put, x, y, -dx, -dy, half, R.water, 5, 5)
     }
   })
 
@@ -696,10 +699,10 @@ export const water = (rng: Rng) =>
  * The previous version computed a grain column for all 4096 texels and read, at
  * play distance, as corduroy. Six lines and two knots read as bark.
  */
-export const bark = (rng: Rng) =>
+export const bark = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
     const drift = valueNoise(r, 6)
-    fill(put, n, tone(RAMP.bark, 3))
+    fill(put, n, tone(R.bark, 3))
 
     // Long grain, wandering with height. `drift` is toroidal in v, so a line
     // that leaves the bottom of the tile arrives back at the top in the same
@@ -711,8 +714,8 @@ export const bark = (rng: Rng) =>
       const wide = r.chance(0.3)
       for (let y = 0; y < n; y++) {
         const x = x0 + Math.round((drift(i / lines, y / n) - 0.5) * 7)
-        put(x, y, tone(RAMP.bark, dark ? 1 : 5))
-        if (wide) put(x + 1, y, tone(RAMP.bark, dark ? 2 : 4))
+        put(x, y, tone(R.bark, dark ? 1 : 5))
+        if (wide) put(x + 1, y, tone(R.bark, dark ? 2 : 4))
       }
     }
 
@@ -727,7 +730,7 @@ export const bark = (rng: Rng) =>
           const d = Math.hypot(dx, dy * 1.2)
           if (d > rad) continue
           const idx = d < rad * 0.35 ? 0 : d > rad - 1.2 ? 5 : 2
-          put(kx + dx, ky + dy, tone(RAMP.bark, idx))
+          put(kx + dx, ky + dy, tone(R.bark, idx))
         }
       }
     }
@@ -742,15 +745,15 @@ export const bark = (rng: Rng) =>
  * the product of map and tint, so a mid-green map under a mid-green tint comes
  * out nearly black and twice as saturated as either.
  */
-export const foliage = (rng: Rng) =>
+export const foliage = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
     const light = normalized(fbm(r, 3))
-    fill(put, n, tone(RAMP.leaf, 2))
+    fill(put, n, tone(R.leaf, 2))
 
     // Gaps first, so clusters drawn over them leave ragged holes rather than a
     // continuous sheet. A canopy you cannot see through has no depth.
     for (let i = 0; i < 8; i++) {
-      blob(put, r.int(0, n - 1), r.int(0, n - 1), r.range(3, 6), r.range(3, 6), tone(RAMP.leaf, 0))
+      blob(put, r.int(0, n - 1), r.int(0, n - 1), r.range(3, 6), r.range(3, 6), tone(R.leaf, 0))
     }
 
     for (let i = 0; i < 26; i++) {
@@ -759,10 +762,10 @@ export const foliage = (rng: Rng) =>
       const rx = r.range(4, 7)
       const ry = rx * r.range(0.6, 0.85)
       const lit = light(x / n, y / n)
-      blob(put, x, y, rx, ry, tone(RAMP.leaf, 2 + Math.round(lit * 2)))
+      blob(put, x, y, rx, ry, tone(R.leaf, 2 + Math.round(lit * 2)))
       // Underside shadow and a lit crown: two marks, both worth their texels.
-      blob(put, x + 1, y + Math.round(ry * 0.8), rx * 0.8, ry * 0.35, tone(RAMP.leaf, 1))
-      blob(put, x - 1, y - Math.round(ry * 0.7), rx * 0.55, ry * 0.3, tone(RAMP.leaf, 5))
+      blob(put, x + 1, y + Math.round(ry * 0.8), rx * 0.8, ry * 0.35, tone(R.leaf, 1))
+      blob(put, x - 1, y - Math.round(ry * 0.7), rx * 0.55, ry * 0.3, tone(R.leaf, 5))
     }
   })
 
@@ -778,7 +781,7 @@ export const foliage = (rng: Rng) =>
  * have to stay flat, because per-texel grit on stone is the exact noise this
  * pass exists to remove.
  */
-export const stone = (rng: Rng) =>
+export const stone = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
     const SEEDS = 26
     const sx: number[] = []
@@ -813,7 +816,7 @@ export const stone = (rng: Rng) =>
         let idx = base[hit]! + (up ? 1 : -1)
         if (edge < 0.9) idx = 0
         else if (edge < 2.1) idx = up ? 4 : 1
-        put(x, y, tone(RAMP.stone, idx))
+        put(x, y, tone(R.stone, idx))
       }
     }
 
@@ -823,7 +826,7 @@ export const stone = (rng: Rng) =>
       const y = r.int(0, n - 1)
       const w = r.int(2, 5)
       for (let dy = 0; dy < w; dy++) {
-        for (let dx = 0; dx < w - dy; dx++) put(x + dx, y + dy, tone(RAMP.stone, 4))
+        for (let dx = 0; dx < w - dy; dx++) put(x + dx, y + dy, tone(R.stone, 4))
       }
     }
 
@@ -833,8 +836,8 @@ export const stone = (rng: Rng) =>
     for (let i = 0; i < 4; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      blob(put, x, y, r.range(2.5, 5), r.range(2, 4), tone(RAMP.grass, 3))
-      blob(put, x + 1, y + 1, r.range(1, 2.5), r.range(1, 2), tone(RAMP.grass, 4))
+      blob(put, x, y, r.range(2.5, 5), r.range(2, 4), tone(R.grass, 3))
+      blob(put, x + 1, y + 1, r.range(1, 2.5), r.range(1, 2), tone(R.grass, 4))
     }
   })
 
@@ -843,7 +846,7 @@ export const stone = (rng: Rng) =>
  * single grain line. Every texel used to get a noise lookup, which at item
  * scale was mush and at wall scale was dirt.
  */
-export const plank = (rng: Rng) =>
+export const plank = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
     // Four texels to a board, which at TEXELS_PER_UNIT is a third of a metre:
     // roughly a split plank, and about five of them up a hut wall.
@@ -855,7 +858,7 @@ export const plank = (rng: Rng) =>
       for (let row = 0; row < BOARD; row++) {
         const y = b * BOARD + row
         const idx = row === 0 ? 0 : row === 1 ? base + 1 : row === BOARD - 1 ? base - 1 : base
-        for (let x = 0; x < n; x++) put(x, y, tone(RAMP.wood, idx))
+        for (let x = 0; x < n; x++) put(x, y, tone(R.wood, idx))
       }
 
       // A grain line on some boards only. On a wall this reads as timber; on
@@ -866,7 +869,7 @@ export const plank = (rng: Rng) =>
         const y = b * BOARD + 2
         const len = r.int(Math.round(n * 0.3), Math.round(n * 0.7))
         const x0 = r.int(0, n - 1)
-        for (let k = 0; k < len; k++) put(x0 + k, y + (r.chance(0.06) ? 1 : 0), tone(RAMP.wood, 1))
+        for (let k = 0; k < len; k++) put(x0 + k, y + (r.chance(0.06) ? 1 : 0), tone(R.wood, 1))
       }
 
       // A butt join on some boards, at a different x on each, so a wall is
@@ -874,11 +877,11 @@ export const plank = (rng: Rng) =>
       if (r.chance(0.45)) {
         const jx = r.int(0, n - 1)
         for (let row = 1; row < BOARD; row++) {
-          put(jx, b * BOARD + row, tone(RAMP.wood, 0))
-          put(jx + 1, b * BOARD + row, tone(RAMP.wood, 5))
+          put(jx, b * BOARD + row, tone(R.wood, 0))
+          put(jx + 1, b * BOARD + row, tone(R.wood, 5))
         }
         for (const nx of [jx - r.int(3, 6), jx + r.int(4, 7)]) {
-          put(nx, b * BOARD + 2, tone(RAMP.stone, 1))
+          put(nx, b * BOARD + 2, tone(R.stone, 1))
         }
       }
     }
@@ -888,128 +891,128 @@ export const plank = (rng: Rng) =>
  * Thatch and dry pasture. Laid in courses, the way a roof is, with a hard
  * shadow under each course and a handful of bold stalks rather than fur.
  */
-export const straw = (rng: Rng) =>
+export const straw = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
     const COURSE = 8
-    fill(put, n, tone(RAMP.straw, 3))
+    fill(put, n, tone(R.straw, 3))
 
     for (let c = 0; c < n / COURSE; c++) {
       const top = c * COURSE
       // One dark line per course, and a ragged edge of stalk ends just under
       // it. That is the entire read: horizontal courses with an uneven lower
       // edge is what says thatch rather than siding.
-      for (let x = 0; x < n; x++) put(x, top, tone(RAMP.straw, 0))
+      for (let x = 0; x < n; x++) put(x, top, tone(R.straw, 0))
       for (let x = 0; x < n; x++) {
         if (!r.chance(0.4)) continue
-        for (let k = 0; k < r.int(1, 3); k++) put(x, top + k, tone(RAMP.straw, 2))
+        for (let k = 0; k < r.int(1, 3); k++) put(x, top + k, tone(R.straw, 2))
       }
       // A few stalks, one step either side of the base tone. This layer used to
       // run from step 2 to step 5 over a step-3 base, and at native resolution a
       // roof of that reads as a checkerboard quilt rather than as straw.
       for (let s2 = 0; s2 < 5; s2++) {
         const x = r.int(0, n - 1)
-        stroke(put, x, top + 2, r.range(-0.3, 0.3), 1, r.int(4, COURSE), RAMP.straw, 2, 4)
+        stroke(put, x, top + 2, r.range(-0.3, 0.3), 1, r.int(4, COURSE), R.straw, 2, 4)
       }
     }
   })
 
 /** Hammered iron: flat, two brushed highlights, four rivets. */
-export const steel = (rng: Rng) =>
+export const steel = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
-    fill(put, n, tone(RAMP.steel, 3))
+    fill(put, n, tone(R.steel, 3))
     for (let i = 0; i < 3; i++) {
       const y = r.int(0, n - 1)
       const h = r.int(2, 5)
       for (let dy = 0; dy < h; dy++) {
-        for (let x = 0; x < n; x++) put(x, y + dy, tone(RAMP.steel, dy === 0 ? 5 : 4))
+        for (let x = 0; x < n; x++) put(x, y + dy, tone(R.steel, dy === 0 ? 5 : 4))
       }
     }
     for (let i = 0; i < 6; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      blob(put, x, y, 2.4, 2.2, tone(RAMP.steel, 1))
-      blob(put, x, y - 1, 1.6, 1, tone(RAMP.steel, 5))
+      blob(put, x, y, 2.4, 2.2, tone(R.steel, 1))
+      blob(put, x, y - 1, 1.6, 1, tone(R.steel, 5))
     }
   })
 
 /** Cloth: a flat weave with a few darker threads and a fold or two. */
-export const cloth = (rng: Rng) =>
+export const cloth = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
     const fold = normalized(fbm(r, 3))
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
-        put(x, y, tone(RAMP.cloth, 2 + Math.round(fold(x / n, y / n) * 2)))
+        put(x, y, tone(R.cloth, 2 + Math.round(fold(x / n, y / n) * 2)))
       }
     }
     // Weave: one darker thread every four texels, in one direction only. Two
     // directions at texel scale is a moire pattern, not a fabric.
     for (let y = 0; y < n; y += 4) {
-      for (let x = 0; x < n; x++) put(x, y, tone(RAMP.cloth, 1))
+      for (let x = 0; x < n; x++) put(x, y, tone(R.cloth, 1))
     }
     for (let i = 0; i < 5; i++) {
       const y = r.int(0, n - 1)
-      stroke(put, r.int(0, n - 1), y, 1, 0, r.int(10, 26), RAMP.cloth, 5, 5)
+      stroke(put, r.int(0, n - 1), y, 1, 0, r.int(10, 26), R.cloth, 5, 5)
     }
   })
 
 /** Fired clay: flat, with the ridges the wheel left. */
-export const clay = (rng: Rng) =>
+export const clay = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
-    fill(put, n, tone(RAMP.clay, 3))
+    fill(put, n, tone(R.clay, 3))
     for (let y = 0; y < n; y += 6) {
       for (let x = 0; x < n; x++) {
-        put(x, y, tone(RAMP.clay, 1))
-        put(x, y + 1, tone(RAMP.clay, 4))
+        put(x, y, tone(R.clay, 1))
+        put(x, y + 1, tone(R.clay, 4))
       }
     }
     for (let i = 0; i < 3; i++) {
-      stroke(put, r.int(0, n - 1), r.int(0, n - 1), 1, 0, r.int(12, 30), RAMP.clay, 5, 5)
+      stroke(put, r.int(0, n - 1), r.int(0, n - 1), 1, 0, r.int(12, 30), R.clay, 5, 5)
     }
   })
 
 /** Cloudy glass: flat and pale, with two streak highlights and a bubble. */
-export const glass = (rng: Rng) =>
+export const glass = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
-    fill(put, n, tone(RAMP.glass, 3))
+    fill(put, n, tone(R.glass, 3))
     for (let i = 0; i < 3; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
       const len = r.int(16, 40)
-      stroke(put, x, y, 0.8, 0.6, len, RAMP.glass, 5, 4)
-      stroke(put, x + 2, y, 0.8, 0.6, len, RAMP.glass, 2, 2)
+      stroke(put, x, y, 0.8, 0.6, len, R.glass, 5, 4)
+      stroke(put, x + 2, y, 0.8, 0.6, len, R.glass, 2, 2)
     }
     for (let i = 0; i < 4; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      blob(put, x, y, 2.2, 2.2, tone(RAMP.glass, 1))
-      blob(put, x, y, 1.2, 1.2, tone(RAMP.glass, 5))
+      blob(put, x, y, 2.2, 2.2, tone(R.glass, 1))
+      blob(put, x, y, 1.2, 1.2, tone(R.glass, 5))
     }
   })
 
 /** Polished gold: flat, with two broad bands. Gold is read by its contrast. */
-export const gold = (rng: Rng) =>
+export const gold = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
     const warp = valueNoise(r, 4)
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
         const band = Math.sin((((x + y) / n) * 2 + warp(x / n, y / n) * 0.5) * Math.PI * 2)
-        put(x, y, tone(RAMP.gold, band > 0.7 ? 5 : band > -0.2 ? 3 : 1))
+        put(x, y, tone(R.gold, band > 0.7 ? 5 : band > -0.2 ? 3 : 1))
       }
     }
   })
 
 /** Ripe fruit: flat skin, one highlight, one shadowed base, a couple of flecks. */
-export const fruit = (rng: Rng) =>
+export const fruit = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
-    fill(put, n, tone(RAMP.fruit, 3))
+    fill(put, n, tone(R.fruit, 3))
     for (let i = 0; i < 3; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      blob(put, x, y, r.range(7, 11), r.range(6, 9), tone(RAMP.fruit, 4))
-      blob(put, x - 2, y - 2, r.range(3, 5), r.range(2.5, 4), tone(RAMP.fruit, 5))
+      blob(put, x, y, r.range(7, 11), r.range(6, 9), tone(R.fruit, 4))
+      blob(put, x - 2, y - 2, r.range(3, 5), r.range(2.5, 4), tone(R.fruit, 5))
     }
     for (let i = 0; i < 3; i++) {
-      blob(put, r.int(0, n - 1), r.int(0, n - 1), r.range(5, 9), r.range(4, 7), tone(RAMP.fruit, 1))
+      blob(put, r.int(0, n - 1), r.int(0, n - 1), r.range(5, 9), r.range(4, 7), tone(R.fruit, 1))
     }
   })
 
@@ -1017,7 +1020,7 @@ export const fruit = (rng: Rng) =>
  * Live coals: a crust of dark plates with fire showing in the cracks between
  * them. Inverted stone, essentially, and the same Voronoi trick.
  */
-export const ember = (rng: Rng) =>
+export const ember = (rng: Rng, R: Ramps) =>
   build(PROP, rng, (put, r, n) => {
     const SEEDS = 90
     const sx: number[] = []
@@ -1041,7 +1044,7 @@ export const ember = (rng: Rng) =>
         }
         const edge = Math.sqrt(second) - Math.sqrt(best)
         // Hot in the fissures, cooling toward the middle of each crust plate.
-        put(x, y, tone(RAMP.ember, edge < 0.8 ? 5 : edge < 1.8 ? 4 : edge < 3.2 ? 2 : 1))
+        put(x, y, tone(R.ember, edge < 0.8 ? 5 : edge < 1.8 ? 4 : edge < 3.2 ? 2 : 1))
       }
     }
   })
@@ -1081,6 +1084,11 @@ export interface TextureSet {
   fruit: THREE.CanvasTexture
 }
 
+/** One built set per band id. A region asks for its own band's set and gets it
+ *  back on every later call, so a band is baked exactly once per run. */
+const sets = new Map<string, TextureSet>()
+
+/** The first set built, which is whatever band the player started in. */
 let cached: TextureSet | null = null
 
 /**
@@ -1088,35 +1096,59 @@ let cached: TextureSet | null = null
  * Rng of their own, such as item assembly. Throws rather than silently building
  * a second unseeded set, which would make two items of the same material look
  * different.
+ *
+ * Deliberately band-agnostic: it returns the FIRST set built, not the set for
+ * wherever the player currently is. Items are carried between bands, and an axe
+ * whose head changed colour because you walked east would read as a bug rather
+ * than as atmosphere. If items ever should re-skin per band, that is a decision
+ * for `items/`, and it needs a band argument here rather than a change of which
+ * set this happens to return.
  */
 export function loadedTextures(): TextureSet {
   if (!cached) throw new Error('textures() must be called once during region build')
   return cached
 }
 
-export function textures(rng: Rng): TextureSet {
-  if (cached) return cached
-  const r = rng.fork('textures')
-  cached = {
-    grass: grass(r),
-    grassDry: grassDry(r),
-    grassWorn: grassWorn(r),
-    sand: sand(r),
-    bark: bark(r),
-    foliage: foliage(r),
-    stone: stone(r),
-    plank: plank(r),
-    straw: straw(r),
-    steel: steel(r),
-    cloth: cloth(r),
-    clay: clay(r),
-    water: water(r),
-    glass: glass(r),
-    gold: gold(r),
-    ember: ember(r),
-    fruit: fruit(r),
+/**
+ * Bake every surface for one band.
+ *
+ * The `band` parameter is how geometry opts into a palette, and it defaults to
+ * Band 0 so that every existing call site keeps the exact behaviour it had.
+ * That default is load-bearing in a way worth spelling out: `BAND0.seedLabel`
+ * is the bare string `'textures'`, so Band 0 forks the same RNG stream it
+ * always did and its bitmaps come out byte for byte identical. `rng.fork`
+ * derives a stream from the label alone, so any other label is a different
+ * world, and changing Band 0's would silently reseed every texture in the game
+ * and invalidate every screenshot in `.shots/`.
+ */
+export function textures(rng: Rng, band: Band = BAND0): TextureSet {
+  const hit = sets.get(band.id)
+  if (hit) return hit
+
+  const r = rng.fork(band.seedLabel)
+  const R = band.ramps
+  const set: TextureSet = {
+    grass: grass(r, R),
+    grassDry: grassDry(r, R),
+    grassWorn: grassWorn(r, R),
+    sand: sand(r, R),
+    bark: bark(r, R),
+    foliage: foliage(r, R),
+    stone: stone(r, R),
+    plank: plank(r, R),
+    straw: straw(r, R),
+    steel: steel(r, R),
+    cloth: cloth(r, R),
+    clay: clay(r, R),
+    water: water(r, R),
+    glass: glass(r, R),
+    gold: gold(r, R),
+    ember: ember(r, R),
+    fruit: fruit(r, R),
   }
-  return cached
+  sets.set(band.id, set)
+  cached ??= set
+  return set
 }
 
 /**

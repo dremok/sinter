@@ -133,6 +133,145 @@ export const RAMP = {
   fruit: ['#3f1614', '#5e211d', '#802e26', '#a03d31', '#bb5343', '#d1745f'],
 } as const
 
+/** Six steps, dark to light. Every ramp in every band has exactly this shape. */
+export type Ramp = readonly [string, string, string, string, string, string]
+
+/** The material ramps a band bakes its textures from. Same keys in every band:
+ *  `textures.ts` has one generator per key and it must work in all of them. */
+export type Ramps = Readonly<Record<keyof typeof RAMP, Ramp>>
+
+/**
+ * Band 1: The Turn. One word: **municipal**.
+ *
+ * ## What "quieter and more wrong" means here specifically
+ *
+ * `docs/DESIGN.md` is precise about this band and it is not a fantasy-decay
+ * band: modernity intrudes without comment. Tarmac through a wheat field,
+ * powerlines, a parked sedan, a petrol station serving a village that still
+ * uses oxen, and nobody remarks on any of it.
+ *
+ * So the wrongness is not rot or magic. It is the specific deadness of
+ * infrastructure: concrete, galvanised steel, weathered fencing nobody paints,
+ * roadside verge grass that is never watered. Colour that was made in a factory
+ * and then left out. That reads as quieter AND wronger at the same time, which
+ * uniform fading does not — a merely faded Band 0 is just Band 0 at dusk.
+ *
+ * ## How these numbers were made, and the one rule that must not be broken
+ *
+ * Derived from the Band 0 table above by a per-ramp drift in hue and chroma,
+ * then **luminance-locked back to the Band 0 value, step for step**.
+ *
+ * That lock is the whole reason this is safe to drop in. `palette.ts` says
+ * value does the reading, and Band 0's values are tuned against each other in
+ * ways that are easy to destroy by accident: `dryGrass` matches `grass` step
+ * for step so the dithered boundary between them is invisible in greyscale, and
+ * `cloth` tops out below `sand` so a rope does not vanish on a beach. A naive
+ * HSV drift breaks all of that silently, because desaturating a colour also
+ * changes how bright it is. Measured before the lock was added, `wood` and
+ * `clay` collapsed from 2.4% apart in value to 0.2%, and water drifted into
+ * steel so a bucket would have disappeared against a pond.
+ *
+ * With the lock, Band 1 differs from Band 0 in hue and chroma ONLY. Every value
+ * span is identical to the decimal, and a separation check over all 136 ramp
+ * pairs scores exactly the same as Band 0 does.
+ *
+ * The drift, by role:
+ *   - **Living things go wrong.** Grass, dry grass and canopy rotate about 60
+ *     degrees cold, to a hue with no yellow left in it, at half the chroma.
+ *     Chlorophyll green has yellow in it; verge green does not.
+ *   - **Earth and timber only fade.** They keep their own hue order, so soil
+ *     still reads as soil beside a plank. Weathered, not sick.
+ *   - **Made things barely move.** Steel, glass and gold are within a few
+ *     percent of Band 0. Iron is iron in any band, and that is the point: the
+ *     manufactured things look MORE at home here than the grass does.
+ *   - **Fire does not move at all.** `ember` is byte-identical to Band 0. The
+ *     one thing still fully saturated in this band is the fire you brought with
+ *     you, and everything around it looks worse for being next to it.
+ *
+ * Hue also rotates *cold* as each ramp lightens, inverting Band 0's "hue
+ * rotates warm as a ramp lightens". A highlight that goes cold is the signature
+ * of light that is not sunlight, and it costs nothing to say it here.
+ */
+export const RAMP1: Ramps = {
+  grass: ['#2a302d', '#36423c', '#46574e', '#596e64', '#74897f', '#97a7a0'],
+  dryGrass: ['#2b3029', '#373e33', '#485242', '#5b6854', '#73836c', '#92a28b'],
+  dirt: ['#322a23', '#423930', '#54493e', '#675a4d', '#7c6e5f', '#928473'],
+  leaf: ['#57615b', '#6c7772', '#818c87', '#96a19d', '#abb6b2', '#c0cbc7'],
+  bark: ['#312b27', '#423a35', '#544b44', '#665c53', '#7a7064', '#908577'],
+  wood: ['#3b332d', '#50453e', '#65584f', '#7a6d60', '#938676', '#b6ab9b'],
+  /** Concrete rather than granite: cooler and flatter than Band 0's stone. */
+  stone: ['#353736', '#4a4d4b', '#616661', '#797f78', '#979d94', '#bec4bb'],
+  sand: ['#4f493b', '#655f4e', '#7c7662', '#948e77', '#afaa91', '#d0cdb9'],
+  straw: ['#403c31', '#545042', '#696453', '#7f7b66', '#9a9780', '#bfbea7'],
+  water: ['#384547', '#46595b', '#576f72', '#6a868a', '#84a0a4', '#a6bec3'],
+  steel: ['#40464f', '#565d66', '#6d747e', '#868b96', '#a4a9b3', '#c7ccd3'],
+  cloth: ['#443c36', '#574e46', '#6b6156', '#7f7568', '#958b7d', '#aea495'],
+  clay: ['#463330', '#58423d', '#6b524a', '#7e6358', '#937869', '#a98f7f'],
+  glass: ['#465b65', '#5b737f', '#708a98', '#89a2b1', '#a5bcc9', '#c4d5df'],
+  gold: ['#644e1c', '#846a27', '#a38734', '#bca346', '#d2bd62', '#e7d78b'],
+  /** Byte-identical to Band 0. Fire is the one thing that is still right. */
+  ember: ['#3d1608', '#6b2410', '#a63817', '#d95420', '#ff7a2f', '#ffc247'],
+  fruit: ['#2e1a1f', '#46272d', '#61353c', '#7d454c', '#9a5a5f', '#ba7879'],
+}
+
+/**
+ * Everything the renderer needs to know about how one band looks.
+ *
+ * A band is data, not a branch. Nothing under `render/` or `world/` should ever
+ * ask "which band is this" and choose colours in an `if`; it should be handed a
+ * `Band` and read from it, for the same reason `sim/` may not branch on an item
+ * id. Adding Band 2 should be a new entry in `BANDS` and no other change.
+ */
+export interface Band {
+  /** Stable identifier. Also the RNG fork label, so it must never change once
+   *  a band has shipped: see `seedLabel`. */
+  readonly id: string
+  /** Human name, from `docs/DESIGN.md`. */
+  readonly name: string
+  /**
+   * The label `textures.ts` forks the texture RNG with.
+   *
+   * Band 0's is the bare string `'textures'` and must stay that way forever.
+   * `rng.fork` derives a stream from the label alone, so renaming it would
+   * reseed every texture in the game, change every existing screenshot, and
+   * make every before/after comparison in this repo meaningless.
+   */
+  readonly seedLabel: string
+  readonly ramps: Ramps
+  readonly sky: number
+  /**
+   * Vestigial. Nothing reads these: fog is derived from `IsoCamera.fogRange()`
+   * in `main.ts` because under an orthographic rig it has to bracket the
+   * camera's own distance (D9). Kept only so the two bands have one shape.
+   * Delete from both at the same time or from neither.
+   */
+  readonly fogNear: number
+  readonly fogFar: number
+  readonly grass: readonly number[]
+  readonly dirt: number
+  readonly sand: number
+  readonly rock: number
+  readonly water: number
+  readonly waterDeep: number
+  readonly bark: number
+  readonly barkDark: number
+  readonly leaf: readonly number[]
+  readonly sun: number
+  readonly skyLight: number
+  readonly groundLight: number
+  readonly ember: number
+  readonly flame: number
+  /**
+   * The player, who does NOT change colour when they cross a border. These are
+   * identical in every band on purpose; they are here because they were here,
+   * and they would be better off in their own export.
+   */
+  readonly tunic: number
+  readonly trouser: number
+  readonly skin: number
+  readonly hair: number
+}
+
 /** A ramp step as a three.js int. `RAMP.grass[3]` and `hex('grass', 3)` agree. */
 export function hex(ramp: keyof typeof RAMP, step: number): number {
   const s = RAMP[ramp][Math.max(0, Math.min(RAMP[ramp].length - 1, step))]!
@@ -140,6 +279,11 @@ export function hex(ramp: keyof typeof RAMP, step: number): number {
 }
 
 export const BAND0 = {
+  id: 'hearth',
+  name: 'Hearth',
+  // Never change this string. See `Band.seedLabel`.
+  seedLabel: 'textures',
+  ramps: RAMP,
   /** Softened from a 44%-saturation cyan; sky is a large area and it glared. */
   sky: 0x9cc6d6,
   fogNear: 34,
@@ -187,7 +331,73 @@ export const BAND0 = {
   trouser: 0x2e3752,
   skin: 0xe8b98a,
   hair: 0x33241a,
-} as const
+} as const satisfies Band
+
+/**
+ * Band 1: The Turn.
+ *
+ * The ramps carry the surfaces; these carry the light and the air. Two rules
+ * ran through every number below.
+ *
+ * **The sky stops being weather.** Band 0's sky is a 27%-saturation blue with a
+ * time of day in it. This one is a 7%-saturation overcast that could be any
+ * hour, which is most of what makes a place feel municipal: nothing about the
+ * light tells you when you are.
+ *
+ * **The sun stops being warm.** Band 0's key is lerped toward orange in
+ * `main.ts` and lands near hue 41. This one sits at 3% saturation, so a surface
+ * lit by it is very nearly its own colour and nothing gets the flattering warm
+ * pass that makes Band 0 look like an afternoon. Combined with the drained
+ * ramps that is the whole effect: a world lit by a bright grey sky.
+ *
+ * Fire is untouched, and the player is untouched.
+ */
+export const BAND1 = {
+  id: 'turn',
+  name: 'The Turn',
+  seedLabel: 'textures:turn',
+  ramps: RAMP1,
+  /** An overcast with no hour in it. */
+  sky: 0xb2bec0,
+  fogNear: 34,
+  fogFar: 96,
+
+  grass: [0x596e64, 0x46574e, 0x74897f, 0x36423c],
+  dirt: 0x675a4d,
+  sand: 0x948e77,
+  rock: 0x797f78,
+  water: 0x576f72,
+  waterDeep: 0x384547,
+
+  bark: 0x665c53,
+  barkDark: 0x423a35,
+
+  /**
+   * Verge green: the same three-tier structure as Band 0, rotated about 60
+   * degrees cold and halved in chroma, so it lands near hue 144 at ~17%. Band 0
+   * holds these near 36% and warns that tint times map compounds; at 17% the
+   * canopy comes out around 21% on screen, which is drab without going grey.
+   */
+  leaf: [0x47564d, 0x576a5f, 0x697e71],
+
+  sun: 0xe9eff0,
+  skyLight: 0xc0ccd0,
+  groundLight: 0x4e5654,
+
+  ember: 0xff7a2f,
+  flame: 0xffc247,
+
+  tunic: 0x9e332c,
+  trouser: 0x2e3752,
+  skin: 0xe8b98a,
+  hair: 0x33241a,
+} as const satisfies Band
+
+/**
+ * Every band, indexed by distance from home. `world/` picks one and hands it
+ * down; nothing downstream should know there is more than one.
+ */
+export const BANDS: readonly Band[] = [BAND0, BAND1]
 
 /**
  * The flat colour for each item material. Only the transparent kinds actually

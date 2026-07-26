@@ -130,75 +130,145 @@ void RE_IndirectDiffuse_Toon( const in vec3 irradiance, const in vec3 geometryPo
 `
 
 let ramp: THREE.DataTexture | null = null
+let rampData: Uint8Array | null = null
+let rampElevation = Number.NaN
 
 /**
- * The lighting ramp, eight texels wide, sampled at `dot(N,L) * 0.5 + 0.5`.
- * Texel i therefore covers dot(N,L) from `i/4 - 1` to `(i+1)/4 - 1`.
+ * Four bands, and the gaps between them are the entire point.
  *
- * Three bands, and the gaps between them are the entire point.
- *
- * The previous version had eight subtly different values, which is not cel
+ * The version before this had eight subtly different values, which is not cel
  * shading, it is a smooth falloff quantised so finely that nothing reads as a
  * step. Its top three bands were 0.94, 1.00 and 1.00: a 6% difference, which is
  * invisible, so every lit surface collapsed into one tone and the frame looked
  * like plain lambert. Bands only read if the jump between them is larger than
  * the variation inside them.
  *
- * So: 0.30 shadow, 0.48 terminator, 0.78 half light, 0.95 light. Four steps,
- * each a long way from its neighbour, and the shadow held flat across four
- * texels so it has no internal shape at all.
+ * The terminator stays *saturated*. A wide terminator swallows the gently
+ * sloping ground, and a desaturated brown one turns every hectare it touches
+ * olive, which is how an earlier attempt traded a value problem for a colour
+ * problem. Its job is to be a step in value on things that stand up, not a
+ * stain on the terrain.
  *
- * The terminator is one texel and it stays *saturated*. Both matter. A wide
- * terminator swallows the gently sloping ground, and a desaturated brown one
- * turns every hectare it touches olive, which is how the previous attempt at
- * this traded a value problem for a colour problem. Its job is to be a step in
- * value on things that stand up, not a stain on the terrain.
+ * Values multiply the key light, so blue in the shadow band means the shadow
+ * side is lit by a blue version of the key rather than by nothing. The LIGHT
+ * end is near neutral on purpose: the key light is warm already, and applying
+ * the same warmth twice is what turned a 6%-saturation grey rock orange.
+ */
+const BAND_SHADOW = [0.26, 0.33, 0.52]
+const BAND_TERMINATOR = [0.6, 0.46, 0.38]
+const BAND_HALF = [0.85, 0.79, 0.7]
+const BAND_LIGHT = [1.0, 0.99, 0.97]
+
+/**
+ * How far a surface may turn away from the key before it leaves each band,
+ * in radians of surface tilt.
  *
- * The sun sits at ~44 degrees of elevation for the same reason: flat ground
- * then lands at dot(N,L) = 0.69, comfortably inside the top band, so only
- * genuinely angled faces band at all.
+ * **This is the change that lets the sun move at all**, and it is worth being
+ * precise about why, because the old ramp made a day cycle impossible.
+ *
+ * The ramp is sampled at `dot(N,L) * 0.5 + 0.5`, and its band edges used to sit
+ * at fixed values of `dot`: 0, 0.25 and 0.5. But flat ground has
+ * `dot(N,L) = sin(elevation)`, so as the sun rises and sets the entire ground
+ * plane slides across those fixed edges. `camera.ts` already records what that
+ * looks like from the one time it happened: at 36 degrees flat ground sits at
+ * 0.59, so any slope over 6 degrees fell into the terminator band and the
+ * clearing "broke out in blotches". That is why the sun was pinned at 44.
+ *
+ * Measured against the fixed edges, the usable elevation range is about 40 to
+ * 62 degrees. That is not a day, it is a lunch break.
+ *
+ * Expressing the edges as an ANGLE below the key instead makes them travel with
+ * it, so flat ground keeps the same relationship to the bands at every hour and
+ * can never blotch. The two margins are chosen so that at the rig's own fixed
+ * sun (43.6 degrees, from `atan(SUN_HEIGHT / SUN_REACH)` in `camera.ts`) they
+ * land on sin(30) = 0.500 and sin(14.5) = 0.250, which are the old edges to
+ * three decimal places. The current look is therefore unchanged, and everything
+ * else this buys is free.
+ */
+const LIGHT_MARGIN = 13.6 * (Math.PI / 180)
+const HALF_MARGIN = 29.12 * (Math.PI / 180)
+
+/** The rig's fixed sun, until something calls `setKeyElevation`. */
+const DEFAULT_ELEVATION = Math.atan2(40, 42)
+
+/**
+ * Wide enough that a band edge lands within a quarter of a degree of where it
+ * should at any elevation. The old ramp was 8 texels, which quantises every
+ * edge to a multiple of 0.25 in dot: fine for one hardcoded sun, useless for an
+ * edge that has to move smoothly. Still nearest-filtered, so the bands are as
+ * hard as they ever were; this buys precision in WHERE the step falls, not a
+ * softer step.
+ */
+const RAMP_TEXELS = 64
+
+/** Fill the ramp for a key light at `elevation` radians above the horizon. */
+function writeRamp(elevation: number): void {
+  const data = rampData!
+  // Below the horizon there is no geometry left to band; hold the lowest
+  // usable arrangement so a setting sun degrades instead of inverting.
+  const e = Math.max(elevation, LIGHT_MARGIN * 0.5)
+  const lightEdge = Math.sin(Math.max(0, e - LIGHT_MARGIN))
+  const halfEdge = Math.sin(Math.max(0, e - HALF_MARGIN))
+
+  for (let i = 0; i < RAMP_TEXELS; i++) {
+    // Texel centre, mapped back to the dot(N,L) it represents.
+    const dot = ((i + 0.5) / RAMP_TEXELS) * 2 - 1
+    const band =
+      dot >= lightEdge
+        ? BAND_LIGHT
+        : dot >= halfEdge
+          ? BAND_HALF
+          : dot >= 0
+            ? BAND_TERMINATOR
+            : BAND_SHADOW
+    data[i * 4 + 0] = Math.round(band[0]! * 255)
+    data[i * 4 + 1] = Math.round(band[1]! * 255)
+    data[i * 4 + 2] = Math.round(band[2]! * 255)
+    data[i * 4 + 3] = 255
+  }
+  rampElevation = elevation
+  if (ramp) ramp.needsUpdate = true
+}
+
+/**
+ * Move the bands to follow the key light.
+ *
+ * One texture is shared by every toon material in the game, so writing 64 texels
+ * here re-lights the entire scene. Cheap enough to call every tick, and guarded
+ * anyway: a change smaller than a quarter of a degree cannot move an edge by a
+ * whole texel, so it cannot change a pixel.
+ */
+export function setKeyElevation(elevation: number): void {
+  if (Math.abs(elevation - rampElevation) < 0.004) return
+  toonRamp()
+  writeRamp(elevation)
+}
+
+/** The elevation the ramp is currently banded for, in radians. */
+export function keyElevation(): number {
+  return Number.isNaN(rampElevation) ? DEFAULT_ELEVATION : rampElevation
+}
+
+/**
+ * The lighting ramp, sampled at `dot(N,L) * 0.5 + 0.5`.
+ *
+ * The division of labour between this and the light itself is explicit, and is
+ * what fixed the frame reading as harsh. The LIGHT supplies hue at the lit end.
+ * The RAMP supplies value steps, and supplies hue only where the light cannot
+ * reach: the terminator and the shadow, which are exactly the two bands the key
+ * is leaving. That also lets the cool fill through on sunlit ground instead of
+ * having its blue scaled away, which is free warm/cool contrast on the largest
+ * surface in the game.
+ *
+ * Where the band edges fall is no longer fixed; see `LIGHT_MARGIN`.
  */
 export function toonRamp(): THREE.DataTexture {
   if (ramp) return ramp
 
-  // r, g, b per band. Values multiply the key light, so blue here means the
-  // shadow side is lit by a blue version of the sun rather than by nothing.
-  //
-  // The LIGHT end is now nearly neutral, and that is a correction rather than a
-  // taste change. The key light is itself lerped 34% toward orange, so it
-  // arrives at roughly (1.00, 0.78, 0.52) before the ramp sees it; multiplying
-  // another 0.88 of blue on top was applying the same warmth twice. Measured on
-  // the frame, that is most of why `RAMP.stone`, a deliberately neutral grey at
-  // 6% saturation, was rendering as a 39%-saturation orange rock: nothing in
-  // the palette can turn grey orange, only the light can.
-  //
-  // So the division of labour is now explicit. The LIGHT supplies hue at the
-  // lit end. The RAMP supplies value steps, and supplies hue only where the
-  // light cannot reach: the terminator and the shadow, which are exactly the
-  // two bands the key light is leaving. That also lets the cool fill through on
-  // sunlit ground instead of having its blue scaled away, which is free
-  // warm/cool contrast on the largest surface in the game.
-  const bands = [
-    [0.26, 0.33, 0.52], // shadow: one flat cool band, no internal shape
-    [0.26, 0.33, 0.52],
-    [0.26, 0.33, 0.52],
-    [0.27, 0.34, 0.53],
-    [0.60, 0.46, 0.38], // terminator: one texel, a real step, still a colour
-    [0.85, 0.79, 0.70], // the step out of it, most of the way back to neutral
-    [1.00, 0.99, 0.97], // light: value only, the sun's own colour does the hue
-    [1.00, 1.00, 0.98],
-  ]
-
-  const data = new Uint8Array(bands.length * 4)
-  for (let i = 0; i < bands.length; i++) {
-    const [r, g, b] = bands[i]!
-    data[i * 4 + 0] = Math.round(r! * 255)
-    data[i * 4 + 1] = Math.round(g! * 255)
-    data[i * 4 + 2] = Math.round(b! * 255)
-    data[i * 4 + 3] = 255
-  }
-
-  ramp = new THREE.DataTexture(data, bands.length, 1, THREE.RGBAFormat)
+  const data = new Uint8Array(RAMP_TEXELS * 4)
+  rampData = data
+  ramp = new THREE.DataTexture(data, RAMP_TEXELS, 1, THREE.RGBAFormat)
+  writeRamp(Number.isNaN(rampElevation) ? DEFAULT_ELEVATION : rampElevation)
   ramp.minFilter = THREE.NearestFilter
   ramp.magFilter = THREE.NearestFilter
   ramp.generateMipmaps = false
