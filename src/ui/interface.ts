@@ -76,16 +76,10 @@ const NOTICE_MS = 5200
 const HOLD_MS = 600
 
 /**
- * How long the bench keeps showing what a merge cost, before going back to
- * asking for two more things. Cleared early by picking anything.
+ * How far a property has to fall before the bench mentions it. Below this it is
+ * derivation noise rather than something worth weighing.
  */
-const AFTERMATH_MS = 9000
-
-/**
- * How much weaker a property has to get before the result counts as having lost
- * it. Below this it is derivation noise rather than a thing the player gave up.
- */
-const LOSS_THRESHOLD = 0.2
+const WEAKER_THRESHOLD = 0.2
 
 /**
  * How each use mode is drawn and named (IDEAS A11).
@@ -200,6 +194,43 @@ export interface UiHooks {
    * forty, which is why the pack needs its own way in.
    */
   onHold?: (index: number) => void
+  /**
+   * The player said the thing with this id.
+   *
+   * `main.ts` owns the conversation, because an answer changes an NPC's state,
+   * can take an item and can stop something opposing you, and all three of
+   * those live in the world. The panel renders a view and reports a click.
+   */
+  onChoose?: (optionId: string) => void
+}
+
+/**
+ * One thing the player may say. No cost, no outcome, no hint of either.
+ *
+ * `src/agents/npc.ts` deliberately withholds all of that: it does not say which
+ * option is a lie, what it will spend, or whether it will work. A player shown
+ * which button is the lie is picking a lie button rather than lying. This type
+ * is that decision written down at the UI boundary, so the panel could not draw
+ * a warning even if somebody decided it should.
+ */
+export interface DialogueOptionView {
+  id: string
+  text: string
+}
+
+export interface DialogueView {
+  speaker: string
+  /**
+   * What they are saying right now.
+   *
+   * On the first frame of a conversation this is the node's own line. On every
+   * frame after it is the REPLY to what was just said, which is a different
+   * string. `main.ts` picks; rendering both would read as one person saying two
+   * things at once.
+   */
+  says: string
+  /** One to seven, in the order they were authored. Never re-sorted here. */
+  options: DialogueOptionView[]
 }
 
 export class Ui {
@@ -235,9 +266,13 @@ export class Ui {
    * being reported the same way as picking up an apple. The bench now holds
    * what was made and what it was made of until the player picks something
    * else, so the loss has somewhere to be looked at.
+   *
+   * Deliberately no expiry. It used to clear itself after nine seconds, which
+   * meant the only record of an irreversible act quietly deleted itself while
+   * the player was still reading it. Picking anything is the exit, and that is
+   * the player's move rather than a timer's.
    */
   private aftermath: { result: ItemDef; a: ItemDef; b: ItemDef } | null = null
-  private aftermathTimer: ReturnType<typeof setTimeout> | null = null
 
   /** In-flight hold on the merge button. See `HOLD_MS`. */
   private holdTimer: ReturnType<typeof setTimeout> | null = null
@@ -264,6 +299,7 @@ export class Ui {
     this.buildBench()
     this.mountDebug()
     this.mountHeadless()
+    this.mountDialogueProbe()
 
     $('slot-a').addEventListener('click', () => {
       this.slotA = null
@@ -335,6 +371,26 @@ export class Ui {
   consume(def: ItemDef): void {
     const i = this.pack.indexOf(def)
     if (i >= 0) this.pack.splice(i, 1)
+    this.slotA = null
+    this.slotB = null
+    this.render()
+  }
+
+  /**
+   * Take ONE thing with this id out of the pack.
+   *
+   * `consume` splices by reference, which is right for the affordance list,
+   * where the caller already has the exact entry it looked up. A conversation
+   * only knows an id: the guard takes "a sword", not that particular one. So
+   * this removes the first match and leaves any duplicates alone.
+   *
+   * The bench is cleared for the same reason it is in `consume`: the slots hold
+   * indices, and removing an entry below them silently repoints both.
+   */
+  consumeById(id: string): void {
+    const i = this.pack.findIndex((d) => d.id === id)
+    if (i < 0) return
+    this.pack.splice(i, 1)
     this.slotA = null
     this.slotB = null
     this.render()
@@ -444,23 +500,9 @@ export class Ui {
 
     this.slotA = null
     this.slotB = null
-    this.setAftermath({ result, a, b })
+    this.aftermath = { result, a, b }
     this.render()
     this.hooks.onMerged(result, a, b)
-  }
-
-  /** Holds what a merge cost on the bench until the player moves on. */
-  private setAftermath(state: Ui['aftermath']): void {
-    if (this.aftermathTimer !== null) clearTimeout(this.aftermathTimer)
-    this.aftermath = state
-    this.aftermathTimer =
-      state === null
-        ? null
-        : setTimeout(() => {
-            this.aftermath = null
-            this.aftermathTimer = null
-            this.render()
-          }, AFTERMATH_MS)
   }
 
   /** Same path as clicking a card. Used by the `?slots=` dev aid for shots. */
@@ -470,7 +512,7 @@ export class Ui {
 
   private pick(index: number): void {
     // Choosing anything is the player moving on from the last merge.
-    if (this.aftermath) this.setAftermath(null)
+    this.aftermath = null
     if (this.slotA === index) {
       this.slotA = null
     } else if (this.slotB === index) {
@@ -598,7 +640,11 @@ export class Ui {
     for (const card of Array.from($('items').querySelectorAll<HTMLElement>('.card'))) {
       const on = Number(card.dataset.index) === this.heldIndex
       card.classList.toggle('in-hand', on)
-      const hold = card.querySelector<HTMLElement>('.card-hold')
+      // NOT the first `.card-hold`. A wearable card has two buttons sharing
+      // that class and Equip is drawn first, so this used to grab Equip and
+      // relabel it "Hold" on every render. The control worked and read as the
+      // wrong verb, which is the same thing as not existing.
+      const hold = card.querySelector<HTMLElement>('.card-hold:not(.card-equip)')
       if (!hold) continue
       hold.textContent = on ? 'In hand' : 'Hold'
       hold.classList.toggle('on', on)
@@ -916,7 +962,9 @@ export class Ui {
     // called `onEquip!`, which `main.ts` never passed, so the one control the
     // equipment view exists for threw on click.
     if (mode === 'worn' && !worn && this.hooks.onEquip) {
-      const equip = el('button', 'card-hold', 'Equip')
+      // `card-hold` for the shared button styling, `card-equip` so `markHeld`
+      // can tell the two apart. They are different verbs on the same card.
+      const equip = el('button', 'card-hold card-equip', 'Equip')
       equip.type = 'button'
       equip.title = `Put on the ${def.name}`
       equip.addEventListener('click', (e) => {
@@ -951,19 +999,38 @@ export class Ui {
     return card
   }
 
-  private buildTrait(id: PropertyId, value: number): HTMLElement {
+  /**
+   * A trait chip.
+   *
+   * `was` draws the pips this property USED to have behind the ones it has
+   * left, which is how the bench shows a merge weakening something without
+   * printing two numbers and a minus sign. Omit it and the chip is the plain
+   * reading the cards use.
+   */
+  private buildTrait(id: PropertyId, value: number, was?: number): HTMLElement {
     const trait = el('span', 'trait')
-    trait.title = `${id.replace(/_/g, ' ').toLowerCase()}: ${meta(id).blurb}`
+    const name = id.replace(/_/g, ' ').toLowerCase()
+    trait.title =
+      was === undefined
+        ? `${name}: ${meta(id).blurb}`
+        : `${name}: weaker after this merge, ${this.pipsOf(was)} down to ${this.pipsOf(value)} of ${PIPS}`
     trait.append(id.replace(/_/g, ' '))
 
     const pips = el('span', 'pips')
     pips.style.setProperty('--pcolor', meta(id).color)
-    // Anything present at all earns a pip, so a trace never renders as empty.
-    const filled = Math.max(1, Math.min(PIPS, Math.round(value * PIPS)))
-    for (let i = 0; i < PIPS; i++) pips.append(el('i', i < filled ? 'pip on' : 'pip'))
+    const filled = value > 0 ? this.pipsOf(value) : 0
+    const before = was === undefined ? filled : this.pipsOf(was)
+    for (let i = 0; i < PIPS; i++) {
+      pips.append(el('i', i < filled ? 'pip on' : i < before ? 'pip lost' : 'pip'))
+    }
 
     trait.append(pips)
     return trait
+  }
+
+  /** Anything present at all earns a pip, so a trace never renders as empty. */
+  private pipsOf(value: number): number {
+    return Math.max(1, Math.min(PIPS, Math.round(value * PIPS)))
   }
 
   private renderBench(): void {
@@ -1078,46 +1145,48 @@ export class Ui {
    * What this particular pair costs, in the vocabulary the pack already teaches.
    *
    * "Both inputs are destroyed" is a rule. It sits under every pair identically
-   * and after the third one it is furniture. What a player actually wants at
-   * the moment of deciding is what THESE two could do that the result cannot,
-   * and for a pair already in the codex that is answerable exactly: take the
-   * stronger of the two inputs for each property and see what the result gives
-   * back.
+   * and after the third one it is furniture. What a player wants at the moment
+   * of deciding is what happens to the things they are spending, and for a pair
+   * already in the codex that is answerable exactly.
    *
-   * For a pair nobody has made, it is not answerable, and saying so is the
-   * honest move. Guessing here would be worse than silence, because a wrong
-   * number about an irreversible act is how a player learns to stop reading.
+   * The first version of this said "you give up" and listed traits, and it was
+   * a lie. `props/derive.ts` blends rather than drops: axe plus rope makes a
+   * poleaxe that is still SHARP, still cuts, still rope-like, all of it about a
+   * third weaker. Nothing is given up. Everything is diluted, which is the real
+   * cost and the real reason to hesitate before spending a good axe. So the row
+   * shows the drop itself, with the pips that go away still drawn behind the
+   * ones that remain.
+   *
+   * For a pair nobody has made it is not answerable, and nothing is drawn. The
+   * result band one line above already says "Never merged before"; not knowing
+   * IS the gamble and it does not need a second caption.
    */
   private renderCost(a: ItemDef, b: ItemDef): void {
-    // Nothing at all for a pair nobody has made. The result band one line above
-    // is already a question mark reading "Never merged before", and a second
-    // sentence saying the cost is unknown too is the same state announced
-    // twice. Not knowing IS the gamble; it does not need a caption.
     if (!isDiscovered(a.id, b.id, this.codex)) return
 
-    this.cost.hidden = false
     const result = tryMerge(a.id, b.id)!
-    const lost: { id: PropertyId; value: number }[] = []
-    for (const { id, value } of ranked(a.props)) {
-      const best = Math.max(value, b.props[id] ?? 0)
-      if (best - (result.props[id] ?? 0) > LOSS_THRESHOLD) lost.push({ id, value: best })
+    const drops: { id: PropertyId; from: number; to: number }[] = []
+    for (const { id } of [...ranked(a.props), ...ranked(b.props)]) {
+      if (drops.some((d) => d.id === id)) continue
+      const from = Math.max(a.props[id] ?? 0, b.props[id] ?? 0)
+      const to = result.props[id] ?? 0
+      if (from - to > WEAKER_THRESHOLD) drops.push({ id, from, to })
     }
-    for (const { id, value } of ranked(b.props)) {
-      if (lost.some((l) => l.id === id)) continue
-      const best = Math.max(value, a.props[id] ?? 0)
-      if (best - (result.props[id] ?? 0) > LOSS_THRESHOLD) lost.push({ id, value: best })
-    }
+    // Biggest fall first. `ranked` sorts by how strong a property is, which is
+    // a different question from how much of it this merge costs.
+    drops.sort((x, y) => y.from - y.to - (x.from - x.to))
 
-    if (lost.length === 0) {
-      this.cost.append(el('span', 'cost-note', 'Nothing either of them could do is lost.'))
+    this.cost.hidden = false
+    if (drops.length === 0) {
+      this.cost.append(el('span', 'cost-note', 'Nothing comes out weaker.'))
       return
     }
 
-    this.cost.append(el('span', 'cost-line', 'You give up'))
+    this.cost.append(el('span', 'cost-line', 'Comes out weaker'))
     const chips = el('span', 'cost-traits')
-    for (const { id, value } of lost.slice(0, TRAITS_PER_CARD)) chips.append(this.buildTrait(id, value))
-    if (lost.length > TRAITS_PER_CARD) {
-      chips.append(el('span', 'trait-more', `+${lost.length - TRAITS_PER_CARD}`))
+    for (const d of drops.slice(0, TRAITS_PER_CARD)) chips.append(this.buildTrait(d.id, d.to, d.from))
+    if (drops.length > TRAITS_PER_CARD) {
+      chips.append(el('span', 'trait-more', `+${drops.length - TRAITS_PER_CARD}`))
     }
     this.cost.append(chips)
   }
@@ -1346,6 +1415,96 @@ export class Ui {
     node.append(act)
   }
 
+  // --------------------------------------------------------------- dialogue
+
+  /**
+   * A conversation.
+   *
+   * Built here rather than in index.html because it is the one panel whose
+   * whole content is variable, and markup that is always empty until code fills
+   * it is markup in the wrong file.
+   *
+   * Four things this panel deliberately does NOT do, all of them agreed with
+   * the people who wrote the dialogue layer:
+   *
+   *   - It does not mark which option is a lie. The engine does not say, and it
+   *     never will. A warned lie is not a lie.
+   *   - It does not show what an option costs. The bribe does not announce that
+   *     it takes your sword.
+   *   - It does not show disposition. No bar, no face, no number. It moves, and
+   *     the player is meant to read it from what people say.
+   *   - It does not grey out anything. Options that cannot be taken are already
+   *     filtered out upstream; a greyed row would be a hint about an item you
+   *     are not carrying, which is a quest marker in a costume, and D20 bans
+   *     those.
+   *
+   * The general form of all four: if the panel is about to tell the player what
+   * they are missing, it is wrong.
+   */
+  showDialogue(view: DialogueView): void {
+    const host = this.dialogueHost()
+    host.replaceChildren()
+
+    host.append(el('div', 'talk-who', view.speaker), el('p', 'talk-says', view.says))
+
+    const list = el('div', 'talk-options')
+    for (const option of view.options) {
+      const row = el('button', 'talk-option')
+      row.type = 'button'
+      row.dataset.option = option.id
+      row.append(el('span', 'talk-quote', '“'), el('span', 'talk-text', option.text))
+      row.addEventListener('click', () => this.hooks.onChoose?.(option.id))
+      list.append(row)
+    }
+    host.append(list)
+
+    document.body.classList.add('talking')
+    host.hidden = false
+  }
+
+  hideDialogue(): void {
+    document.body.classList.remove('talking')
+    const host = document.getElementById('talk')
+    if (!host) return
+    host.hidden = true
+    host.replaceChildren()
+  }
+
+  get isTalking(): boolean {
+    return document.body.classList.contains('talking')
+  }
+
+  /**
+   * The panel, made once.
+   *
+   * Arrow keys walk the options and the buttons are real buttons, so Tab and
+   * Enter work without anything here. Nothing is focused on arrival on purpose:
+   * a highlighted first row reads as the recommended answer, and in a
+   * conversation where one of these may be a lie, an implied default is a nudge
+   * the design does not want to give.
+   */
+  private dialogueHost(): HTMLElement {
+    const existing = document.getElementById('talk')
+    if (existing) return existing
+
+    const host = el('div')
+    host.id = 'talk'
+    host.tabIndex = -1
+    host.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+      const rows = Array.from(host.querySelectorAll<HTMLButtonElement>('.talk-option'))
+      if (rows.length === 0) return
+      e.preventDefault()
+      const at = rows.indexOf(document.activeElement as HTMLButtonElement)
+      const step = e.key === 'ArrowDown' ? 1 : -1
+      // From nowhere, ArrowDown enters at the top and ArrowUp at the bottom.
+      const next = at < 0 ? (step > 0 ? 0 : rows.length - 1) : (at + step + rows.length) % rows.length
+      rows[next]!.focus()
+    })
+    document.body.append(host)
+    return host
+  }
+
   /**
    * The targeting pill, shown only when there is a key to press.
    *
@@ -1392,6 +1551,53 @@ export class Ui {
       e.preventDefault()
       document.body.classList.toggle('debug')
     })
+  }
+
+  /**
+   * Put a REAL conversation on screen from the URL, so the panel can be looked
+   * at: `?talk=wren`, or `?talk=gate_guard@start` for one named node.
+   *
+   * Same family as `?pack=` and `?wear=` in `main.ts`: a flag that exists only
+   * so a single frame can show a state a player would need to walk somewhere to
+   * reach. It pulls the real cast rather than a fixture, which is the point.
+   * The panel has to survive the guard's eight authored answers and Wren's
+   * three, at the real sentence lengths, and prose I made up to fill a box
+   * would have proved nothing about either.
+   *
+   * The node form deliberately skips the gates, so it renders every authored
+   * option rather than the ones a given situation offers. That is a layout
+   * check, not a claim about what a player would see.
+   *
+   * Dynamically imported, so `agents/` stays out of the bundle for everyone who
+   * does not pass the flag. Delete this once `main.ts` can walk up to somebody.
+   */
+  private mountDialogueProbe(): void {
+    const want = new URLSearchParams(location.search).get('talk')
+    if (!want) return
+
+    const [id, node] = want.split('@')
+    void (async () => {
+      const [{ npc }, { emptySituation, initialState, talk }] = await Promise.all([
+        import('../agents/cast'),
+        import('../agents/npc'),
+      ])
+      const def = npc(id ?? '')
+      if (!def) return
+
+      if (node) {
+        const hit = def.nodes.find((n) => n.id === node)
+        if (!hit) return
+        this.showDialogue({
+          speaker: def.name,
+          says: hit.says,
+          options: hit.options.map((o) => ({ id: o.id, text: o.text })),
+        })
+        return
+      }
+
+      const exchange = talk(def, initialState(def), emptySituation())
+      this.showDialogue({ speaker: def.name, says: exchange.says, options: exchange.options })
+    })()
   }
 
   /**

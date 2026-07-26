@@ -214,6 +214,82 @@
       }
       .glyph { display: flex; }
 
+      /* --------------------------------------------------------- dialogue */
+      /*
+       * A conversation takes the bottom of the screen, which is the convention
+       * and is right: the world stays visible above it and nothing about the
+       * frame gets dimmed, because the world is the content.
+       *
+       * It sits ABOVE the held strip rather than replacing it, on purpose.
+       * docs/DESIGN.md is explicit that some progress needs the right thing
+       * said while holding the right thing, so what is in your hand is part of
+       * the conversation and has to stay on screen during one.
+       *
+       * Sized for the real content: seven options at the widest, and two lines
+       * of prose. Not one option, and not twenty.
+       */
+      #talk {
+        position: fixed; bottom: 124px; left: 50%; transform: translateX(-50%);
+        width: min(660px, calc(100vw - 80px));
+        padding: 18px 22px 14px; border-radius: 5px;
+        background: linear-gradient(rgba(26, 21, 17, 0.93), rgba(13, 10, 8, 0.95));
+        box-shadow:
+          inset 0 1px 0 rgba(240, 220, 190, 0.12),
+          inset 2px 0 0 var(--warm),
+          0 10px 34px rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(7px);
+      }
+      #talk[hidden] { display: none; }
+      #talk:focus { outline: none; }
+
+      .talk-who {
+        font: 400 12px/1 var(--display); letter-spacing: 0.2em; text-transform: uppercase;
+        color: var(--warm);
+      }
+      /* Reading size, not label size. This is the only prose in the game a
+         player is expected to actually read rather than scan. */
+      .talk-says {
+        margin: 9px 0 15px; max-width: 58ch;
+        font: 400 15px/1.5 var(--ui); color: var(--ink);
+      }
+
+      .talk-options { display: flex; flex-direction: column; gap: 2px; }
+      /*
+       * Every option looks identical. That is the design, not a shortcut: one
+       * of these may be a lie, one may cost you your sword, and the panel is
+       * forbidden from hinting at either. Nothing here may ever grow a variant.
+       */
+      .talk-option {
+        display: flex; align-items: baseline; gap: 8px; width: 100%;
+        padding: 9px 11px; border: 1px solid transparent; border-radius: 3px;
+        background: none; cursor: pointer; text-align: left;
+        font: 400 13.5px/1.4 var(--ui); color: var(--ink-2);
+      }
+      .talk-option:hover,
+      .talk-option:focus-visible {
+        outline: none; color: #ffe9c8;
+        background: linear-gradient(90deg, rgba(224, 163, 92, 0.18), rgba(224, 163, 92, 0.04));
+        border-color: rgba(224, 163, 92, 0.45);
+      }
+      /* A quote mark instead of a number. Numbers would promise that 1 to 7 do
+         something, and those keys belong to the affordance list on whatever you
+         are facing. */
+      .talk-quote {
+        flex: none; font: 400 15px/1 var(--display); color: var(--dim);
+      }
+      .talk-option:hover .talk-quote,
+      .talk-option:focus-visible .talk-quote { color: var(--warm); }
+      .talk-text { min-width: 0; }
+
+      /*
+       * While talking, the bottom belongs to the conversation. The targeting
+       * pill goes, because "F take apple" under somebody's face is noise, and
+       * the notice stack moves to the top rather than being drawn behind the
+       * panel where a fire spreading would be invisible.
+       */
+      body.talking #prompt { display: none; }
+      body.talking #toasts { bottom: auto; top: 20px; }
+
       /* --------------------------------------------------------- controls */
       #controls {
         position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
@@ -595,8 +671,11 @@
         box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45), inset 0 4px 9px rgba(0, 0, 0, 0.4);
       }
       .slot img { width: 22px; height: 22px; }
+      /* line-height 1.15 with overflow hidden cut the descenders off every name
+         in the bench: "Coil of Rope" lost the tail of its f and its p. The slot
+         is 58px and the contents come to 50, so the room was always there. */
       .slot span {
-        font: 400 11px/1.15 var(--display); color: var(--ink);
+        font: 400 11px/1.45 var(--display); color: var(--ink);
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
       }
       /* A ghost tile the size of an item icon. Says "something goes here"
@@ -652,10 +731,13 @@
       }
       .cost-note { font: 400 11px/1.35 var(--ui); color: var(--dim); }
       .cost-traits { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-      /* Struck through, because these are the readings that go away. The trait
-         chip is the same object the cards use, so the vocabulary carries. */
-      .cost-traits .trait { color: var(--ink-2); text-decoration: line-through; }
-      .cost-traits .pip.on { opacity: 0.55; }
+      .cost-traits .trait { color: var(--ink-2); }
+      /*
+       * A pip the merge takes away, drawn behind the ones that survive. Ghosted
+       * rather than struck: the property is not gone, it is weaker, and the
+       * length of the faint tail is exactly how much weaker.
+       */
+      .pip.lost { background: var(--pcolor, #ccc); opacity: 0.26; }
 
       #result {
         display: flex; align-items: center; gap: 10px;

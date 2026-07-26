@@ -309,12 +309,16 @@ iso.update()
 // ---------------------------------------------------------------- ui
 
 const ui = new Ui({
-  onMerged: (result, a, b) => {
+  onMerged: () => {
     // Rule 3, as a sound. Both inputs are gone for good, so this is a grind,
     // one heavy impact and a decay to nothing: no rise anywhere in it, because
     // a rising cue would tell the player they were rewarded.
     audio.play('merge')
-    ui.toast('Merged', `${a.name} + ${b.name} → ${result.name}`)
+    // No toast. The bench itself now says it better and in the right place,
+    // with both spent items still in their sockets and struck through, and both
+    // routes to a merge require the pack panel to be open, so the notice was
+    // always a second copy of a sentence the player was already reading. Max:
+    // messages that belong to one action belong in one box.
   },
   onDropped: (def) => ui.toast('Dropped', def.name),
   // Which item is in hand is state that lives here, because Q, E and R are read
@@ -529,8 +533,28 @@ function darken(root: THREE.Object3D, factor: number): void {
 
 // ---------------------------------------------------------------- world ops
 
+/**
+ * The height of whatever you would be standing on at (x, z).
+ *
+ * `region.heightAt` is the TERRAIN, which is not the same question. A thing
+ * dropped or thrown onto the plank crossing was being placed at the height of
+ * the streambed under it and came to rest half sunk in the deck. `surfaceUnder`
+ * answers this correctly for the player but carries the player's own footing
+ * hysteresis, which is state and has no business in a placement query.
+ *
+ * No STEP_HEIGHT test here on purpose: a thrown bucket does not have to be able
+ * to climb the thing it lands on.
+ */
+function restingHeight(x: number, z: number): number {
+  let top = region.heightAt(x, z)
+  for (const s of region.standables) {
+    if (s.top > top && distanceTo(s, x, z) <= 0) top = s.top
+  }
+  return top
+}
+
 function placeInWorld(def: ItemDef, x: number, z: number): void {
-  const y = region.heightAt(x, z) + 0.45
+  const y = restingHeight(x, z) + 0.45
   const mesh = buildItemMesh(def)
   mesh.position.set(x, y, z)
   region.group.add(mesh)
