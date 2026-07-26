@@ -736,15 +736,18 @@ export class Ui {
     if (GLYPHED.includes(mode)) {
       const badge = this.modeGlyph(mode)
       badge.classList.add('card-mode')
-      // Same badge, two readings: dim it is the mode, warm it is the state.
-      badge.append(el('span', undefined, worn ? 'On' : MODES[mode].label))
+      // Same badge, two readings. For a wearable the words have to separate
+      // "could be worn" from "is worn", or a dim WORN and a warm WORN are the
+      // only thing telling the player which is which.
+      const label = mode === 'worn' ? (worn ? 'Worn' : 'Wearable') : MODES[mode].label
+      badge.append(el('span', undefined, label))
       actions.append(badge)
     }
     if (picked) actions.append(el('div', 'card-slot', String(picked)))
 
     // Wearing is one click from the list. Making the player select the item and
     // then press use was ceremony for a thing you do once and forget.
-    if (mode === 'worn' && !worn && this.hooks.onEquip) {
+    if (mode === 'worn' && !worn) { // PROBE
       const equip = el('button', 'card-hold', 'Equip')
       equip.type = 'button'
       equip.title = `Put on the ${def.name}`

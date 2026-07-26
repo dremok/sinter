@@ -1638,7 +1638,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // cannot be walked around. Facts, not invisible walls: they are STONE, so
   // nothing burns or cuts them.
   for (const side of [-1, 1]) {
-    let x = side * 6.9
+    let x = side * 7.6
     while (Math.abs(x) < 29.5) {
       const z = PAL_Z + palRng.range(-0.4, 0.4)
       const h = heightAt(x, z)
@@ -2371,6 +2371,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       const z = HOME.z + Math.sin(a) * rz + homeRng.range(-0.14, 0.14)
       const h = heightAt(x, z)
       if (inGap) {
+        prev = null
+        continue
+      }
+
+      // Skip anywhere a building already stands. The fence is an ellipse and
+      // knows nothing about the longhouse's rotated footprint, so without this
+      // its posts grow out of the wall.
+      if (Math.hypot(x + 4.9, z - 15.5) < 3.4 || Math.hypot(x - 6.2, z - 15.5) < 2.3) {
         prev = null
         continue
       }
