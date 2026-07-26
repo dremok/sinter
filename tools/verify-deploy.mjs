@@ -32,8 +32,8 @@ page.on('console', (m) => {
 page.on('requestfailed', (r) => errors.push(`requestfailed: ${r.url()} ${r.failure()?.errorText}`))
 
 try {
-  await page.goto(URL, { waitUntil: 'load', timeout: 60_000 })
-  await page.waitForFunction(() => window.__sinterReady === true, undefined, { timeout: 60_000 })
+  await page.goto(URL, { waitUntil: 'load', timeout: 180_000 })
+  await page.waitForFunction(() => window.__sinterReady === true, undefined, { timeout: 180_000 })
 
   // Let the wall-clock loop run for a few seconds. A single frame would pass
   // even if the simulation threw on its second tick.

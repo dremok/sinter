@@ -35,7 +35,8 @@ Three things worth understanding rather than copying blindly:
 npm i -g @railway/cli     # if not already installed
 railway login
 railway init              # creates the project, or `railway link` to attach to an existing one
-railway up                # build and deploy
+npm run deploy            # build and deploy what is COMMITTED (use this)
+railway up                # uploads the WORKING TREE, see the warning below
 railway domain            # generate a public URL
 ```
 
@@ -70,3 +71,26 @@ The deployed game needs **none**. It runs entirely offline in the browser.
 - **Asset size.** Baked textures and audio are committed, so the repo and the build both grow over time. This is the most likely future cause of slow deploys.
 - **`tsc --noEmit` runs as part of `npm run build`.** A type error fails the deploy, which is intentional. Do not weaken this to get a deploy out.
 - **Rapier prints a deprecation warning on init** ("using deprecated parameters for the initialization function"). It comes from inside `@dimforge/rapier3d-compat` 0.19.3, which passes a `Uint8Array` to its own wasm loader. It is harmless and there is no call site to change. Do not spend time on it.
+
+
+## Deploy the commit, not the disk
+
+`railway up` uploads the working directory. That is fine when one person is
+typing and actively dangerous when several agents are editing the tree at once:
+the deploy ships whatever existed at the instant the upload ran, including
+half-finished work nobody reviewed and files that are not in any commit.
+
+This was caught by comparing the deployed bundle hash against a local build made
+ninety seconds earlier and finding they differed. The project has already shipped
+one incident of the same shape, when an unrelated `git add -A` swept an agent's
+work in progress into a commit and debug geometry in primary colours reached
+production.
+
+`npm run deploy` exports HEAD with `git archive`, installs, builds it locally so
+a broken build fails here with readable output rather than as a red deploy, and
+uploads that. Whatever is live then always has a commit hash, so it can be
+reproduced, bisected and rolled back.
+
+Then look at it. `npm run verify:deploy` drives the live animation loop on the
+deployed URL and writes `.shots/deployed.png`. A green build is not a working
+game: WebGL and WASM fail in ways a build cannot catch.

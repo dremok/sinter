@@ -18,7 +18,8 @@
     "start": "node tools/serve.mjs",
     "verify:movement": "node tools/verify-movement.mjs",
     "verify:collision": "node tools/verify-collision.mjs",
-    "verify:still": "node tools/verify-still.mjs"
+    "verify:still": "node tools/verify-still.mjs",
+    "deploy": "node tools/deploy.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",
