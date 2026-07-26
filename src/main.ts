@@ -41,6 +41,7 @@ const HEADLESS_TICKS = params.has('ticks') ? Number(params.get('ticks')) : 0
 const IGNITE_AT = params.get('ignite')
 const START_AT = params.get('at')
 const PACK = params.get('pack')
+const WEAR = params.get('wear')
 
 const rng = createRng(SEED)
 const clock = new Clock()
@@ -657,6 +658,23 @@ function groundEverything(): void {
   key.position.set(0, 1.1, 0)
   character.group.add(key)
 
+  /**
+   * A second, tighter light in front of the face.
+   *
+   * The sun is perpendicular to the camera and the character turns to face the
+   * camera when idle, so their face is on the plane the key light reaches
+   * least: a face built out of light skin was coming out as a dark hole under
+   * blond hair. This is parented to the character group, so it turns with them
+   * and the face is lit from the front whichever way they are looking.
+   *
+   * Very short range on purpose. 1.1m of reach from 25cm in front of the nose
+   * means it lands on the face, the collar and nothing else; it is a fill for
+   * one surface, not a lantern.
+   */
+  const faceFill = new THREE.PointLight(0xffe9cc, 1.15, 1.1, 1.6)
+  faceFill.position.set(0, 1.16, 0.42)
+  character.group.add(faceFill)
+
 }
 
 // ---------------------------------------------------------------- interaction
@@ -1143,6 +1161,11 @@ function syncMeshes(dt: number): void {
   }
 
   character.group.position.copy(player.pos)
+  // Worn kit. This call did not exist, which is the whole of "the glasses are
+  // not visible when worn": the geometry, the slot and the wearing state were
+  // all built and nothing ever told the model about any of it.
+  character.setEquipment(equipped)
+  character.setRestFacing(iso.towardCamera())
   character.update(dt, player.speed01, player.heading)
 
   for (const e of queries.bobbing) {
@@ -1366,6 +1389,23 @@ if (PACK) {
   if (slots) for (const i of slots.split(',')) ui.select(Number(i))
 }
 
+/**
+ * Put something on, headlessly.
+ *
+ * Same family as `--pack` and `--ignite`: a flag that exists only so a single
+ * rendered frame can show a state the player would need several keypresses to
+ * reach. Worn kit that cannot be screenshotted cannot be verified, and the
+ * spectacles have now been through two designs that were never once looked at
+ * on the character.
+ */
+if (WEAR) {
+  for (const id of WEAR.split(',')) {
+    const def = CATALOG[id.trim()]
+    const use = def && useOf(def)
+    if (def && use?.mode === 'worn') equipped.set(use.slot, def.id)
+  }
+}
+
 if (IGNITE_AT) {
   const [ix, iz] = IGNITE_AT.split(',').map(Number)
   spatial.rebuild(queries.simulated)
@@ -1378,6 +1418,9 @@ if (HEADLESS_TICKS > 0) {
     stepSimulation()
     clock.forceTicks(1)
   }
+  character.setEquipment(equipped)
+  character.setRestFacing(iso.towardCamera())
+  character.settle()
   syncMeshes(TICK_DT)
   updateFocus()
   syncHeld()

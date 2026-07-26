@@ -29,6 +29,8 @@ interface Args {
   at: string
   /** Comma-separated item ids to put in the pack, which also opens the panel. */
   pack: string
+  /** Comma-separated item ids to WEAR, so worn kit can be screenshotted. */
+  wear: string
   /** Two pack indices to load into the merge bench, e.g. "0,1". Needs --pack. */
   slots: string
 }
@@ -48,6 +50,7 @@ function parseArgs(argv: string[]): Args {
     ignite: get('ignite', ''),
     at: get('at', ''),
     pack: get('pack', ''),
+    wear: get('wear', ''),
     slots: get('slots', ''),
   }
 }
@@ -102,6 +105,7 @@ try {
     (args.ignite ? `&ignite=${encodeURIComponent(args.ignite)}` : '') +
     (args.at ? `&at=${encodeURIComponent(args.at)}` : '') +
     (args.pack ? `&pack=${encodeURIComponent(args.pack)}` : '') +
+    (args.wear ? `&wear=${encodeURIComponent(args.wear)}` : '') +
     (args.slots ? `&slots=${encodeURIComponent(args.slots)}` : '')
   const target = `${url}/?seed=${encodeURIComponent(args.seed)}&ticks=${args.ticks}${extra}`
   await page.goto(target, { waitUntil: 'load' })

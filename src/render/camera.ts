@@ -101,6 +101,20 @@ export class IsoCamera {
   }
 
   /**
+   * The yaw that points a model's +z face at the camera.
+   *
+   * Follows the azimuth, so it stays correct at all four angles. Used for the
+   * character's resting facing: a character who keeps the heading they last
+   * walked in spends most of a session with their back to the player, which is
+   * a fine rule for a game whose character has no face and a bad one for a game
+   * whose character has a face and a pair of glasses you are supposed to see.
+   */
+  towardCamera(): number {
+    const dir = AZIMUTHS[this.azimuthIndex]!
+    return Math.atan2(dir.x, dir.z)
+  }
+
+  /**
    * Fog distances, in camera depth.
    *
    * Under an orthographic rig everything sits at roughly `distance` from the

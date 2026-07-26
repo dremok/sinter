@@ -99,6 +99,27 @@ const HUE = {
   head: 0xd8c9a6,
   /** A plane change on the hood brow. Still firmly inside the light band. */
   headShade: 0xc0b28f,
+  /**
+   * Skin, and the lightest thing on the character.
+   *
+   * The head used to be ONE pale mass with a small plate stuck on the front,
+   * which Max read exactly as what it is: "a jig weird helmet". A human head
+   * is two masses, hair and face, and telling them apart is most of what makes
+   * a head read as a head rather than as headgear.
+   */
+  skin: 0xecd2ac,
+  /** Turned planes of the face: the nose, the ears. */
+  skinShade: 0xd0b087,
+  /**
+   * Hair. Sandy, and the value is load bearing.
+   *
+   * Dark hair reads as hair immediately and is wrong here: it lands at the same
+   * value as the torso, and it sits directly in front of the pack, which is
+   * dark for the express reason that it must not compete with the head. At 159
+   * it is a clear step under the skin, a clear step over the pack, and the head
+   * stays the light mass the whole value plan is built on.
+   */
+  hair: 0xc79a5c,
   /** Torso, mantle and sleeves. Mid, and where the red identity now lives. */
   torso: 0xc16a48,
   /** The trailing cloak panel, a step under the torso so it reads as behind. */
@@ -113,10 +134,14 @@ const HUE = {
    * resolve into a face when you look at it.
    */
   face: 0xc9a078,
-  /** Eyes. Two pixels, and the entire face. */
+  /** Eyes and brow. The darkest thing on the head, by a long way. */
   eye: 0x18131a,
+  /** Mouth. A step lighter than the eyes, so the eyes still win the face. */
+  mouth: 0x6d3b32,
   /** Lenses. Bright, so worn glasses flip the eye band from dark to light. */
   lens: 0xd7ecf2,
+  /** Spectacle frame. Dark enough to hold the lenses apart at four pixels. */
+  frame: 0x2b2320,
 } as const
 
 /** Hip height, and the origin of both the pelvis and the chest. */
@@ -210,6 +235,31 @@ function box(w: number, h: number, d: number, color: number): THREE.Mesh {
   return mesh(new THREE.BoxGeometry(w, h, d), color)
 }
 
+/**
+ * A face feature: a small box that the outline pass must not touch.
+ *
+ * This is the whole reason the header above concluded that "detail below about
+ * 3 pixels is not detail, it is noise for the outline to bisect". It is noise
+ * only because the outline was drawing round it. The pass is a fixed
+ * world-space width, so on a 2-pixel eye the hull is wider than the eye, and on
+ * four features 2 pixels apart the four hulls merge into one dark blob — which
+ * is exactly what a brow, two eyes, a nose and a mouth turned into on the first
+ * try, and is why the face has been two pixels for so long.
+ *
+ * Excluded from the pass, the same features read as what they are: dark pixels
+ * on a lit plate, inside the head's own outline, which is the only outline the
+ * head ever needed.
+ */
+function feature(w: number, h: number, d: number, color: number): THREE.Mesh {
+  const m = box(w, h, d, color)
+  m.userData.noOutline = true
+  // Nor a shadow: a 2cm box casting into the face plate 2cm behind it is pure
+  // acne at this shadow-map resolution.
+  m.castShadow = false
+  m.userData.noShadow = true
+  return m
+}
+
 interface Leg {
   side: number
   hip: THREE.Group
@@ -251,6 +301,10 @@ export class Character {
   private cloakFacing = 0
   /** How far the requested heading is ahead of the body. The head looks there. */
   private lead = 0
+  /** Seconds since the player last asked to move. Drives the turn to camera. */
+  private still = 0
+  /** Facing to settle on when idle. Null leaves the last heading alone. */
+  private rest: number | null = null
   /** Smoothed speed. The caller only ever reports 0 or 1, so the ramp is ours. */
   private walk = 0
 
@@ -353,51 +407,133 @@ export class Character {
     collar.position.y = -0.03
     this.head.add(collar)
 
-    // ONE form. A separate brow and a separate swept-back tip were modelled
-    // here and both are gone: each carried its own outline, and where they met
-    // the hood the two outlines doubled into black wedges that cut the head to
-    // pieces. Deeper than it is wide and tapered toward the crown, which gives
-    // a cowl profile out of a single unbroken light mass.
-    const hood = bevel(0.36, 0.34, 0.42, HUE.head, 0.88)
-    hood.position.set(0, 0.19, -0.04)
-    this.head.add(hood)
-
     /**
-     * The face.
+     * A head, in two masses.
      *
-     * At 26x45 a face cannot be features. It is a small mid-value plate with
-     * two dark pixels on it, and that is the whole design: anything more turns
-     * into noise, and noise inside an outline turns into a smear.
+     * This was one tapered block 0.36 by 0.34 by 0.42 in a single pale colour,
+     * with a small darker plate stuck on the front for a face. Deeper than it
+     * was wide, uniform in value, and rounded over the top: Max called it a
+     * weird helmet, which is precisely what that describes.
      *
-     * The plate stands proud of the hood front rather than sitting in a recess.
-     * A recess was tried first and it read as shadow, not as a face, which is
-     * the trap the brief names: the front of the character faces away from the
-     * sun at every camera angle, so anything set back into the hood is simply
-     * dark. Standing it forward puts it on its own lit plane.
+     * What makes a head read as a head at forty pixels is not detail, it is the
+     * two-mass structure everybody's visual system is tuned for — a cranium
+     * with hair on it, and a narrower jaw below the brow carrying a lighter
+     * face. Get those two shapes and their values right and the features are
+     * confirmation rather than the whole argument.
+     *
+     * So: cranium wider than deep now rather than the reverse, a jaw that
+     * tapers to a chin, hair over the crown and back with a fringe at the brow,
+     * and ears where the two masses meet.
      */
-    const face = box(0.21, 0.14, 0.06, HUE.face)
-    face.position.set(0, 0.13, 0.16)
-    this.head.add(face)
+    const skull = bevel(0.30, 0.21, 0.285, HUE.skin, 0.94)
+    skull.position.set(0, 0.255, -0.015)
+    this.head.add(skull)
+
+    // Taper > 1 widens the TOP, so this narrows downward: cheekbones to chin.
+    const jaw = bevel(0.272, 0.155, 0.262, HUE.skin, 1.16)
+    jaw.position.set(0, 0.132, 0.008)
+    this.head.add(jaw)
+
+    const hair = bevel(0.322, 0.155, 0.318, HUE.hair, 0.86)
+    hair.position.set(0, 0.30, -0.045)
+    this.head.add(hair)
+
+    // The fringe is what stops the hair reading as a cap: a hard dark-over-light
+    // edge at the brow line is the single most face-making shape on a head.
+    const fringe = box(0.278, 0.05, 0.095, HUE.hair)
+    fringe.position.set(0, 0.262, 0.098)
+    this.head.add(fringe)
 
     for (const side of [-1, 1] as const) {
-      const eye = box(0.05, 0.05, 0.04, HUE.eye)
-      eye.position.set(side * 0.052, 0.145, 0.185)
-      this.head.add(eye)
+      const ear = feature(0.035, 0.062, 0.055, HUE.skinShade)
+      ear.position.set(side * 0.150, 0.196, -0.005)
+      this.head.add(ear)
     }
 
     /**
-     * Worn spectacles: one bright bar across the eye band, wide enough and
-     * proud enough to cover both eyes.
+     * The face, tipped back to meet the camera.
      *
-     * Two light lenses on a light face would not read at this size. Replacing
-     * two dark pixels with one light bar is a change of sign rather than a
-     * change of detail, and that is legible at a glance, which is the test.
+     * The rig looks down at 35 degrees, so a face on a vertical plane is seen
+     * 35 degrees off square and loses a third of its height to foreshortening.
+     * On a ten pixel face that is three rows, which is most of what there was.
+     * Tipping the plane up hands them back and costs nothing, because the
+     * character is never seen from below.
+     *
+     * One group, so the whole face tips together and the spectacles stay on the
+     * nose rather than sliding down it.
      */
-    const lenses = box(0.19, 0.06, 0.03, HUE.lens)
-    lenses.position.set(0, 0.145, 0.2)
-    lenses.visible = false
-    this.head.add(lenses)
-    this.worn.set('glasses', lenses)
+    const front = new THREE.Group()
+    front.rotation.x = -0.3
+    front.position.set(0, 0.196, 0.115)
+    this.head.add(front)
+
+    /**
+     * Brow, eyes, nose, mouth, and none of them outlined.
+     *
+     * The face was two dark pixels, on the reasoning that anything more becomes
+     * "noise for the outline to bisect". The observation was right and the
+     * conclusion was backwards: it is noise only BECAUSE the outline was drawing
+     * round it. The pass is a fixed world-space width, so on a two-pixel eye the
+     * hull is wider than the eye and four features two pixels apart merge into
+     * one dark blob. Excluded from the pass, the same four read cleanly.
+     *
+     * The rows are spaced so that when the face collapses to four pixels of
+     * height at distance, what survives is dark-light-dark-light: fringe, brow,
+     * eyes, chin. That is the pattern the eye reads as a face when it cannot
+     * see a single feature, and it is the real test, not whether the mouth is
+     * legible.
+     */
+    const brow = feature(0.16, 0.022, 0.04, HUE.skinShade)
+    brow.position.set(0, 0.044, 0.025)
+    front.add(brow)
+
+    for (const side of [-1, 1] as const) {
+      const eye = feature(0.04, 0.038, 0.04, HUE.eye)
+      eye.position.set(side * 0.05, 0.008, 0.032)
+      front.add(eye)
+    }
+
+    // A plane, not a lump. Standing the nose out gives it a lit side and a
+    // shadowed one, which at this size is worth more than its silhouette: it is
+    // what stops the face reading as a sticker printed on the front of a block.
+    const nose = feature(0.03, 0.052, 0.042, HUE.skinShade)
+    nose.position.set(0, -0.032, 0.036)
+    front.add(nose)
+
+    const mouth = feature(0.058, 0.02, 0.035, HUE.mouth)
+    mouth.position.set(0, -0.072, 0.026)
+    front.add(mouth)
+
+    /**
+     * Worn spectacles: two bright lenses in a dark frame, with a bridge.
+     *
+     * One bright bar was tried first, on the argument that flipping the eye band
+     * from dark to light is a change of SIGN and therefore legible where detail
+     * is not. True, and it also read as a blindfold. Lenses light, frame dark,
+     * and the gap between them held open by the bridge: the sign still flips,
+     * and the shape that flips is glasses-shaped.
+     */
+    const specs = new THREE.Group()
+    for (const side of [-1, 1] as const) {
+      const rim = feature(0.082, 0.068, 0.028, HUE.frame)
+      rim.position.set(side * 0.052, 0.008, 0.042)
+      specs.add(rim)
+      const lens = feature(0.058, 0.046, 0.022, HUE.lens)
+      lens.position.set(side * 0.052, 0.008, 0.052)
+      specs.add(lens)
+      // Arms, back along the temple. Only a few pixels, but they are what say
+      // the glasses are ON the head rather than painted on the front of it.
+      const arm = feature(0.02, 0.015, 0.14, HUE.frame)
+      arm.position.set(side * 0.096, 0.02, -0.03)
+      specs.add(arm)
+    }
+    const bridge = feature(0.034, 0.016, 0.024, HUE.frame)
+    bridge.position.set(0, 0.014, 0.044)
+    specs.add(bridge)
+
+    specs.visible = false
+    front.add(specs)
+    this.worn.set('glasses', specs)
   }
 
   private buildCloth(): void {
@@ -466,6 +602,25 @@ export class Character {
    * @param speed01 how fast the character is moving, normalised to its top speed
    * @param heading direction of travel in radians, ignored when standing still
    */
+  /** Where to look when nobody is steering. See the idle branch of `update`. */
+  setRestFacing(yaw: number | null): void {
+    this.rest = yaw
+  }
+
+  /**
+   * Jump straight to the resting pose.
+   *
+   * For the headless harness, which renders exactly one frame: without this a
+   * screenshot always catches the character mid-turn, one sixtieth of a second
+   * after spawning, and could never show the steady state. Same reason
+   * `fadeOccluders` snaps on its first call.
+   */
+  settle(): void {
+    if (this.rest !== null) this.facing = this.rest
+    this.still = 99
+    this.group.rotation.y = this.facing
+  }
+
   update(dt: number, speed01: number, heading: number | null): void {
     // Springs are integrated explicitly, so a dropped frame must not be allowed
     // to hand them a step long enough to blow up.
@@ -479,8 +634,27 @@ export class Character {
       // A turn taken at speed is a wider arc than a turn taken standing still.
       this.facing += delta * Math.min(1, h * (17 - 7 * this.walk))
       this.lead = delta
+      this.still = 0
     } else {
       this.lead -= this.lead * Math.min(1, h * 6)
+
+      /**
+       * Stand still long enough and you turn to face the camera.
+       *
+       * Keeping the heading you last walked in is the usual rule and it was
+       * costing the whole face: the player spends most of a session standing
+       * somewhere, and wherever that is, they got there by walking, so the
+       * character is showing their back. A face and a pair of spectacles that
+       * are only visible while walking south-east are not visible.
+       *
+       * Delayed and slow on purpose. Snapping round the moment you release a
+       * key reads as the character being yanked; a second of stillness and then
+       * an unhurried turn reads as somebody stopping to look about.
+       */
+      this.still += h
+      if (this.rest !== null && this.still > 0.9) {
+        this.facing += wrapPi(this.rest - this.facing) * Math.min(1, h * 2.4)
+      }
     }
     this.group.rotation.y = this.facing
 
