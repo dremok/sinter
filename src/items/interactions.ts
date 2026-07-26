@@ -218,6 +218,27 @@ export const LANDINGS: Record<LandingId, Landing> = {
     applies: { WATER: 1, WET: 1, TOXIC: 0.9 },
     radius: 1.4,
   },
+  /**
+   * Chili, delivered.
+   *
+   * Added because two items were writing cheques the simulation could not
+   * cash. `chili_water` says "Do not rub your eyes after" and `chili_oil` says
+   * "terrible in eyes", and neither could reach anybody's eyes: crushing the
+   * fruit into a pail produced a pail, and the blinding lives in the authored
+   * interaction on the raw fruit, which the derivatives do not inherit.
+   *
+   * TOXIC rather than a new CAUSTIC property, because TOXIC already means "harms
+   * whatever eats or absorbs it", which is what capsaicin in the eyes is, and
+   * because a property with no reader is a word nothing can hear. It lands
+   * above the 0.5 the granary rats want, so burning them out is no longer the
+   * only answer that is not rat poison.
+   */
+  caustic_burst: {
+    id: 'caustic_burst',
+    says: 'It goes everywhere, and everything close by starts blinking.',
+    applies: { TOXIC: 0.55, WET: 1 },
+    radius: 1.5,
+  },
   focused_sunlight: {
     id: 'focused_sunlight',
     says: 'A white spot, a thread of smoke, and then it takes.',

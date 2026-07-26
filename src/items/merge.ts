@@ -466,12 +466,15 @@ export const RECIPES: Recipe[] = [
     id: 'chili_water',
     name: 'Chili Water',
     desc: 'The fruit crushed into the pail. Do not rub your eyes after.',
+    // The description was a promise nothing kept. Now it is a thing you throw.
+    use: { mode: 'projected', range: 6, onLand: 'caustic_burst', leaves: 'lands' },
   },
   {
     inputs: ['chili', 'oil'],
     id: 'chili_oil',
     name: 'Chili Oil',
     desc: 'Steeped until the oil itself burns. Good on food, terrible in eyes.',
+    use: { mode: 'projected', range: 8, onLand: 'caustic_burst', leaves: 'shatters' },
   },
   {
     inputs: ['chili', 'straw'],
@@ -492,6 +495,32 @@ export const RECIPES: Recipe[] = [
     id: 'burning_sword',
     name: 'Burning Sword',
     desc: 'Oil down the blade, lit at the guard. It frightens people far more than it cuts them.',
+  },
+
+  // ----------------------------------------------------------- Band 1 objects
+  //
+  // Two, not four. Twelve pairs were derived and measured before any were
+  // written, and only these gained a capability neither parent had. The rest
+  // produced something already covered: `banana + poison` is `dosed_apple`
+  // again, `magazine + oil` is oil, `crossbow + knife` is a knife. Writing them
+  // anyway would have added exactly the filler the ratchet exists to stop.
+  //
+  // NOTE WHAT THE DESCRIPTIONS DO NOT SAY. Both of these come out LADDER_LIKE
+  // above the 0.45 the palisade climb wants, and neither line mentions walls.
+  // The route falls out of ROPE_LIKE meeting something rigid, which is rule 1
+  // working as designed, and it stops working the moment a description tells
+  // the player what the object is for.
+  {
+    inputs: ['rubber_band', 'plank'],
+    id: 'slung_board',
+    name: 'Slung Board',
+    desc: 'The band goes round the board twice and holds. It rides on your back and leaves your hands free.',
+  },
+  {
+    inputs: ['crossbow', 'rope'],
+    id: 'corded_crossbow',
+    name: 'Corded Crossbow',
+    desc: 'A line made fast to the stock, well worn at the knot. Somebody has done this before.',
   },
 ]
 

@@ -129,6 +129,7 @@ export type LandingId =
   | 'oil_spill'
   | 'water_burst'
   | 'tainted_splash'
+  | 'caustic_burst'
   | 'focused_sunlight'
 
 /** Where a worn item sits. One item per slot. */
