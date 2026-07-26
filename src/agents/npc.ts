@@ -36,8 +36,7 @@
  * state rather than mutating one, so the same conversation replays identically.
  */
 
-import { CATALOG } from '../items/catalog'
-import type { Effect, PropertyRoute } from '../items/interactions'
+import { CATALOG, type Effect, type PropertyRoute } from '../items'
 import { p, type PropertyId } from '../props/registry'
 
 /** What an NPC wants, separately from what they think of you. */

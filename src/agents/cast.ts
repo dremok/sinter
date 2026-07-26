@@ -26,8 +26,7 @@
  * option that exists to be the correct one.
  */
 
-import { CATALOG } from '../items/catalog'
-import { RECIPES } from '../items/merge'
+import { CATALOG, RECIPES } from '../items'
 import type { NpcDef, NpcState, Said, Situation } from './npc'
 import { choose } from './npc'
 

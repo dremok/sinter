@@ -5,7 +5,8 @@ import { PLAYER_RADIUS, STEP_HEIGHT } from './core/body'
 import { distanceTo, separate, type Footprint, type Point2 } from './core/footprint'
 import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
-import { ContactShadow, Grade, sizeToDisplay, toonUnique } from './render/toon'
+import { ContactShadow, Grade, setKeyElevation, sizeToDisplay, toonUnique } from './render/toon'
+import { keyOffset, skyAt, type Sky } from './render/daylight'
 import { advanceSmoke, Flame, setFlameViewport } from './render/flame'
 import { applyOutlines, setOutlineViewport } from './render/outline'
 import { loadParts } from './render/parts'
@@ -18,11 +19,16 @@ import { spatial } from './sim/spatial'
 import { applyReactions } from './props/derive'
 import { p } from './props/registry'
 import { buildItemMesh } from './render/kitbash'
-import { CATALOG, useOf, useSummary, type ItemDef, type WearSlot } from './items/catalog'
+// `./items`, not `./items/catalog`. The catalog is only fully populated as a
+// side effect of `merge.ts` running `buildAll()` at module load, so importing
+// the base module alone sees the 25 authored items and none of the 66 merge
+// results, with no error. See the header of `items/index.ts`.
+import { CATALOG, useOf, useSummary, type ItemDef, type WearSlot } from './items'
 import { landingOf } from './items/interactions'
 import { itemIcon } from './render/icons'
 import { Ui } from './ui/interface'
 import { AimReticle } from './ui/reticle'
+import { audio, type FieldEntry } from './audio'
 
 /**
  * SINTER, alpha slice.
@@ -94,7 +100,8 @@ iso.viewSize = 13
  *
  * Range comes from `IsoCamera.fogRange()`, never from absolute numbers. (D9)
  */
-const HAZE = new THREE.Color(BAND0.sky).lerp(new THREE.Color(0xf7e6cc), 0.05)
+const sky: Sky = skyAt(0, BAND0)
+const HAZE = new THREE.Color().copy(sky.haze)
 scene.background = HAZE
 const fogRange = iso.fogRange()
 scene.fog = new THREE.Fog(HAZE, fogRange.near, fogRange.far)
@@ -114,12 +121,13 @@ scene.fog = new THREE.Fog(HAZE, fogRange.near, fogRange.far)
  * split tone catches cast shadows, where the key is switched off entirely and
  * neither of the other two has anything to say.
  */
-scene.add(new THREE.HemisphereLight(BAND0.skyLight, BAND0.groundLight, 0.78))
+const hemi = new THREE.HemisphereLight(BAND0.skyLight, BAND0.groundLight, 0.78)
+scene.add(hemi)
 
 // Sun azimuth must differ from the camera's, or shadows hide behind their own
 // casters and read as broken. `iso.sunOffset()` owns that now, at every camera
 // angle rather than only the starting one. (DECISIONS D9)
-const sun = new THREE.DirectionalLight(new THREE.Color(BAND0.sun).lerp(new THREE.Color(0xffc46a), 0.34), 3.6)
+const sun = new THREE.DirectionalLight(0xffffff, 3.6)
 sun.castShadow = true
 
 /**
@@ -175,8 +183,29 @@ const sunOffset = new THREE.Vector3()
 
 /** Both lights ride with the camera, so the shadow map never wastes texels on
  *  ground the player cannot see and the key stays square to the screen. */
+const baseOffset = new THREE.Vector3()
+
+/** Time of day into the lights. One `skyAt` per frame, no allocation. */
+function applySky(): void {
+  skyAt(clock.tick, BAND0, sky)
+  sun.color.copy(sky.key)
+  sun.intensity = sky.keyIntensity
+  fill.color.copy(sky.fill)
+  fill.intensity = sky.fillIntensity
+  hemi.color.copy(sky.hemiSky)
+  hemi.groundColor.copy(sky.hemiGround)
+  hemi.intensity = sky.hemiIntensity
+  HAZE.copy(sky.haze)
+  const fogNow = scene.fog as THREE.Fog | null
+  if (fogNow) fogNow.color.copy(sky.haze)
+  // Move the cel bands with the key, or flat ground slides across them.
+  setKeyElevation(sky.elevation)
+}
+
 function placeLights(): void {
-  iso.sunOffset(sunOffset)
+  applySky()
+  iso.sunOffset(baseOffset)
+  keyOffset(baseOffset, sky, sunOffset)
 
   /**
    * Quantise the shadow camera to its own texel grid before moving it.
@@ -227,6 +256,33 @@ if (START_AT) {
   region.playerStart.set(sx ?? 0, region.heightAt(sx ?? 0, sz ?? 0), sz ?? 0)
 }
 
+// ---------------------------------------------------------------- audio
+
+/**
+ * Sound.
+ *
+ * `install()` arms two one-shot gesture listeners and creates NOTHING else: no
+ * AudioContext, no nodes, no fetch. That is deliberate and it is what keeps
+ * `tools/shot.ts` alive, because the harness never interacts with the page, so
+ * a context built at boot would sit suspended forever with a pile of silent
+ * nodes in it. Nothing in `src/audio` is awaitable either, so no audio promise
+ * can stand between boot and `window.__sinterReady`.
+ *
+ * The headless branch below is therefore belt and braces rather than the only
+ * thing holding the screenshot workflow up.
+ *
+ * Places come from the region, not from coordinates. D22 asked that regions
+ * expose their meaning so systems can ask instead of knowing the map, and
+ * `region.places` has had no consumer until now.
+ */
+if (HEADLESS_TICKS > 0) {
+  audio.disable()
+} else {
+  audio.install()
+  audio.places(region.places)
+  audio.bed('ambience', true)
+}
+
 // ---------------------------------------------------------------- player
 
 /**
@@ -253,7 +309,13 @@ iso.update()
 // ---------------------------------------------------------------- ui
 
 const ui = new Ui({
-  onMerged: (result, a, b) => ui.toast('Merged', `${a.name} + ${b.name} → ${result.name}`),
+  onMerged: (result, a, b) => {
+    // Rule 3, as a sound. Both inputs are gone for good, so this is a grind,
+    // one heavy impact and a decay to nothing: no rise anywhere in it, because
+    // a rising cue would tell the player they were rewarded.
+    audio.play('merge')
+    ui.toast('Merged', `${a.name} + ${b.name} → ${result.name}`)
+  },
   onDropped: (def) => ui.toast('Dropped', def.name),
   // Which item is in hand is state that lives here, because Q, E and R are read
   // here. Cycling is fine for four things and useless for forty.
@@ -360,6 +422,10 @@ function affordances(target: Entity): Affordance[] {
     out.push({
       label: `Chop with ${cut.name}`,
       run: () => {
+        // Positional, at the thing being hit. Chopping is one of the five ways
+        // past the palisade and the only one whose feedback is a percentage in
+        // a notice, so the sound is carrying "that did something".
+        audio.play('chop', target.transform?.pos)
         const damage = 30 * (cut.props.TOOL_CUTTING ?? 0.5)
         target.structure!.hp -= damage
         const left = Math.max(0, Math.round((target.structure!.hp / target.structure!.maxHp) * 100))
@@ -481,6 +547,12 @@ function placeInWorld(def: ItemDef, x: number, z: number): void {
 
 const fires = new Map<Entity, Flame>()
 const alight: { e: Entity; at: THREE.Vector3; heat: number; near: number }[] = []
+
+/**
+ * The same list again, in the shape the audio layer wants, refilled in place
+ * each frame so the frame loop allocates nothing (docs/PERFORMANCE.md).
+ */
+const firePool: FieldEntry[] = []
 
 /**
  * How hard a thing is visibly burning, which is not the same question as
@@ -992,6 +1064,7 @@ function syncAim(): void {
 
 function handleInput(): void {
   if (pressed.has('f') && focus?.item) {
+    audio.play('take')
     ui.add(focus.item.def)
     ui.toast('Took', focus.item.def.name)
     // removeFromParent, not scene.remove: world items are children of the
@@ -1015,6 +1088,7 @@ function handleInput(): void {
   if (pressed.has('g')) {
     const def = ui.takeLast()
     if (def) {
+      audio.play('drop')
       const basis = iso.screenBasis()
       placeInWorld(def, player.pos.x + basis.forward.x * 1.3, player.pos.z + basis.forward.z * 1.3)
       ui.toast('Dropped', def.name)
@@ -1027,6 +1101,10 @@ function handleInput(): void {
       break
     }
   }
+
+  // Max may well play muted, and the HUD says which it is either way. Sound is
+  // never the only channel for anything in this game.
+  if (pressed.has('m')) ui.toast('Sound', audio.toggleMute() ? 'Muted' : 'On')
 
   pressed.clear()
 }
@@ -1264,6 +1342,51 @@ function syncMeshes(dt: number): void {
   region.fadeOccluders(player.pos, iso.camera, dt)
 
   syncFireVisuals()
+
+  /**
+   * Sound, once a frame, and it must come after `syncFireVisuals` because that
+   * is what fills `alight`.
+   *
+   * The listener is the PLAYER; the pan basis is the CAMERA. Under an
+   * orthographic rig every object sits at roughly `IsoCamera.distance`, so a
+   * listener placed at the camera hears the hearth and the mill at the same
+   * volume — the D9 fog trap in another form. Left and right, on the other
+   * hand, are facts about the screen, so panning uses the same basis the
+   * movement keys do.
+   */
+  const ears = iso.screenBasis()
+  audio.listen(player.pos.x, player.pos.z, ears.right.x, ears.right.z)
+
+  /**
+   * A footfall per stride's worth of ground covered, rather than per unit of
+   * time, so it cannot drift out of step with the walk when the player is
+   * pushed out of a blocker or walks into a wall. Standing still is silent for
+   * free. `footing` is non-null only on a built standable, which is the jetty,
+   * the crossing, a felled trunk or the chopping block.
+   */
+  audio.travel(player.pos.x, player.pos.z, footing !== null)
+
+  /**
+   * Every fire in the world, including the hearth.
+   *
+   * Positions come from the ECS transform via `alight`, which `syncFireVisuals`
+   * fills from `fireHeat()`. That reads HOT and LUMINOUS rather than the
+   * `burning` component, which is exactly why the hearth is in this list: it is
+   * HOT 1 with no fuel of its own. No id is involved anywhere in the path, so a
+   * merge result nobody has invented yet gets a fire sound for the same reason
+   * it gets a flame.
+   */
+  let voices = 0
+  for (const a of alight) {
+    const slot = (firePool[voices] ??= { key: a.e, x: 0, z: 0, level: 0 })
+    slot.key = a.e
+    slot.x = a.at.x
+    slot.z = a.at.z
+    slot.level = Math.min(1, a.heat)
+    voices++
+  }
+  audio.field('fire', firePool, voices)
+
   placeLights()
   syncBufferSize()
   // The ground under the player changes as they walk, so this is the one
@@ -1289,6 +1412,7 @@ function updateHud(fps: number): void {
     `fps      ${fps.toFixed(0)}`,
     `carried  ${ui.count}`,
     `codex    ${ui.codex.size} merges known`,
+    audio.muted ? `<b>sound    muted (M)</b>` : `sound    on (M)`,
     burning > 0 ? `<b style="color:#ff8244">burning  ${burning}</b>` : `burning  0`,
   ].join('\n')
 }

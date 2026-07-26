@@ -332,7 +332,13 @@ export const RECIPES: Recipe[] = [
     inputs: ['grapple', 'rope_ladder'],
     id: 'grapple_ladder',
     name: 'Grappling Ladder',
-    desc: 'A ladder that throws itself up first. It needs nothing to lean on.',
+    // Was "A ladder that throws itself up first", which promised a throw the
+    // item does not have. Fixed by changing the PROSE rather than by adding a
+    // landing, because the honest verb here is climbing, not throwing: a
+    // grapple going up a wall is a traversal, not properties arriving at a
+    // point, and inventing a landing to make the sentence true would be
+    // authoring an outcome to satisfy a description.
+    desc: 'Rungs below, hooks above. It needs nothing to lean on.',
   },
   {
     inputs: ['rock', 'rope'],

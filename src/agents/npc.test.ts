@@ -27,8 +27,7 @@ import {
 // import is erased at build time, so the check below costs nothing at runtime
 // and still fails `npm run typecheck` if the two ever disagree.
 import type { Place } from '../world/region'
-import { CATALOG, STARTING_ITEMS } from '../items/catalog'
-import { RECIPES } from '../items/merge'
+import { CATALOG, RECIPES, STARTING_ITEMS } from '../items'
 import { p, type PropertyId } from '../props/registry'
 
 /**
