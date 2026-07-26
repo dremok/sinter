@@ -106,6 +106,37 @@ export const MAX_AZIMUTH_SWING = 38 * (Math.PI / 180)
  */
 const TWILIGHT = 0.035
 
+/**
+ * The key's DIRECTION is quantised to this step. Its colour is not.
+ *
+ * Measured, not guessed. With a continuously moving sun, `verify:still` went
+ * from 0.3% of pixels moving per frame to 2.9%, with one cell at 25%, and the
+ * heat map put all of it on the wheat field and the tree canopies: the finest
+ * shadow casters in the scene. Pinning the direction while leaving the colour
+ * and the ramp moving every frame brought it straight back to 0.3%, so the
+ * colour changes and the ramp rewrite are innocent and the direction is the
+ * whole cause.
+ *
+ * The reason is the shadow-map texel snapping in `main.ts`. It rounds the
+ * shadow camera's position onto a grid built from the sun's own axes, so that a
+ * shadow edge moves a whole texel or not at all. That works perfectly for a
+ * fixed sun and does nothing at all for a moving one: when the basis itself
+ * rotates every frame, the whole map re-rasterises at a slightly new angle and
+ * every shadow edge boils, which is the exact artefact the snapping was added
+ * to kill.
+ *
+ * Quantising the direction restores the assumption the snapping was built on.
+ * Between steps the basis is bit-for-bit identical and nothing moves; on a step
+ * the shadows shift once. The step is sized so that shift is about one shadow
+ * texel for a typical caster, so it reads as a shadow creeping rather than as a
+ * jump. This does not make the sun move less, it makes it move in the same
+ * discrete way the shadow map already quantises everything else.
+ */
+const DIRECTION_STEP = 0.35 * (Math.PI / 180)
+
+const quantise = (radians: number): number =>
+  Math.round(radians / DIRECTION_STEP) * DIRECTION_STEP
+
 export type Phase = 'night' | 'dawn' | 'day' | 'dusk'
 
 export interface Sky {
@@ -228,17 +259,21 @@ export function skyAt(tick: number, band: Band, out?: Sky): Sky {
   const sunElevation = up
     ? Math.max(MIN_SUN_ELEVATION, PEAK_ELEVATION * Math.sin(Math.PI * day))
     : MIN_SUN_ELEVATION
-  sky.elevation = lerp(sunElevation, MOON_ELEVATION, night)
+  // Quantised: see DIRECTION_STEP. The ramp reads this too, so the cel bands
+  // and the shadows always agree about where the key is.
+  sky.elevation = quantise(lerp(sunElevation, MOON_ELEVATION, night))
 
   // East to west while up, and back again overnight, so the sweep is
   // continuous across both crossings and across midnight.
-  sky.azimuth = up
+  sky.azimuth = quantise(
+    up
     ? lerp(-MAX_AZIMUTH_SWING, MAX_AZIMUTH_SWING, day)
     : lerp(
         MAX_AZIMUTH_SWING,
         -MAX_AZIMUTH_SWING,
         span(t < SUNRISE ? t + 1 - SUNSET : t - SUNSET, 0, 1 - SUNSET + SUNRISE),
-      )
+      ),
+  )
 
   /**
    * How far through the descent the sun is: 0 at noon, 1 once it has settled on

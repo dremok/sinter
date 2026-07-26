@@ -470,12 +470,26 @@ export class ContactShadow {
  * Same idea as `window.__sinter` in `main.ts`: a measurement needs handles the
  * game itself has no reason to expose. Populated by the first `Grade.render`
  * and never written again.
+ *
+ * It is on `window` as well as exported, and that is not belt and braces. The
+ * verification tools drive a `vite build` served by `vite preview` rather than
+ * the dev server, because a dev server reloads every open page whenever another
+ * agent saves a file and a half-finished measurement then reports a blank
+ * canvas as a result. In a built bundle there is no `/src/render/toon.ts` to
+ * import, so a module-level export alone is unreachable from the only target
+ * worth measuring.
  */
-interface FrameHook {
+export interface FrameHook {
   renderer: THREE.WebGLRenderer
   scene: THREE.Scene
   camera: THREE.Camera
   grade: Grade
+}
+
+declare global {
+  interface Window {
+    __sinterFrame?: FrameHook
+  }
 }
 
 let frameHook: FrameHook | null = null
@@ -662,7 +676,10 @@ export class Grade {
     // costs needs the renderer, the scene and the camera together, and this is
     // the only place all three meet outside `main.ts`. One truthiness check per
     // frame, no allocation, and it cannot reach a pixel.
-    if (!frameHook) frameHook = { renderer, scene, camera, grade: this }
+    if (!frameHook) {
+      frameHook = { renderer, scene, camera, grade: this }
+      window.__sinterFrame = frameHook
+    }
 
     renderer.getDrawingBufferSize(this.size)
     if (this.target.width !== this.size.x || this.target.height !== this.size.y) {
