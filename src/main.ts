@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { createRng } from './core/rng'
 import { Clock, TICK_DT } from './core/clock'
+import { PLAYER_RADIUS, STEP_HEIGHT } from './core/body'
+import { distanceTo, separate, type Footprint, type Point2 } from './core/footprint'
 import { IsoCamera } from './render/camera'
 import { BAND0 } from './render/palette'
 import { ContactShadow, Grade, sizeToDisplay, toonUnique } from './render/toon'
@@ -182,7 +184,6 @@ if (START_AT) {
  * with a dozen circular obstacles a physics engine was never buying anything.
  * Recorded as D13. Rapier comes back when crates, ropes and vehicles need it.
  */
-const PLAYER_RADIUS = 0.34
 const MOVE_SPEED = 6.5
 
 const character = new Character()
@@ -877,13 +878,7 @@ let crossed = false
 /** Scratch, because `movePlayer` runs on every fixed tick and the budget in
  *  docs/PERFORMANCE.md asks for no allocation in the loop. */
 const wish = new THREE.Vector3()
-
-/**
- * How high you can step up in one go. Anything taller is a wall to walk around,
- * not a thing to walk onto, and nothing decides that per prop: it falls out of
- * the height difference.
- */
-const STEP_HEIGHT = 0.55
+const scratch: Point2 = { x: 0, z: 0 }
 
 /**
  * The surface the player is standing on, which is not always the terrain.
@@ -926,13 +921,8 @@ function surfaceUnder(x: number, z: number, from: number): number {
 
   for (let i = 0; i < region.standables.length; i++) {
     const s = region.standables[i]!
-    const dx = x - s.x
-    const dz = z - s.z
-    const d2 = dx * dx + dz * dz
-
     // Already standing on this one, so it keeps you a little past its edge.
-    const reach = footing === i ? s.radius + LEDGE_GRIP : s.radius
-    if (d2 > reach * reach) continue
+    if (distanceTo(s, x, z) > (footing === i ? LEDGE_GRIP : 0)) continue
 
     if (s.top <= best) continue
     // Reachable from where the player currently is, not from the terrain, so
@@ -970,15 +960,48 @@ function pushOutOfLedges(pos: THREE.Vector3): void {
     if (s.top - pos.y <= STEP_HEIGHT) continue
     // Already above it, so it is the floor rather than something in the way.
     if (pos.y >= s.top - 0.01) continue
+    if (separate(s, pos.x, pos.z, PLAYER_RADIUS, scratch)) {
+      pos.x = scratch.x
+      pos.z = scratch.z
+    }
+  }
+}
 
-    const dx = pos.x - s.x
-    const dz = pos.z - s.z
-    const r = s.radius + PLAYER_RADIUS
-    const d = Math.hypot(dx, dz)
-    if (d >= r || d < 1e-4) continue
+/**
+ * Everything solid, flattened out of the ECS once and kept until it changes.
+ *
+ * Deliberately NOT a spatial-hash query. The hash filters by distance from an
+ * entity's ORIGIN, which is fine for a boulder and wrong for a barn: the player
+ * can be four metres from the centre of a building and touching its wall, and a
+ * `near(x, z, 3)` query silently drops it. That failure mode has no symptom
+ * until somebody walks through a wall, so the query is gone rather than widened.
+ *
+ * There are on the order of a hundred of these and they never move, so a flat
+ * array scanned twice a tick is both simpler and cheaper than any index.
+ */
+let solidField: Footprint[] = []
+let solidFieldSize = -1
 
-    pos.x += (dx / d) * (r - d)
-    pos.z += (dz / d) * (r - d)
+function refreshSolids(): void {
+  const n = queries.blockers.entities.length
+  if (n === solidFieldSize) return
+  solidFieldSize = n
+  solidField = queries.blockers.entities.map((e) => e.blocker)
+}
+
+/**
+ * Two resolution passes, so a player pressed into the corner between two
+ * blockers gets pushed clear instead of wedging.
+ */
+function resolveBlockers(pos: THREE.Vector3): void {
+  refreshSolids()
+  for (let pass = 0; pass < 2; pass++) {
+    for (const f of solidField) {
+      if (separate(f, pos.x, pos.z, PLAYER_RADIUS, scratch)) {
+        pos.x = scratch.x
+        pos.z = scratch.z
+      }
+    }
   }
 }
 
@@ -999,22 +1022,7 @@ function movePlayer(): void {
   }
   player.speed01 = moving ? 1 : 0
 
-  // Two resolution passes, so a player pressed into the corner between two
-  // blockers gets pushed clear instead of wedging.
-  for (let pass = 0; pass < 2; pass++) {
-    spatial.near(player.pos.x, player.pos.z, 3, nearby)
-    for (const b of nearby) {
-      if (!b.blocker) continue
-      const dx = player.pos.x - b.transform!.pos.x
-      const dz = player.pos.z - b.transform!.pos.z
-      const r = b.blocker.radius + PLAYER_RADIUS
-      const d = Math.hypot(dx, dz)
-      if (d < r && d > 1e-4) {
-        player.pos.x += (dx / d) * (r - d)
-        player.pos.z += (dz / d) * (r - d)
-      }
-    }
-  }
+  resolveBlockers(player.pos)
 
   player.pos.x = Math.min(BOUNDS.maxX, Math.max(BOUNDS.minX, player.pos.x))
   player.pos.z = Math.min(BOUNDS.maxZ, Math.max(BOUNDS.minZ, player.pos.z))
@@ -1134,9 +1142,85 @@ declare global {
       pos: () => { x: number; y: number; z: number }
       project: (x: number, y: number, z: number) => { x: number; y: number }
       speed: () => number
-      blockers: () => { label: string; x: number; z: number; r: number }[]
+      blockers: () => SolidReport[]
+      standables: () => (Footprint & { top: number })[]
+      heightAt: (x: number, z: number) => number
+      probe: (x: number, z: number) => ProbeReport
     }
   }
+}
+
+/**
+ * One solid thing, as the collision system sees it AND as the player sees it.
+ *
+ * `seen` is the mesh's own world bounding box. The pair is the point: a blocker
+ * that reaches well outside the thing it belongs to is an invisible wall, which
+ * is the single worst kind of collision bug because there is nothing on screen
+ * to blame. The gate had 1.9m of it in every direction off a 0.35m plank.
+ */
+interface SolidReport extends Footprint {
+  label: string
+  destructible: boolean
+  seen: { x0: number; x1: number; z0: number; z1: number }
+}
+
+interface ProbeReport {
+  terrain: number
+  /** Standables whose footprint contains this column, tallest first. */
+  standing: { top: number; shape: string; x: number; z: number }[]
+  /** Blockers overlapping the player capsule at this column. */
+  blocking: { label: string; overlap: number; shape: string }[]
+  /** Every scene mesh whose world bounding box spans this column. */
+  over: { name: string; y0: number; y1: number; mat: string }[]
+}
+
+/**
+ * What is actually at (x, z), in every layer that can disagree about it.
+ *
+ * "The character walks through the green area instead of on top of it" is a
+ * disagreement between three separate representations of one spot: the terrain
+ * height function, the standable list, and whatever mesh was drawn there. A
+ * screenshot shows the third and nothing else, which is why two collision bugs
+ * in a row survived being looked at. This prints all three side by side.
+ */
+const probeBox = new THREE.Box3()
+const shapeOf = (f: Footprint): string =>
+  f.hx === 0 && f.hz === 0
+    ? `circle r${f.r.toFixed(2)}`
+    : `box ${(f.hx * 2).toFixed(2)}x${(f.hz * 2).toFixed(2)}@${f.ry.toFixed(2)}${f.r ? `+${f.r.toFixed(2)}` : ''}`
+
+function probe(x: number, z: number): ProbeReport {
+  const standing = region.standables
+    .filter((s) => distanceTo(s, x, z) <= 0)
+    .map((s) => ({ top: s.top, shape: shapeOf(s), x: s.x, z: s.z }))
+    .sort((a, b) => b.top - a.top)
+
+  const blocking = [...queries.blockers]
+    .map((e) => ({
+      label: e.label ?? 'unlabelled',
+      shape: shapeOf(e.blocker),
+      overlap: PLAYER_RADIUS - distanceTo(e.blocker, x, z),
+    }))
+    .filter((b) => b.overlap > 0)
+    .sort((a, b) => b.overlap - a.overlap)
+
+  const over: ProbeReport['over'] = []
+  region.group.traverseVisible((o) => {
+    const m = o as THREE.Mesh
+    if (!m.isMesh || !m.geometry) return
+    probeBox.setFromObject(m, true)
+    if (x < probeBox.min.x || x > probeBox.max.x || z < probeBox.min.z || z > probeBox.max.z) return
+    const mat = m.material as THREE.Material
+    over.push({
+      name: m.name || m.parent?.name || m.geometry.type,
+      y0: +probeBox.min.y.toFixed(3),
+      y1: +probeBox.max.y.toFixed(3),
+      mat: (mat as THREE.MeshToonMaterial)?.color?.getHexString?.() ?? '?',
+    })
+  })
+  over.sort((a, b) => b.y1 - a.y1)
+
+  return { terrain: region.heightAt(x, z), standing, blocking, over: over.slice(0, 14) }
 }
 
 window.__sinter = {
@@ -1164,12 +1248,27 @@ window.__sinter = {
    * have shown it.
    */
   blockers: () =>
-    [...queries.blockers].map((e) => ({
-      label: e.label ?? 'unlabelled',
-      x: e.transform.pos.x,
-      z: e.transform.pos.z,
-      r: e.blocker.radius,
-    })),
+    [...queries.blockers].map((e) => {
+      const seen = { x0: NaN, x1: NaN, z0: NaN, z1: NaN }
+      if (e.mesh) {
+        probeBox.setFromObject(e.mesh, true)
+        if (!probeBox.isEmpty()) {
+          seen.x0 = probeBox.min.x
+          seen.x1 = probeBox.max.x
+          seen.z0 = probeBox.min.z
+          seen.z1 = probeBox.max.z
+        }
+      }
+      return {
+        label: e.label ?? 'unlabelled',
+        destructible: e.structure !== undefined,
+        ...e.blocker,
+        seen,
+      }
+    }),
+  standables: () => region.standables.map((s) => ({ ...s })),
+  heightAt: region.heightAt,
+  probe,
 }
 
 if (PACK) {

@@ -8,6 +8,7 @@
 
 import * as THREE from 'three'
 import { World } from 'miniplex'
+import type { Footprint } from '../core/footprint'
 import type { ItemDef } from '../items/catalog'
 import type { Properties } from '../props/registry'
 
@@ -36,8 +37,14 @@ export interface Entity {
   /** Built world geometry that can be destroyed: the palisade, a hut wall. */
   structure?: { hp: number; maxHp: number; height: number; label: string }
 
-  /** Blocks movement while it stands. Removed when the structure falls. */
-  blocker?: { radius: number }
+  /**
+   * Blocks movement while it stands. Removed when the structure falls.
+   *
+   * A `Footprint`, not a radius: a circle cannot be a rectangle, and pretending
+   * otherwise is what put an invisible two-metre bubble in front of the gate
+   * and a walk-through hole in the barn wall. See `core/footprint.ts`.
+   */
+  blocker?: Footprint
 
   /** Something the player can climb, if it is tall enough and near a blocker. */
   climbAid?: { height: number }

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import * as THREE from 'three'
+import { circle } from '../core/footprint'
 import { createRng } from '../core/rng'
 import { clearWorld, queries, world } from '../ecs/world'
 import { ignite, stepFire } from './fire'
@@ -25,7 +26,7 @@ function buildRow(n: number, spacing: number, props: Record<string, number>) {
         transform: { pos: new THREE.Vector3(i * spacing, 2, 0), ry: 0 },
         props: { ...props },
         structure: { hp: 100, maxHp: 100, height: 4, label: 'Post' },
-        blocker: { radius: 0.75 },
+        blocker: circle(i * spacing, 0, 0.75),
       }),
     )
   }

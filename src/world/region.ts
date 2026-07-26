@@ -29,6 +29,8 @@
 
 import * as THREE from 'three'
 import { createNoise2D } from 'simplex-noise'
+import { STEP_HEIGHT } from '../core/body'
+import { box, circle, distanceTo, type Footprint } from '../core/footprint'
 import type { Rng } from '../core/rng'
 import { queries, world, type Entity } from '../ecs/world'
 import { CATALOG, STARTING_ITEMS } from '../items/catalog'
@@ -141,6 +143,19 @@ interface Occluder {
   hulls?: THREE.Mesh[] | null
 }
 
+/**
+ * A flat surface the player can stand on, with the same shape vocabulary as a
+ * blocker.
+ *
+ * A deck is a rectangle. Approximating one with a run of discs overhangs its
+ * ends, which is how the plank crossing came to have half a metre of invisible
+ * floor sticking out into the stream at each end.
+ */
+export interface Standable extends Footprint {
+  /** World height of the surface. */
+  top: number
+}
+
 export interface Region {
   group: THREE.Group
   heightAt: (x: number, z: number) => number
@@ -166,7 +181,7 @@ export interface Region {
    * doing the work, and it means a plank the player drops becomes a step
    * without anybody writing that down.
    */
-  standables: { x: number; z: number; radius: number; top: number }[]
+  standables: Standable[]
   /**
    * What is here and what it is for.
    *
@@ -377,11 +392,29 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Everything that can hide the player. Filled in as the world is built. */
   const occluders: Occluder[] = []
-  const standables: { x: number; z: number; radius: number; top: number }[] = []
+  const standables: Standable[] = []
 
-  /** A surface to walk on. Long props get several, laid along their length. */
+  /** A round surface to walk on: a stump, a chopping block, a barrel top. */
   const stand = (x: number, z: number, radius: number, top: number): void => {
-    standables.push({ x, z, radius, top })
+    standables.push({ ...circle(x, z, radius), top })
+  }
+
+  /**
+   * A rectangular surface to walk on: a deck, a jetty, a fallen trunk.
+   *
+   * `w` and `dep` are full extents and `turn` is the mesh's own `rotation.y`,
+   * so a caller passes the numbers it already used to build the thing and the
+   * collision cannot end up a different shape from the object.
+   */
+  const standDeck = (
+    x: number,
+    z: number,
+    w: number,
+    dep: number,
+    turn: number,
+    top: number,
+  ): void => {
+    standables.push({ ...box(x, z, w / 2, dep / 2, turn), top })
   }
 
   /**
@@ -397,29 +430,27 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     props: Entity['props'],
     radius: number,
   ): void => {
-    world.add({ transform: { pos: at, ry: 0 }, mesh, label, props, blocker: { radius } })
+    world.add({
+      transform: { pos: at, ry: 0 },
+      mesh,
+      label,
+      props,
+      blocker: circle(at.x, at.z, radius),
+    })
   }
 
-  /** Radius of one collision segment, and how far apart their centres sit. */
-  const SEG_R = 0.55
-  const SEG_STEP = 0.95
-
   /**
-   * A rectangular thing, blocked with a run of overlapping circles round its
-   * footprint instead of one circle at its middle.
+   * A rectangular thing, blocked with a rectangle.
    *
-   * A circle cannot be a rectangle. Small enough not to bulge past the short
-   * walls and it never reaches the ends of the long ones; big enough to cover
-   * the length and it stops people well outside the corners. Either way there
-   * are gaps, and the barn, being the longest building, failed worst: you could
-   * walk in through the middle of a wall.
+   * This used to lay a run of ~30 overlapping circles around each perimeter,
+   * because a circle cannot be a rectangle: small enough not to bulge past the
+   * short walls and it never reaches the ends of the long ones, big enough to
+   * cover the length and it stops people well outside the corners. The run
+   * closed the holes and cost thirty entities per building to do it, and it
+   * still made every wall subtly lumpy.
    *
-   * Same answer as the one already used for long standables. Centres sit
-   * `SEG_STEP` apart with radius `SEG_R`, so neighbours overlap by 0.15 before
-   * the player's own radius is counted, and nothing can squeeze between them.
-   * Only the perimeter is covered: nothing can reach the inside without
-   * crossing the edge first, and filling the middle would triple the count for
-   * no gain.
+   * One oriented box is exact, is one entity, and cannot have a gap. See
+   * `core/footprint.ts` for why there is now only one shape in the game.
    */
   function solidFootprint(
     mesh: THREE.Object3D,
@@ -432,32 +463,13 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     label: string,
     props: Entity['props'],
   ): void {
-    const nx = Math.max(2, Math.ceil(w / SEG_STEP))
-    const nz = Math.max(2, Math.ceil(dep / SEG_STEP))
-    const local: [number, number][] = []
-
-    for (let i = 0; i <= nx; i++) {
-      const lx = -w / 2 + (i / nx) * w
-      local.push([lx, -dep / 2], [lx, dep / 2])
-    }
-    for (let j = 1; j < nz; j++) {
-      const lz = -dep / 2 + (j / nz) * dep
-      local.push([-w / 2, lz], [w / 2, lz])
-    }
-
-    const c = Math.cos(turn)
-    const s = Math.sin(turn)
-    for (const [lx, lz] of local) {
-      const x = cx + lx * c + lz * s
-      const z = cz - lx * s + lz * c
-      world.add({
-        transform: { pos: new THREE.Vector3(x, y, z), ry: 0 },
-        mesh,
-        label,
-        props,
-        blocker: { radius: SEG_R },
-      })
-    }
+    world.add({
+      transform: { pos: new THREE.Vector3(cx, y, cz), ry: turn },
+      mesh,
+      label,
+      props,
+      blocker: box(cx, cz, w / 2, dep / 2, turn),
+    })
   }
   const occluder = (
     object: THREE.Object3D,
@@ -778,14 +790,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     trunk.castShadow = true
     group.add(trunk)
 
-    // Several footprints along its length, because one disc around the middle
-    // of a five metre log is not the shape of a five metre log.
-    const dx = Math.cos(yaw)
-    const dz = -Math.sin(yaw)
-    for (let i = -3; i <= 3; i++) {
-      const t = (i / 3) * (len / 2 - girth)
-      stand(bx + dx * t, bz + dz * t, girth * 1.5, by + girth)
-    }
+    // A capsule, because that is the shape of a log: a segment grown by its own
+    // girth. This used to be seven discs laid along its length.
+    standables.push({
+      ...box(bx, bz, len / 2 - girth, 0, yaw, girth * 1.5),
+      top: by + girth,
+    })
   }
 
   const boulderGeo = new THREE.DodecahedronGeometry(1, 0)
@@ -867,9 +877,38 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    */
   {
     const bed = heightAt(FORD.x, FORD.z)
-    const deck = bed + BROOK_D * 0.52 + 0.34
     const turn = -0.28
     const SPAN = 4.6
+
+    /**
+     * The deck is derived from the banks it lands on, not authored.
+     *
+     * It used to be `bed + clearance`, which put it 0.26m BELOW the south bank,
+     * because the two sides of the brook are not the same height. Max walked
+     * across the green moss strip at that end rather than over it, and the
+     * handrail came out of the ground at knee height. No amount of care with
+     * the constant fixes that, because the constant cannot know what the
+     * terrain does: a crossing has to be measured against what it crosses.
+     */
+    const WIDE = 2.36
+    const abut = ([-1, 1] as const).map((side) => {
+      const ax = FORD.x + Math.sin(turn) * side * (SPAN / 2)
+      const az = FORD.z + Math.cos(turn) * side * (SPAN / 2)
+      // Both corners, not the middle. A deck 2.36m wide landing on a bank that
+      // slopes across it meets the ground higher at one corner than at the
+      // centre, and the centre is what the first version measured, so a corner
+      // of the boards still ended up under the grass.
+      let ground = heightAt(ax, az)
+      for (const across of [-WIDE / 2, WIDE / 2]) {
+        ground = Math.max(
+          ground,
+          heightAt(ax + Math.cos(turn) * across, az - Math.sin(turn) * across),
+        )
+      }
+      return { side, x: ax, z: az, ground }
+    })
+    const deck = Math.max(bed + BROOK_D * 0.52 + 0.34, ...abut.map((a) => a.ground + 0.05))
+
     const g = new THREE.Group()
 
     // Deck. Five narrower boards rather than three wide ones, because the joins
@@ -956,15 +995,39 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.rotation.y = turn
     group.add(g)
 
-    for (let i = -2; i <= 2; i++) {
-      stand(FORD.x + Math.sin(turn) * i * 0.9, FORD.z + Math.cos(turn) * i * 0.9, 1.0, deck + 0.06)
+    // The deck, as the rectangle it is. Five discs laid along it used to
+    // overhang each end by 0.6m, so you stepped up onto open water before you
+    // reached the boards.
+    standDeck(FORD.x, FORD.z, WIDE, SPAN, turn, deck + 0.06)
+
+    // Abutments, which is what a bridge has at its ends and what the stonework
+    // here is already drawn as. Generated only where the bank is actually too
+    // far below the deck to step up, so a crossing over level ground gets none.
+    for (const a of abut) {
+      const rise = deck + 0.06 - a.ground
+      if (rise <= STEP_HEIGHT) continue
+      const steps = Math.ceil(rise / STEP_HEIGHT)
+      for (let i = 1; i < steps; i++) {
+        const out = SPAN / 2 + 0.25 + (steps - 1 - i) * 0.55
+        const sx = FORD.x + Math.sin(turn) * a.side * out
+        const sz = FORD.z + Math.cos(turn) * a.side * out
+        const top = a.ground + (rise * i) / steps
+        standDeck(sx, sz, WIDE, 0.7, turn, top)
+
+        const tread = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.26, 0.8), M.rubbleWall)
+        tread.position.set(sx, top - 0.13, sz)
+        tread.rotation.y = turn
+        tread.castShadow = true
+        tread.receiveShadow = true
+        group.add(tread)
+      }
     }
 
     // Worn dirt running onto the deck from both banks, so the track arrives at
     // the bridge instead of stopping a stride short of it.
-    for (const side of [-1, 1]) {
-      const ax = FORD.x + Math.sin(turn) * side * (SPAN / 2 + 0.5)
-      const az = FORD.z + Math.cos(turn) * side * (SPAN / 2 + 0.5)
+    for (const a of abut) {
+      const ax = FORD.x + Math.sin(turn) * a.side * (SPAN / 2 + 0.5)
+      const az = FORD.z + Math.cos(turn) * a.side * (SPAN / 2 + 0.5)
       layPatch(ax, az, 1.15, M.track, pondRng, 0.28, 14, 0.075)
     }
   }
@@ -1147,7 +1210,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       label,
       props: { WOODEN: 0.9, PLANT: 0.6, FLAMMABLE: 0.5, RIGID: 0.8, HEAVY: 0.5 },
       structure: { hp: 90 * scale, maxHp: 90 * scale, height, label },
-      blocker: { radius: 0.38 * scale },
+      blocker: circle(x, z, 0.38 * scale),
     })
   }
 
@@ -1437,7 +1500,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
             mesh: rock,
             label: 'Rock',
             props: { STONE: 1, HEAVY: 1, RIGID: 1 },
-            blocker: { radius: s * 0.75 },
+            blocker: circle(x, z, s * 0.75),
           })
         }
       }
@@ -1525,7 +1588,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       label: 'Palisade',
       props: { WOODEN: 0.95, FLAMMABLE: 0.62, RIGID: 0.9, HEAVY: 0.7 },
       structure: { hp: 82, maxHp: 82, height, label: 'Palisade' },
-      blocker: { radius: PALISADE.postRadius },
+      blocker: circle(x, z, PALISADE.postRadius),
     })
   }
 
@@ -1627,10 +1690,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       label: 'The gate',
       props: { WOODEN: 0.95, FLAMMABLE: 0.7, RIGID: 0.85, HEAVY: 0.6 },
       structure: { hp: 70, maxHp: 70, height: 2.6, label: 'The gate' },
-      // Wide enough to cover both pillars and the leaf between them, so
-      // nothing else is load-bearing for it. It overlaps the first post on
-      // each side, and when the gate falls this goes with it.
-      blocker: { radius: GATE_HALF },
+      // The shape of the gate, which is a wall: as wide as the pillars are
+      // apart and as thin as the leaf is deep. It used to be a circle of this
+      // half-width, which is a 1.9m bubble in front of a 0.17m plank, so the
+      // one landmark the whole region points at could not be walked up to.
+      // Nothing else is load-bearing for it, and when it falls this goes too.
+      blocker: box(0, PAL_Z, GATE_HALF, 0.3),
     })
   }
 
@@ -1658,7 +1723,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         mesh: rock,
         label: 'Rock',
         props: { STONE: 1, HEAVY: 1, RIGID: 1 },
-        blocker: { radius: s * 0.8 },
+        blocker: circle(x, z, s * 0.8),
       })
 
       // Smaller rubble at the foot, so the spur reads as an outcrop.
@@ -2251,9 +2316,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       seat.castShadow = true
       seat.receiveShadow = true
       group.add(seat)
-      for (let k = -1; k <= 1; k++) {
-        stand(sx + Math.cos(ry) * k * len * 0.32, sz - Math.sin(ry) * k * len * 0.32, rad * 1.4, heightAt(sx, sz) + rad * 1.5)
-      }
+      standables.push({
+        ...box(sx, sz, len * 0.32, 0, ry, rad * 1.4),
+        top: heightAt(sx, sz) + rad * 1.5,
+      })
     }
 
     // HOT but not FLAMMABLE, so the fire sim treats it as a permanent ignition
@@ -2313,14 +2379,22 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       mesh: g,
       label: 'The well',
       props: { WATER: 1, CONTAINER: 0.8, STONE: 0.9 },
-      blocker: { radius: 0.78 },
+      blocker: circle(wx, wz, 0.78),
     })
   }
 
-  /** Woodpile, stacked against the east hut. Renewable fuel, and a silhouette. */
+  /**
+   * Woodpile, stacked against the east hut. Renewable fuel, and a silhouette.
+   *
+   * One group, not thirty loose meshes with the collision hung off whichever
+   * upright happened to be built last. That arrangement gave the entity a mesh
+   * the size of one post and a footprint the size of the whole stack, so a
+   * 0.9m circle sat 1.9m outside anything the player could see.
+   */
   {
     const bx = 6.2
     const bz = 15.2
+    const pile = new THREE.Group()
     for (let row = 0; row < 4; row++) {
       for (let i = 0; i < 5 - Math.floor(row / 2); i++) {
         const lz = bz - 0.9 + i * 0.36 + (row % 2) * 0.16
@@ -2330,21 +2404,23 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         log.rotation.y = homeRng.range(-0.05, 0.05)
         log.castShadow = true
         log.receiveShadow = true
-        group.add(log)
+        pile.add(log)
       }
     }
     // Two uprights holding the stack in.
-    let last: THREE.Mesh | null = null
     for (const s of [-1, 1]) {
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.13, 1.7, 0.13), M.log)
       post.position.set(bx, heightAt(bx, bz + s * 1.1) + 0.85, bz + s * 1.1)
       post.castShadow = true
-      group.add(post)
-      last = post
+      pile.add(post)
     }
-    if (last) {
-      solid(last, new THREE.Vector3(bx, heightAt(bx, bz) + 0.7, bz), 'Woodpile', { WOODEN: 1, FLAMMABLE: 0.75, RIGID: 0.6, HEAVY: 0.6 }, 0.9)
-    }
+    group.add(pile)
+    solidFootprint(pile, bx, bz - 0.18, 1.74, 2.3, 0, heightAt(bx, bz) + 0.7, 'Woodpile', {
+      WOODEN: 1,
+      FLAMMABLE: 0.75,
+      RIGID: 0.6,
+      HEAVY: 0.6,
+    })
   }
 
   /** The yard fence. Low, leaning, and missing a rail in two places. */
@@ -2775,9 +2851,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     g.position.set(bx, heightAt(bx, bz), bz)
     g.rotation.y = -0.55
     group.add(g)
-    for (let k = -1; k <= 1; k++) {
-      stand(bx + Math.cos(-0.55) * k * 0.6, bz - Math.sin(-0.55) * k * 0.6, 0.36, heightAt(bx, bz) + 0.55)
-    }
+    standDeck(bx, bz, 1.75, 0.42, -0.55, heightAt(bx, bz) + 0.55)
   }
 
   /** A second bed outside the fence, where the things that need sun go. */
@@ -2894,9 +2968,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       plankMesh.receiveShadow = true
       group.add(plankMesh)
     }
-    for (let i = -1; i <= 1; i++) {
-      stand(px - 0.55 + i * 0.6, pz, 0.5, deckY)
-    }
+    standDeck(px - 0.55, pz, 1.7, 1.08, 0.06, deckY)
   }
 
   /**
@@ -3503,10 +3575,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     if (heightAt(x, z) < WATER_LEVEL + 0.1) return false
     if (distToPath(x, z, BROOK) < BROOK_W + 0.7) return false
     for (const b of queries.blockers) {
-      const dx = b.transform.pos.x - x
-      const dz = b.transform.pos.z - z
-      const r = b.blocker.radius + 0.5
-      if (dx * dx + dz * dz < r * r) return false
+      if (distanceTo(b.blocker, x, z) < 0.5) return false
     }
     return true
   }
