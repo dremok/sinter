@@ -19,6 +19,7 @@
  */
 
 import { CATALOG, useOf, type ItemDef, type Use, type WearSlot } from '../items/catalog'
+import type { CodexEntry, CodexView } from '../items/codex'
 import { landingOf } from '../items/interactions'
 import { canMerge, isDiscovered, mergeId, refusal, tryMerge } from '../items/merge'
 import { itemIcon } from '../render/icons'
@@ -300,6 +301,7 @@ export class Ui {
     this.mountDebug()
     this.mountHeadless()
     this.mountDialogueProbe()
+    this.mountCodexProbe()
 
     $('slot-a').addEventListener('click', () => {
       this.slotA = null
@@ -363,9 +365,36 @@ export class Ui {
     return best
   }
 
-  /** Finds a carried item satisfying a property threshold. */
+  /**
+   * The BEST carried item for a job, not the first one that will do.
+   *
+   * This returned `pack.find(...)`, the first adequate item in pack order, and
+   * `commitMerge` pushes a result onto the END of the pack. So a merge result
+   * was structurally guaranteed to be ignored for any verb an earlier item
+   * already satisfied. Merge flint and a horseshoe into a Fire Striker while
+   * carrying a knife and the prompt still read "Chop with Knife".
+   *
+   * That made the entire merge economy invisible at the point of use. The whole
+   * of it was rebuilt so that a purpose-built tool beats an improvised one and
+   * an emergent combination never beats either, and none of that could reach a
+   * player through an affordance layer that could not tell them apart. It is
+   * also precisely where "merging feels like admin" is manufactured: you do the
+   * work, and the game carries on using your old thing.
+   *
+   * Ties keep the earlier item, so pack order still decides between equals and
+   * the answer stays stable as things are added.
+   */
   findCarried(id: PropertyId, min: number): ItemDef | undefined {
-    return this.pack.find((d) => (d.props[id] ?? 0) >= min)
+    let best: ItemDef | undefined
+    let score = min
+    for (const d of this.pack) {
+      const v = d.props[id] ?? 0
+      if (v >= score && (best === undefined || v > score)) {
+        best = d
+        score = v
+      }
+    }
+    return best
   }
 
   consume(def: ItemDef): void {
@@ -1415,6 +1444,100 @@ export class Ui {
     node.append(act)
   }
 
+  // ------------------------------------------------------------------ codex
+
+  /**
+   * What the player has found, and nothing else.
+   *
+   * The hard constraints, which come from `items/codex.ts` and which this panel
+   * exists to honour rather than to decorate:
+   *
+   *   - Nothing is drawn for what has not been found. No silhouettes, no locked
+   *     rows, no question marks, no greyed entries, no count of what is
+   *     missing. A silhouette says "there is a thing here and you have not got
+   *     it", which is an instruction, which is a quest marker in a costume.
+   *   - THERE IS NO TOTAL. `found` is the size of the player's own history and
+   *     `CodexView` is never handed the recipe book, so it could not compute a
+   *     denominator even if asked. "23 of 64" turns wandering into completion
+   *     and asserts the world is finite and exactly this big, which is the
+   *     opposite of the pitch.
+   *   - An empty codex draws NOTHING. That is the state a new player is in, and
+   *     a panel of empty headings is worse than no panel.
+   *
+   * `learned` is drawn first, ahead of the order the view declares. Those are
+   * rules of the physics the player has personally watched happen, written down
+   * nowhere else in the game, and they are the closest thing to a tutorial this
+   * design permits. Under three lists of nouns they would never be read.
+   */
+  showCodex(view: CodexView): void {
+    if (view.found === 0) {
+      this.hideCodex()
+      return
+    }
+
+    const host = this.codexHost()
+    const body = host.querySelector<HTMLElement>('.codex-body')!
+    body.replaceChildren()
+
+    // `found` is the only number here, and it has no denominator on purpose.
+    host.querySelector<HTMLElement>('.codex-count')!.textContent = `${view.found} found`
+
+    for (const [label, entries] of [
+      ['Learned', view.learned],
+      ['Things', view.things],
+      ['Made', view.merges],
+      ['Used', view.uses],
+    ] as const) {
+      if (entries.length === 0) continue
+      body.append(el('div', 'codex-head', label))
+      for (const entry of entries) body.append(this.buildCodexRow(entry))
+    }
+
+    host.classList.add('open')
+  }
+
+  hideCodex(): void {
+    document.getElementById('codex')?.classList.remove('open')
+  }
+
+  get isCodexOpen(): boolean {
+    return document.getElementById('codex')?.classList.contains('open') ?? false
+  }
+
+  private buildCodexRow(entry: CodexEntry): HTMLElement {
+    const row = el('div', 'codex-row')
+    row.append(el('div', 'codex-title', entry.title), el('div', 'codex-line', entry.line))
+
+    // What it cost, by name. Rule 3 is that both inputs are destroyed forever,
+    // so the record of a merge that does not show the two things it ate is not
+    // a record of a merge. Struck through, the same way the bench marks what it
+    // has just spent, so the two places agree on what gone looks like.
+    if (entry.from) {
+      const cost = el('div', 'codex-from')
+      cost.append(
+        el('span', 'codex-gone', entry.from[0]),
+        el('span', 'codex-plus', '+'),
+        el('span', 'codex-gone', entry.from[1]),
+      )
+      row.append(cost)
+    }
+    return row
+  }
+
+  /** The panel, made once, mirroring the pack on the other side of the frame. */
+  private codexHost(): HTMLElement {
+    const existing = document.getElementById('codex')
+    if (existing) return existing
+
+    const host = el('aside')
+    host.id = 'codex'
+    const head = el('header', 'codex-head-bar')
+    head.append(el('h2', 'codex-title-bar', 'Codex'), el('div', 'codex-count'))
+    host.append(head, el('div', 'rule'), el('div', 'codex-body'))
+    document.body.append(host)
+    return host
+  }
+
   // --------------------------------------------------------------- dialogue
 
   /**
@@ -1577,13 +1700,14 @@ export class Ui {
 
     const [id, node] = want.split('@')
     void (async () => {
-      const [{ npc }, { emptySituation, initialState, talk }] = await Promise.all([
+      const [{ npc, say }, { emptySituation, initialState, talk }] = await Promise.all([
         import('../agents/cast'),
         import('../agents/npc'),
       ])
       const def = npc(id ?? '')
       if (!def) return
 
+      // One named node, every authored option, gates ignored. A layout check.
       if (node) {
         const hit = def.nodes.find((n) => n.id === node)
         if (!hit) return
@@ -1595,8 +1719,83 @@ export class Ui {
         return
       }
 
-      const exchange = talk(def, initialState(def), emptySituation())
-      this.showDialogue({ speaker: def.name, says: exchange.says, options: exchange.options })
+      // A whole conversation, driven from here, but ONLY while nothing else has
+      // claimed the hook. The moment `main.ts` can walk up to somebody, that
+      // wins and this stops running.
+      //
+      // Worth having rather than a static first frame: it is the only way to
+      // check the thing that is easy to get wrong, which is that every exchange
+      // after the first shows the REPLY to what was said and not the new node's
+      // own line. Those are different strings and rendering both reads as one
+      // person saying two things at once.
+      let state = initialState(def)
+      const sit = emptySituation()
+
+      if (!this.hooks.onChoose) {
+        this.hooks.onChoose = (optionId) => {
+          const said = say(def, state, sit, optionId)
+          state = said.state
+          if (said.ended) {
+            this.hideDialogue()
+            return
+          }
+          this.showDialogue({
+            speaker: def.name,
+            says: said.reply,
+            options: talk(def, state, sit).options,
+          })
+        }
+      }
+
+      const opening = talk(def, state, sit)
+      this.showDialogue({ speaker: def.name, says: opening.says, options: opening.options })
+    })()
+  }
+
+  /**
+   * Put a REAL codex on screen from the URL: `?codex=some`, or `?codex=none`
+   * for the state a player is in before they have done anything.
+   *
+   * Same family as the dialogue probe. It records a handful of genuine
+   * discoveries and hands the result through `codexView`, so the panel is
+   * measured against real prose, real merge lineage and the real grouping
+   * rather than against rows I invented to fill it.
+   *
+   * `merge.ts` is imported for its side effect and NOT for a symbol. `CATALOG`
+   * is only fully populated as a side effect of loading that module, which runs
+   * `buildAll()`; a module that imports `./catalog` alone sees the base items
+   * and none of the merge results, with no error and no crash. The panel above
+   * this one already pulls real symbols from `merge.ts`, so this is belt and
+   * braces, but the failure is silent and expensive enough to be explicit about.
+   */
+  private mountCodexProbe(): void {
+    const want = new URLSearchParams(location.search).get('codex')
+    if (!want) return
+
+    void (async () => {
+      const [{ codexView, emptyCodex, record }] = await Promise.all([
+        import('../items/codex'),
+        import('../items/merge'),
+      ])
+
+      if (want === 'none') {
+        this.showCodex(codexView(emptyCodex()))
+        return
+      }
+
+      let found = emptyCodex()
+      for (const d of [
+        { kind: 'reaction', id: 'wet_resists_fire' },
+        { kind: 'reaction', id: 'iron_on_stone_sparks' },
+        { kind: 'item', id: 'axe' },
+        { kind: 'item', id: 'glasses' },
+        { kind: 'merge', a: 'axe', b: 'rope' },
+        { kind: 'merge', a: 'oil', b: 'torch' },
+        { kind: 'interaction', item: 'key', target: 'mill_door' },
+      ] as const) {
+        found = record(found, d)
+      }
+      this.showCodex(codexView(found))
     })()
   }
 
