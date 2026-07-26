@@ -23,6 +23,11 @@ const browser = await chromium.launch({
 })
 
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } })
+// Playwright's default action timeout is 30s, which a 1600x900 screenshot can
+// exceed on a machine running several agents. A timeout here is contention, and
+// it looks exactly like a broken deploy, which is the worst thing for it to look
+// like: this tool is the one that decides whether production is healthy.
+page.setDefaultTimeout(180_000)
 
 const errors = []
 page.on('pageerror', (e) => errors.push(`pageerror: ${e}`))
