@@ -15,8 +15,39 @@
  */
 
 import { chromium } from 'playwright'
+import { spawn } from 'node:child_process'
+import { resolve } from 'node:path'
 
-const URL = process.argv[2] ?? 'http://localhost:5199/'
+/**
+ * Starts its own server unless told otherwise.
+ *
+ * This used to default to a hardcoded `http://localhost:5199/` and start
+ * nothing, which quietly makes the check meaningless: a leftover dev server on
+ * that port from some earlier session answers, and every assertion is then
+ * about whatever code that process happens to be serving. It cost an hour of
+ * chasing a debug hook that "did not exist" while sitting in the file.
+ *
+ * A verification tool that can silently test something other than the working
+ * tree is worse than no verification tool.
+ */
+let server = null
+let URL = process.argv[2]
+if (!URL) {
+  server = spawn('npx', ['vite', '--port', '0'], {
+    cwd: resolve(import.meta.dirname, '..'),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  URL = await new Promise((res, rej) => {
+    const timer = setTimeout(() => rej(new Error('vite did not start')), 30_000)
+    server.stdout.on('data', (c) => {
+      const m = /(http:\/\/localhost:\d+)/.exec(c.toString())
+      if (m) {
+        clearTimeout(timer)
+        res(m[1] + '/')
+      }
+    })
+  })
+}
 
 const browser = await chromium.launch({
   args: ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'],
@@ -37,6 +68,31 @@ const check = (name, ok, detail) => {
  * position directly does not work: the camera is glued to the player, so that
  * delta is always near zero regardless of which way the controls go.
  */
+/**
+ * Hold a key until the SIMULATION has advanced by `ticks`, not until a wall
+ * clock has.
+ *
+ * `Clock` caps at five fixed ticks per rendered frame so a stalled tab cannot
+ * spiral, which means a slow headless renderer advances the world at a fraction
+ * of real time. Asserting "2.6 seconds of walking covers 4 metres" therefore
+ * measures the machine: the same build covered 8.2m, then 4.5m, then 3.1m on
+ * one laptop as it got busier, and three checks went red with nothing wrong.
+ * Ticks are the game's own clock, so distance per tick is a fact about the game.
+ */
+async function walk(keys, ticks, cap = 40_000) {
+  const start = await page.evaluate(() => window.__sinter.ticks())
+  for (const k of keys) await page.keyboard.down(k)
+  const deadline = Date.now() + cap
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(80)
+    const now = await page.evaluate(() => window.__sinter.ticks())
+    if (now - start >= ticks) break
+  }
+  for (const k of keys) await page.keyboard.up(k)
+  await page.waitForTimeout(150)
+  return (await page.evaluate(() => window.__sinter.ticks())) - start
+}
+
 async function press(key, ms = 500) {
   const before = await page.evaluate(() => window.__sinter.pos())
   await page.keyboard.down(key)
@@ -101,12 +157,16 @@ try {
     // Nothing to do; movement is driven by keys only. Placeholder for clarity.
   })
   const beforeWall = await page.evaluate(() => window.__sinter.pos())
-  await page.keyboard.down('w')
-  await page.waitForTimeout(2600)
-  await page.keyboard.up('w')
+  const walked = await walk(['w'], 150)
   const atWall = await page.evaluate(() => window.__sinter.pos())
   const advanced = beforeWall.z - atWall.z
-  check('player can travel a long way unobstructed', advanced > 4, `${advanced.toFixed(1)} units north`)
+  // 150 ticks is 2.5 simulated seconds at 6.5 m/s, so 16 metres of intent. Four
+  // is a low bar deliberately: this is a check for being wedged, not a speed run.
+  check(
+    'player can travel a long way unobstructed',
+    advanced > 4,
+    `${advanced.toFixed(1)} units north in ${walked} ticks`,
+  )
 
   const escape = await press('s', 600)
   check('player can always back out again', escape.dy < -0.02, `dy ${escape.dy.toFixed(3)}`)
@@ -123,12 +183,13 @@ try {
   // W alone runs diagonally north-west in world space, because "up the screen"
   // on an isometric camera is not "north". W+D together is straight north,
   // which is where the palisade is.
-  await page.keyboard.down('w')
-  await page.keyboard.down('d')
-  await page.waitForTimeout(5200)
-  await page.keyboard.up('w')
-  await page.keyboard.up('d')
-  await page.waitForTimeout(400)
+  // North to the wall, then east along it. W+D together is due north in world
+  // terms under this camera, so the first leg arrives at the GATE, which is a
+  // different obstacle with an item lying in front of it. The second leg slides
+  // along the palisade to a post, which is what this section is about.
+  await walk(['w', 'd'], 320)
+  await walk(['d'], 45)
+  await page.waitForTimeout(250)
 
   const promptText = async () => page.evaluate(() => document.getElementById('prompt')?.textContent ?? '')
 
@@ -165,6 +226,7 @@ try {
   )
 } finally {
   await browser.close()
+  server?.kill()
 }
 
 console.log(`\n${failures.length === 0 ? 'all movement checks passed' : `${failures.length} FAILED: ${failures.join(', ')}`}`)

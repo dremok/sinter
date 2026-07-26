@@ -372,7 +372,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     h += bump(x, z, -15.0, -0.5, 4.2, 0.9)
     h += smoothstep(-5, -22, z) * 3.0
 
-    const yard = 1 - smoothstep(6.4, 11.0, Math.hypot((x - HOME.x) * 0.82, z - HOME.z))
+    // Reaches far enough to hold the widened holding and no further. Pushed out
+    // to 13.4 once, which reached the brook twelve metres away and lifted its
+    // south bank, which lifted the crossing that is derived from the bank,
+    // which put the deck out of stepping range from the water. Terrain is
+    // shared: a radius here is not a local decision.
+    const yard = 1 - smoothstep(7.6, 11.9, Math.hypot((x - HOME.x) * 0.82, z - HOME.z))
     h = h * (1 - yard) + 0.42 * yard
 
     // The brook, cut before the pond so that where the two meet the pond wins
@@ -1050,13 +1055,21 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
      * level banks generates nothing at all.
      */
     const RISER = STEP_HEIGHT * 0.8
+    /** Highest ground anywhere under a tread of this width, not just its middle. */
+    const under = (sx: number, sz: number): number => {
+      let h = -Infinity
+      for (const across of [-WIDE / 2, 0, WIDE / 2]) {
+        h = Math.max(h, heightAt(sx + Math.cos(turn) * across, sz - Math.sin(turn) * across))
+      }
+      return h
+    }
     for (const a of abut) {
       let top = deck + 0.06
       for (let i = 0; i < 4; i++) {
         const out = SPAN / 2 + 0.28 + i * 0.62
         const sx = FORD.x + Math.sin(turn) * a.side * out
         const sz = FORD.z + Math.cos(turn) * a.side * out
-        const ground = heightAt(sx, sz)
+        const ground = under(sx, sz)
         if (top - ground <= RISER) break
 
         top = Math.max(top - RISER, ground + 0.12)
@@ -1155,9 +1168,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // Deliberately smaller than the fenced plot. Bare ground everywhere inside
   // the fence reads as a building site; grass surviving between the worn parts
   // is what makes the worn parts read as feet.
-  layPatch(0.3, 13.1, 3.9, M.yard, trackRng, 0.34, 30, 0.06)
-  layPatch(-4.7, 15.2, 3.0, M.yard, trackRng, 0.36, 20, 0.06)
-  layPatch(6.1, 15.2, 2.3, M.yard, trackRng, 0.36, 18, 0.06)
+  layPatch(0.3, 13.1, 4.3, M.yard, trackRng, 0.34, 30, 0.06)
+  layPatch(-6.6, 16.0, 3.0, M.yard, trackRng, 0.36, 20, 0.06)
+  layPatch(8.2, 16.0, 2.3, M.yard, trackRng, 0.36, 18, 0.06)
   layPatch(HOME.x + 0.1, HOME.z - 0.3, 1.75, M.ash, trackRng, 0.24, 20, 0.07)
 
   // ----------------------------------------------------------------- trees
@@ -1340,7 +1353,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     const x = treeRng.range(BOUNDS.minX + 0.5, BOUNDS.maxX - 0.5)
     const z = treeRng.range(BOUNDS.minZ + 0.5, BOUNDS.maxZ - 0.5)
     if (distToPath(x, z, BROOK) < 2.6) continue
-    if (Math.hypot(x - HOME.x, z - HOME.z) < 11) continue
+    if (Math.hypot(x - HOME.x, z - HOME.z) < 13.5) continue
     if (Math.hypot(x - POND.x, z - POND.z) < pondRadius(Math.atan2(z - POND.z, x - POND.x)) + 0.6) continue
     if (Math.abs(z - PAL_Z) < 2.5) continue
     if (nearTrack(x, z, 4.5)) continue
@@ -1423,7 +1436,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       const x = cx + grassRng.range(-2.4, 2.4)
       const z = cz + grassRng.range(-2.4, 2.4)
       if (Math.hypot(x - POND.x, z - POND.z) < pondRadius(Math.atan2(z - POND.z, x - POND.x)) + 0.8) continue
-      if (Math.hypot(x - HOME.x, z - HOME.z) < 6.5) continue
+      if (Math.hypot(x - HOME.x, z - HOME.z) < 8.5) continue
       if (nearTrack(x, z, 1.3)) continue
 
       const h = heightAt(x, z)
@@ -2227,17 +2240,32 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     })
   }
 
-  longhouse(-4.9, 15.5, 1.83, 5.0, 3.2)
-  shed(6.2, 15.5, -0.34, 3.2, 2.4)
+  /**
+   * Pushed apart, and the whole holding with them.
+   *
+   * Max: "the home base is too crammed with stuff, makes it hard to move, and
+   * in general there is too much stuff going on in a small area, the game
+   * should feel more open". The props were right and the spacing was not: the
+   * house, the shed, the store, the coop and the woodpile all sat inside about
+   * eleven metres, so the east side of the yard was one continuous six-metre
+   * wall of building with no grass showing between any of it.
+   *
+   * Everything below moves OUTWARD from the hearth rather than being deleted.
+   * A holding is supposed to have this much in it; it is supposed to have room
+   * between the parts as well, and room is what says somebody lives here
+   * rather than that somebody is storing scenery here.
+   */
+  longhouse(-7.0, 16.4, 1.83, 5.0, 3.2)
+  shed(8.4, 16.4, -0.34, 3.2, 2.4)
 
   // The three lines a person actually walks at home: door to fire, fire to
   // shed, fire to well. These are laid last so they sit on top of the yard, and
   // they are the reason the ground under the buildings is not unbroken lawn.
   layTrack(
     [
-      [-2.64, 16.14],
-      [-1.7, 15.1],
-      [-0.6, 14.1],
+      [-4.5, 17.2],
+      [-2.7, 15.7],
+      [-1.0, 14.3],
       [0.2, 13.7],
     ],
     0.52,
@@ -2248,9 +2276,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   layTrack(
     [
       [0.9, 13.4],
-      [3.0, 14.0],
-      [5.0, 14.8],
-      [6.0, 15.2],
+      [3.4, 14.3],
+      [6.0, 15.5],
+      [8.1, 16.1],
     ],
     0.46,
     M.track,
@@ -2259,9 +2287,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   )
   layTrack(
     [
-      [0.5, 12.7],
-      [1.8, 12.0],
-      [2.8, 11.5],
+      [0.6, 12.6],
+      [2.4, 11.6],
+      [4.1, 10.6],
     ],
     0.42,
     M.track,
@@ -2389,7 +2417,7 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** The well: free WATER, so water is a tool rather than a lucky find. */
   {
-    const wx = 3.0
+    const wx = 4.4
     const wz = 11.3
     const h = heightAt(wx, wz)
     const g = new THREE.Group()
@@ -2440,8 +2468,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * 0.9m circle sat 1.9m outside anything the player could see.
    */
   {
-    const bx = 6.2
-    const bz = 15.2
+    const bx = 8.4
+    const bz = 16.1
     const base = heightAt(bx, bz)
     const pile = new THREE.Group()
     for (let row = 0; row < 4; row++) {
@@ -2478,8 +2506,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** The yard fence. Low, leaning, and missing a rail in two places. */
   {
-    const rx = 8.4
-    const rz = 4.7
+    const rx = 10.6
+    const rz = 6.4
     // Gaps are in the parametric angle of the ellipse, and each one has to line
     // up with a track or the track walks through the fence.
     const gaps = [
@@ -2560,8 +2588,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Kitchen garden. Tilled rows, cabbages, and beans up sticks. */
   {
-    const gx = -2.4
-    const gz = 10.2
+    const gx = -4.2
+    const gz = 9.2
     layPatch(gx, gz, 1.9, M.tilled, homeRng, 0.12, 14, 0.075)
 
     const cabbageGeo = new THREE.SphereGeometry(0.2, 6, 5)
@@ -2603,8 +2631,10 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Washing line. Two forked poles, a sag, and three things drying. */
   {
-    const a = new THREE.Vector3(-8.6, 0, 11.4)
-    const b = new THREE.Vector3(-7.9, 0, 14.5)
+    // South of the house, not into it. The house moved west and the line did
+    // not, which put the far pole inside the gable wall.
+    const a = new THREE.Vector3(-9.4, 0, 10.4)
+    const b = new THREE.Vector3(-8.9, 0, 13.2)
     a.y = heightAt(a.x, a.z)
     b.y = heightAt(b.x, b.z)
 
@@ -2652,8 +2682,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Drying rack: an A-frame with strips hanging off it. */
   {
-    const rx = -0.9
-    const rz = 17.3
+    const rx = -2.6
+    const rz = 19.2
     const h = heightAt(rx, rz)
     const g = new THREE.Group()
     for (const sx of [-1, 1]) {
@@ -2686,8 +2716,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Chicken coop, a run, and three birds. Living things sell habitation. */
   {
-    const cx = 2.6
-    const cz = 16.4
+    const cx = 4.6
+    const cz = 18.6
     const h = heightAt(cx, cz)
     const g = new THREE.Group()
 
@@ -2859,8 +2889,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** Chopping block, split logs and a woodshed roof, east of the yard. */
   {
-    const bx = 10.4
-    const bz = 10.9
+    const bx = 12.6
+    const bz = 10.3
     const h = heightAt(bx, bz)
     layPatch(bx, bz, 1.5, M.yard, homeRng, 0.3, 16, 0.062)
 
@@ -2887,8 +2917,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
    * looks at the way out, which is the only comment this region makes on it.
    */
   {
-    const bx = 3.0
-    const bz = 8.4
+    const bx = 3.2
+    const bz = 7.3
     const g = new THREE.Group()
     for (const sx of [-1, 1]) {
       const leg = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.42, 0.34), M.log)
@@ -2909,8 +2939,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** A second bed outside the fence, where the things that need sun go. */
   {
-    const bx = -3.6
-    const bz = 8.2
+    const bx = -6.0
+    const bz = 7.5
     layPatch(bx, bz, 1.3, M.tilled, homeRng, 0.14, 12, 0.075)
     const podGeo = new THREE.ConeGeometry(0.13, 0.5, 5)
     const podMat = toonUnique({ color: 0x7e9d61, map: tiled(tex.foliage, 0.7, 0.7) })
@@ -2928,8 +2958,8 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
 
   /** A lean-to store by the chopping block, with a shelf nobody keeps tidy. */
   {
-    const sx = 11.5
-    const sz = 13.4
+    const sx = 13.8
+    const sz = 13.6
     const h = heightAt(sx, sz)
     const g = new THREE.Group()
     for (const dx of [-1, 1]) {

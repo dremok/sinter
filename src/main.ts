@@ -1213,6 +1213,7 @@ declare global {
       standables: () => (Footprint & { top: number })[]
       occluders: () => { x: number; z: number; radius: number; opacity: number }[]
       heightAt: (x: number, z: number) => number
+      ticks: () => number
       probe: (x: number, z: number) => ProbeReport
     }
   }
@@ -1342,6 +1343,16 @@ window.__sinter = {
   standables: () => region.standables.map((s) => ({ ...s })),
   occluders: region.occluderStates,
   heightAt: region.heightAt,
+  /**
+   * Fixed ticks simulated so far.
+   *
+   * The movement checks used to hold a key for a wall-clock duration and assert
+   * a distance, which measures the MACHINE: the clock caps at five ticks per
+   * frame to avoid a spiral of death, so a headless renderer at 6fps advances
+   * the simulation at half speed and the player covers half the ground. Three
+   * checks failed that way on a busy laptop with nothing wrong with the game.
+   */
+  ticks: () => clock.tick,
   probe,
 }
 
