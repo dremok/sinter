@@ -49,8 +49,18 @@ import type { Band } from './palette'
  * Ticks in one full day. At the fixed 60Hz tick this is ten minutes of play,
  * which is long enough that noon and dusk feel like different places to be and
  * short enough that a player who needs darkness does not have to wait for it.
+ *
+ * Ten minutes is 600 SECONDS, which at 60Hz is 36000 ticks. This was 600, so a
+ * full day and night passed every ten seconds: the entire sky, the key colour
+ * and every shadow in the frame swept through dawn to midnight and back while
+ * the player stood still. `verify:still` measured it as 5.2% of the frame
+ * moving every frame against a normal 0.3%, and spread across every cell rather
+ * than concentrated at the fire, which is the signature of the light itself
+ * moving rather than of something in the world animating.
+ *
+ * The comment above was right and the number was wrong by a factor of sixty.
  */
-export const DAY_TICKS = 600
+export const DAY_TICKS = 36_000
 
 /**
  * Where tick 0 sits in the day. Mid-morning, so a new run opens in good light:
@@ -200,8 +210,16 @@ export function skyAt(tick: number, band: Band, out?: Sky): Sky {
     ? Math.min(t - SUNRISE, SUNSET - t)
     : -Math.min(t < SUNRISE ? SUNRISE - t : t - SUNSET, 1 - SUNSET + SUNRISE)
 
-  /** 0 in full daylight, 1 in full night, half at the horizon. */
-  const night = 1 - smooth(span(depth, -TWILIGHT, TWILIGHT))
+  /**
+   * 0 in full daylight, 1 in full night.
+   *
+   * Deliberately lopsided. Centred on the horizon it began fading to moonlight
+   * while the sun was still visibly up, which cross-faded the reddest few
+   * minutes of the day away before anyone could see them. Weighted like this
+   * the sun keeps its own colour right up to the horizon and the handover
+   * happens mostly after it has gone, which is also what actually happens.
+   */
+  const night = 1 - smooth(span(depth, -TWILIGHT * 1.6, TWILIGHT * 0.4))
 
   // The sun's own arc, floored so shadows never outgrow the map. Evaluated
   // even at night, where it simply sits at the floor, so that the blend below
@@ -222,10 +240,21 @@ export function skyAt(tick: number, band: Band, out?: Sky): Sky {
         span(t < SUNRISE ? t + 1 - SUNSET : t - SUNSET, 0, 1 - SUNSET + SUNRISE),
       )
 
-  // How low the sun is, 0 at noon and 1 on the horizon. Colour is driven by
-  // this rather than by the clock, because it is elevation that decides how
-  // much atmosphere the light has come through.
-  const low = 1 - span(sunElevation, 0, PEAK_ELEVATION)
+  /**
+   * How far through the descent the sun is: 0 at noon, 1 once it has settled on
+   * its floor. Colour is driven by this rather than by the clock, because it is
+   * elevation that decides how much atmosphere the light has come through.
+   *
+   * Normalised over MIN..PEAK rather than 0..PEAK, and that is a fix rather
+   * than a detail. Against 0..PEAK this could only ever reach
+   * `1 - MIN/PEAK = 0.774`, because the sun never goes below its floor. Every
+   * threshold above 0.774 was therefore unreachable: the entire sunset-red lerp
+   * starts at 0.82, so it was dead code and never once ran, and the key
+   * intensity bottomed out at 2.51 instead of the 1.4 it was written for.
+   * Dusk came out as flat blue-grey overcast, which is exactly what it looked
+   * like in the first shot of it.
+   */
+  const low = 1 - span(sunElevation, MIN_SUN_ELEVATION, PEAK_ELEVATION)
 
   sky.phase = night > 0.5 ? 'night' : low > 0.7 ? (t < 0.5 ? 'dawn' : 'dusk') : 'day'
 
