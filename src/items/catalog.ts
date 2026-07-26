@@ -449,6 +449,127 @@ add({
   parts: [{ part: 'key_body', scale: [1, 1, 1], at: [0, -0.22, 0], material: 'gold', signature: true }],
 })
 
+/* ---------------------------------------------------------------------------
+ * Band 1, the Turn. Modernity arrives and nobody remarks on it.
+ *
+ * The rest of A8, added 2026-07-26. Every one of these is written against a
+ * property some system reads TODAY, because an object whose whole point is a
+ * mechanic that does not exist is dead content, and dead content in a table is
+ * invisible: it typechecks, it reads fine, and it never does anything.
+ *
+ * So the gun frightens rather than fires, and the crossbow frightens rather
+ * than shoots. FRIGHTENING is read by the gate guard's threat gate, by the yard
+ * dog and by the stray ox. Pointing a gun at somebody is most of what a gun is
+ * for, and it works on the day it is added. Firing one needs a projectile
+ * system, and when that lands these gain LAUNCHER and stop being half a thing.
+ *
+ * A8 asked for LAUNCHER, PROJECTILE, ELASTIC, RUBBER, PAPER, SLIPPERY, LOUD and
+ * WRITTEN. None are added here, per the standing rule that a property arrives
+ * when a system is about to read it and not before. Each one would be a
+ * vocabulary word nothing can hear.
+ *
+ * None of these are reachable yet: the region places Band 0 only and no recipe
+ * names them. They are the catalog for a region that does not exist. That is
+ * the honest position, and it is why they are Band 1 rather than quietly
+ * dropped into the clearing, which already lost a playtest for having too much
+ * lying about in it.
+ * ------------------------------------------------------------------------- */
+
+add({
+  id: 'gun',
+  name: 'Revolver',
+  band: 1,
+  desc: 'Oiled, loaded, and far too new. Nobody here has seen one before.',
+  // The loudest object in the game once LOUD exists. Today it is the most
+  // frightening, which is the half that already works.
+  props: { METAL: 0.9, RIGID: 0.8, FRIGHTENING: 0.95, VALUABLE: 0.6, HEAVY: 0.4 },
+  parts: [
+    { part: 'bar_stock', scale: [0.5, 0.32, 1.15], at: [0, 0.06, 0.1], material: 'steel', signature: true },
+    { part: 'grip_wrapped', scale: [0.62, 0.78, 0.62], at: [0, -0.16, -0.16], rot: [0.35, 0, 0], material: 'wood' },
+  ],
+})
+
+add({
+  id: 'crossbow',
+  name: 'Crossbow',
+  band: 1,
+  desc: 'Spanned and ready. The cord has been replaced more than once.',
+  props: { WOODEN: 0.5, METAL: 0.4, RIGID: 0.8, FRIGHTENING: 0.7, VALUABLE: 0.35 },
+  parts: [
+    { part: 'stock_crossbow', scale: [1, 1, 1], at: [0, -0.04, 0], material: 'wood', signature: true },
+    { part: 'prod_bow', scale: [1, 1, 1], at: [0, 0.06, 0.3], material: 'steel' },
+  ],
+})
+
+add({
+  id: 'slingshot',
+  name: 'Slingshot',
+  band: 1,
+  desc: 'A forked stick and a good long band. It puts a stone through a window.',
+  props: { WOODEN: 0.6, RIGID: 0.5, ROPE_LIKE: 0.3 },
+  parts: [{ part: 'fork_sling', scale: [1, 1, 1], at: [0, -0.06, 0], material: 'wood', signature: true }],
+})
+
+add({
+  id: 'rubber_band',
+  name: 'Rubber Band',
+  band: 1,
+  desc: 'Perished at one edge. It still pulls back further than it looks like it should.',
+  // ELASTIC when something reads it. Until then it ties things, which is real:
+  // ROPE_LIKE feeds the ladder rule and every binding merge in the book.
+  props: { ROPE_LIKE: 0.5, FLAMMABLE: 0.35 },
+  parts: [{ part: 'ring_band', scale: [0.8, 0.5, 0.8], at: [0, -0.05, 0], material: 'cloth', signature: true }],
+})
+
+add({
+  id: 'balloon',
+  name: 'Balloon',
+  band: 1,
+  desc: 'Red, filled, and tied off. It pulls upward the whole time you hold it.',
+  // BUOYANT has no reader yet and FRAGILE has three. It pops on anything sharp
+  // today, which is the correct half to have working first.
+  props: { BUOYANT: 1, FRAGILE: 0.85, CLOTH: 0.3 },
+  parts: [
+    { part: 'apple_body', scale: [1.15, 1.3, 1.15], at: [0, 0.14, 0], material: 'cloth', signature: true },
+    { part: 'rope_coil', scale: [0.3, 0.3, 0.3], at: [0, -0.22, 0], material: 'cloth' },
+  ],
+})
+
+add({
+  id: 'magazine',
+  name: 'Magazine',
+  band: 1,
+  desc: 'Glossy, curled at the corner, and about people nobody here has heard of.',
+  // Tinder, or reading, depending on how desperate you are. Only the first of
+  // those works today, and it works very well: FLAMMABLE is the best-read
+  // property in the game.
+  props: { FLAMMABLE: 0.95, PLANT: 0.3 },
+  parts: [{ part: 'book_closed', scale: [1, 0.55, 1], at: [0, -0.1, 0], material: 'cloth', signature: true }],
+})
+
+add({
+  id: 'banana',
+  name: 'Banana',
+  band: 1,
+  desc: 'Nothing like it grows within a thousand miles. It is not even bruised.',
+  props: { EDIBLE: 0.9, PLANT: 0.5 },
+  parts: [
+    { part: 'chili_pod', scale: [1.3, 0.9, 2.6], at: [0, -0.05, 0], rot: [0, 0, 0.25], material: 'straw', signature: true },
+  ],
+})
+
+add({
+  id: 'orange',
+  name: 'Orange',
+  band: 1,
+  desc: 'Cold to hold. The peel comes away in one piece if you are careful.',
+  props: { EDIBLE: 0.9, PLANT: 0.5 },
+  parts: [
+    { part: 'apple_body', scale: [1.05, 1.05, 1.05], at: [0, -0.08, 0], material: 'clay', signature: true },
+    { part: 'leaf_cluster', scale: [0.5, 0.5, 0.5], at: [0.05, 0.16, 0], material: 'leaf' },
+  ],
+})
+
 /**
  * Everything the region places, in the order it reads best on the ground.
  *

@@ -163,15 +163,30 @@ export function toonRamp(): THREE.DataTexture {
 
   // r, g, b per band. Values multiply the key light, so blue here means the
   // shadow side is lit by a blue version of the sun rather than by nothing.
+  //
+  // The LIGHT end is now nearly neutral, and that is a correction rather than a
+  // taste change. The key light is itself lerped 34% toward orange, so it
+  // arrives at roughly (1.00, 0.78, 0.52) before the ramp sees it; multiplying
+  // another 0.88 of blue on top was applying the same warmth twice. Measured on
+  // the frame, that is most of why `RAMP.stone`, a deliberately neutral grey at
+  // 6% saturation, was rendering as a 39%-saturation orange rock: nothing in
+  // the palette can turn grey orange, only the light can.
+  //
+  // So the division of labour is now explicit. The LIGHT supplies hue at the
+  // lit end. The RAMP supplies value steps, and supplies hue only where the
+  // light cannot reach: the terminator and the shadow, which are exactly the
+  // two bands the key light is leaving. That also lets the cool fill through on
+  // sunlit ground instead of having its blue scaled away, which is free
+  // warm/cool contrast on the largest surface in the game.
   const bands = [
     [0.26, 0.33, 0.52], // shadow: one flat cool band, no internal shape
     [0.26, 0.33, 0.52],
     [0.26, 0.33, 0.52],
     [0.27, 0.34, 0.53],
     [0.60, 0.46, 0.38], // terminator: one texel, a real step, still a colour
-    [0.84, 0.76, 0.62], // the step out of it
-    [1.00, 0.96, 0.88], // light
-    [1.00, 0.98, 0.90],
+    [0.85, 0.79, 0.70], // the step out of it, most of the way back to neutral
+    [1.00, 0.99, 0.97], // light: value only, the sun's own colour does the hue
+    [1.00, 1.00, 0.98],
   ]
 
   const data = new Uint8Array(bands.length * 4)
@@ -266,6 +281,10 @@ export type HeightSampler = (x: number, z: number) => number
  *  small enough that it never reads as hovering. */
 const CONTACT_LIFT = 0.025
 
+/** Scratch for the parent rotation `drape` cancels. One per module, never read
+ *  across a call. */
+const FLATTEN = new THREE.Quaternion()
+
 /**
  * A darkened patch to sit a thing on the ground.
  *
@@ -334,6 +353,32 @@ export class ContactShadow {
    * character or dropped into the scene at a fixed spot.
    */
   drape(cx: number, cz: number, baseY: number, sample: HeightSampler): void {
+    /**
+     * Square the sheet to the world before sampling anything.
+     *
+     * The loop below reads LOCAL vertex offsets and asks the terrain what it is
+     * doing at `centre + offset`, which is only the same question if the sheet's
+     * local axes are the world's. The player's blob is parented to the character
+     * group, and that group sets `rotation.y` to the heading, so they were not:
+     * the height field got laid onto the sheet rotated by the player's facing.
+     * Draped on a bank facing along +x it was right, and facing along +z it
+     * tilted ACROSS the slope instead of down it, so half the sheet sank into
+     * the bank and half stood proud of it, and the whole thing counter-rotated
+     * as the player turned. Measured on a 1:1 ramp under a 1.2m blob, the worst
+     * vertex was 0.63m out of the ground.
+     *
+     * That is the same defect this class was written to fix, arriving by a
+     * second route, and it reads the same way: a dark hole with the player
+     * standing in it.
+     *
+     * Cancelling the parent's rotation is free rather than a compromise,
+     * because the blob texture is radially symmetric — the sheet's yaw has never
+     * been visible. `getWorldQuaternion` refreshes the ancestor matrices itself,
+     * so this is correct however the caller has ordered its updates.
+     */
+    const parent = this.mesh.parent
+    if (parent) this.mesh.quaternion.copy(parent.getWorldQuaternion(FLATTEN)).invert()
+
     const pos = this.mesh.geometry.attributes.position as THREE.BufferAttribute
     for (let i = 0; i < pos.count; i++) {
       pos.setY(i, sample(cx + pos.getX(i), cz + pos.getZ(i)) - baseY + CONTACT_LIFT)
@@ -348,6 +393,26 @@ export class ContactShadow {
 }
 
 // ---------------------------------------------------------------- colour grade
+
+/**
+ * The renderer, scene and camera of the live frame, for `tools/perf.mjs`.
+ *
+ * Same idea as `window.__sinter` in `main.ts`: a measurement needs handles the
+ * game itself has no reason to expose. Populated by the first `Grade.render`
+ * and never written again.
+ */
+interface FrameHook {
+  renderer: THREE.WebGLRenderer
+  scene: THREE.Scene
+  camera: THREE.Camera
+  grade: Grade
+}
+
+let frameHook: FrameHook | null = null
+
+export function liveFrame(): FrameHook | null {
+  return frameHook
+}
 
 const GRADE_VERT = /* glsl */ `
 varying vec2 vUv;
@@ -409,22 +474,46 @@ void main() {
   // carries the warm/cool contrast through cast shadows, which the ramp cannot
   // reach: a shadow map zeroes the key light, so the ramp's blue band never
   // gets to apply there.
+  //
+  // The highlight end was (1.09, 1.00, 0.87), a 1.25 spread between red and
+  // blue, and it was the THIRD warm filter in a chain: the sun is lerped 34%
+  // toward orange, the ramp's light band was another 0.88 of blue, and then
+  // this. Each one is defensible alone and the product was not. Halving the
+  // spread here is the part of that chain the grade owns.
   float l = dot( c, LUMA );
-  c *= mix( vec3( 0.80, 0.92, 1.30 ), vec3( 1.09, 1.00, 0.87 ), smoothstep( 0.0, 0.68, l ) );
+  c *= mix( vec3( 0.80, 0.92, 1.30 ), vec3( 1.045, 1.00, 0.945 ), smoothstep( 0.0, 0.68, l ) );
 
   // Contrast about a mid pivot, then saturation, weighted by brightness.
   //
-  // Shadows lose saturation and highlights gain it, which is the other half of
-  // making shadow read as shadow: outdoors a shadow is lit by a broad grey-blue
-  // sky, so it goes flat as well as cool. Saturating everything equally is what
-  // leaves dark grass looking like dark grass instead of like grass in shade.
+  // Shadows lose saturation, which is the other half of making shadow read as
+  // shadow: outdoors a shadow is lit by a broad grey-blue sky, so it goes flat
+  // as well as cool. Desaturating everything equally is what leaves dark grass
+  // looking like dark grass instead of like grass in shade.
+  //
+  // Highlights no longer GAIN saturation, and that is the single largest change
+  // in this pass. The curve was mix(0.82, 1.22, ...), so the brighter a pixel
+  // was the more chroma it got. Luminance is not role, and palette.ts allocates
+  // chroma by role: "Ground, foliage, terrain: 30-40%... Items, fire, gold, the
+  // player: 50-80%". The ground is the brightest large surface in the frame, so
+  // a luma-keyed boost spent the chroma budget precisely on the backdrop that
+  // is supposed to be restful, and left nothing separating an item from it.
+  // Measured: RAMP.grass[4] is a 31%-saturation olive and open ground was
+  // rendering at 53%. The grade was doing that, not the palette.
+  //
+  // Keeping the shadow end at 0.82 and taking the highlight end just below 1.0
+  // means the grade now only ever removes chroma. Deciding where chroma goes is
+  // palette.ts's job, and it is the only file that knows what a thing IS.
+  //
+  // Contrast stays at 1.28 deliberately. The brief is too much chroma, not too
+  // much contrast, and palette.ts is explicit that value must keep doing the
+  // reading as saturation comes down.
     // Then lift the black point off zero. p1 had reached 1: the darkest percent
   // of the frame was pure black, where the baseline sat at 23. Shadow with no
   // information in it is a hole, not a shadow.
   c = ( c - 0.40 ) * 1.28 + 0.455;
   c = clamp( c * 0.93 + 0.065, 0.0, 1.0 );
   float g = dot( c, LUMA );
-  c = clamp( mix( vec3( g ), c, mix( 0.82, 1.22, smoothstep( 0.04, 0.58, l ) ) ), 0.0, 1.0 );
+  c = clamp( mix( vec3( g ), c, mix( 0.82, 0.96, smoothstep( 0.04, 0.58, l ) ) ), 0.0, 1.0 );
 
   // A cooler, flatter, darker band along the top edge.
   //
@@ -461,7 +550,9 @@ void main() {
  * lines of GLSL buys the entire difference between "a render" and "a frame".
  */
 export class Grade {
-  private readonly target: THREE.WebGLRenderTarget
+  /** Public only so `tools/perf.mjs` can clone it and time the scene render on
+   *  its own. Nothing in `src/` should touch it. */
+  readonly target: THREE.WebGLRenderTarget
   private readonly scene = new THREE.Scene()
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
   private readonly material: THREE.ShaderMaterial
@@ -497,6 +588,12 @@ export class Grade {
    * drawing buffer, so nothing has to remember to tell it about a window resize.
    */
   render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void {
+    // Debug hook for `tools/perf.mjs`, assigned once. Measuring what a pass
+    // costs needs the renderer, the scene and the camera together, and this is
+    // the only place all three meet outside `main.ts`. One truthiness check per
+    // frame, no allocation, and it cannot reach a pixel.
+    if (!frameHook) frameHook = { renderer, scene, camera, grade: this }
+
     renderer.getDrawingBufferSize(this.size)
     if (this.target.width !== this.size.x || this.target.height !== this.size.y) {
       this.target.setSize(this.size.x, this.size.y)

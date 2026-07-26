@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SINTER audio probe</title>
+    <style>
+      body { background: #14110e; color: #f0e6d3; font: 14px system-ui, sans-serif; padding: 40px; }
+      button { font: inherit; padding: 12px 20px; }
+      pre { color: #c9bda7; }
+    </style>
+  </head>
+  <body>
+    <!--
+      A page that is the audio layer and nothing else.
+
+      It exists because a browser will not start an AudioContext without a
+      gesture, so the only way to hear whether `src/audio` works is to open a
+      real browser, click something, play cues and read the samples back off the
+      master bus. `tools/bake-audio/runtime.ts` drives this with Playwright.
+
+      Deliberately NOT the game. Loading `main.ts` would drag in the region, the
+      renderer and the parts library, and a failure anywhere in that would look
+      like an audio failure. This imports two modules.
+
+      Nothing in `src/` references this file and `vite build` never sees it: the
+      build entry is `index.html` at the repo root.
+    -->
+    <button id="go">Start audio</button>
+    <pre id="out">waiting for a gesture</pre>
+
+    <script type="module">
+      import { audio } from '/src/audio/index.ts'
+      import { mixer } from '/src/audio/mixer.ts'
+      import { ALL_CUES } from '/src/audio/cues.ts'
+
+      audio.install()
+
+      /** Peak and mean square per channel, accumulated from the master tap. */
+      const meter = { left: 0, right: 0, leftSum: 0, rightSum: 0, frames: 0 }
+      let tap = null
+      let bufL = null
+      let bufR = null
+
+      function sample() {
+        if (!tap) return
+        tap.left.getFloatTimeDomainData(bufL)
+        tap.right.getFloatTimeDomainData(bufR)
+        for (let i = 0; i < bufL.length; i++) {
+          const l = Math.abs(bufL[i])
+          const r = Math.abs(bufR[i])
+          if (l > meter.left) meter.left = l
+          if (r > meter.right) meter.right = r
+          meter.leftSum += l * l
+          meter.rightSum += r * r
+        }
+        meter.frames += bufL.length
+        requestAnimationFrame(sample)
+      }
+
+      document.getElementById('go').addEventListener('click', () => {
+        // The click itself is what starts the context, via mixer.install().
+        setTimeout(() => {
+          tap = mixer.tap()
+          if (tap) {
+            bufL = new Float32Array(tap.left.fftSize)
+            bufR = new Float32Array(tap.right.fftSize)
+            requestAnimationFrame(sample)
+          }
+          document.getElementById('out').textContent = `ready: ${mixer.ready}, sampleRate: ${mixer.context?.sampleRate}`
+        }, 0)
+      })
+
+      window.__audio = {
+        ready: () => mixer.ready,
+        muted: () => mixer.muted,
+        setMuted: (v) => mixer.setMuted(v),
+        cues: () => ALL_CUES,
+        status: () => audio.status(),
+        listen: (x, z, rx, rz) => audio.listen(x, z, rx, rz),
+        play: (id, at) => audio.play(id, at),
+        bed: (id, on) => audio.bed(id, on),
+        field: (id, entries) => audio.field(id, entries),
+        places: (list) => audio.places(list),
+        travel: (x, z, wood) => audio.travel(x, z, wood),
+        reset: () => {
+          meter.left = 0
+          meter.right = 0
+          meter.leftSum = 0
+          meter.rightSum = 0
+          meter.frames = 0
+        },
+        read: () => ({
+          peakL: meter.left,
+          peakR: meter.right,
+          rmsL: meter.frames ? Math.sqrt(meter.leftSum / meter.frames) : 0,
+          rmsR: meter.frames ? Math.sqrt(meter.rightSum / meter.frames) : 0,
+          frames: meter.frames,
+        }),
+      }
+    </script>
+  </body>
+</html>

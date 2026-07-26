@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { CATALOG, STARTING_ITEMS, itemsInBand, useOf, useSummary } from './catalog'
 import { RECIPES, canMerge, merge, mergeId, refusal, tryMerge } from './merge'
 import {
@@ -225,9 +226,26 @@ describe('derivation rules produce sensible physics', () => {
     expect(p(merge('horseshoe', 'rock').props, 'TOOL_STRIKING')).toBeGreaterThan(0.5)
   })
 
-  it('water thins poison the same way it kills heat', () => {
+  it('water rinses poison off a thing, and does not destroy it in a vessel', () => {
+    // Both halves, because they used to be one rule and the merged case was
+    // wrong. A pail of poison is poison; a poisoned thing that gets hosed down
+    // is mostly clean. The gate is CONTAINER, so it holds for any vessel and
+    // any toxin, including ones nobody has invented.
     const neat = p(CATALOG.poison!.props, 'TOXIC')
-    expect(p(merge('bucket', 'poison').props, 'TOXIC')).toBeLessThan(neat * 0.6)
+    expect(p(merge('bucket', 'poison').props, 'TOXIC'), 'a pail of poison is poison').toBeGreaterThan(0.5)
+
+    const doused = applyReactions({ TOXIC: neat, WATER: 1, WET: 1 })
+    expect(p(doused, 'TOXIC'), 'hosing something down should still rinse it').toBeLessThan(neat * 0.6)
+  })
+
+  it('makes a bucket of poison good for the thing a bucket of poison is for', () => {
+    // The granary rats want TOXIC 0.5 and the item is thrown as a
+    // `tainted_splash` that applies 0.9. It was 0.27, so it agreed with
+    // neither, and the one obvious use for it silently did not work.
+    const pail = merge('bucket', 'poison')
+    expect(p(pail.props, 'TOXIC')).toBeGreaterThanOrEqual(
+      routesPast('granary_rats').find((r) => r.prop === 'TOXIC')!.min,
+    )
   })
 
   it('poison carries onto an edge without being watered down', () => {
@@ -252,6 +270,98 @@ describe('derivation rules produce sensible physics', () => {
     const forward = merge('flint', 'horseshoe').props
     const backward = merge('horseshoe', 'flint').props
     expect(forward).toEqual(backward)
+  })
+})
+
+describe('merging is a trade, not an accumulation', () => {
+  /**
+   * Max's verdict on the loop was that merging felt like admin, and the cause
+   * was measurable rather than a matter of taste. Every capability combined by
+   * `max`, so a result was the union of everything its lineage could ever do,
+   * at full strength. Base items averaged 1.4 capabilities, first merges 4.0,
+   * second 7.9, third 9.0. Half of all results gained nothing their parents did
+   * not already have, and 22 of 64 were functionally indistinguishable from
+   * another result. Everything drifted toward the same swiss army knife.
+   *
+   * These are the assertions that stop it coming back. They measure what a
+   * player can DO with a thing, at the thresholds the systems actually read,
+   * because two items with different numbers and identical capabilities are the
+   * same item as far as play is concerned.
+   */
+  const CAPS: PropertyId[] = [
+    'TOOL_CUTTING', 'TOOL_STRIKING', 'HOT', 'WATER', 'FLAMMABLE', 'ROPE_LIKE',
+    'LADDER_LIKE', 'PLATFORM', 'EDIBLE', 'TOXIC', 'VALUABLE', 'FRIGHTENING',
+    'CONTAINER', 'LUMINOUS', 'SHARP', 'BUOYANT', 'EXPLOSIVE', 'SEED', 'SACRED',
+  ]
+
+  /** What you could actually do with it, rather than what it scores. */
+  const caps = (id: string): string[] =>
+    CAPS.filter((k) => p(CATALOG[id]!.props, k) >= 0.35).sort()
+
+  it('never lets an improvised tool beat the purpose-built one', () => {
+    // Every emergent multiplier used to be above 1, so flint lashed to a
+    // horseshoe cut better than the axe and the axe was pointless. Emergence
+    // should get you a tool you did not have, not a better one than exists.
+    const striker = merge('flint', 'horseshoe')
+    expect(p(striker.props, 'TOOL_CUTTING')).toBeLessThan(p(CATALOG.axe!.props, 'TOOL_CUTTING'))
+    expect(p(striker.props, 'TOOL_CUTTING')).toBeGreaterThan(0)
+  })
+
+  it('does not make small rigid things into bridges', () => {
+    // PLATFORM needed only RIGID and any metal, so a brass key and a fire
+    // striker both counted as things you could stand on.
+    expect(p(merge('flint', 'horseshoe').props, 'PLATFORM')).toBeLessThan(0.35)
+    expect(p(CATALOG.plank!.props, 'PLATFORM'), 'a plank is still a plank').toBeGreaterThan(0.35)
+  })
+
+  it('fades what a merge merely inherited, so the loss is real', () => {
+    // Rule 3 only means something if a result is not strictly better than both
+    // parents. Rope is ROPE_LIKE; tie a rock to it and you have a thing for
+    // throwing, not a better rope.
+    const bolas = merge('rock', 'rope')
+    expect(p(bolas.props, 'ROPE_LIKE')).toBeLessThan(p(CATALOG.rope!.props, 'ROPE_LIKE'))
+  })
+
+  it('keeps what the combination invented, at full strength', () => {
+    // The other half of the same rule, and the one that broke first: an early
+    // version ranked capabilities by size and faded the striker's heat below
+    // the ignition threshold, which is the one thing it exists to do.
+    const striker = merge('flint', 'horseshoe')
+    expect(p(CATALOG.flint!.props, 'HOT')).toBe(0)
+    expect(p(CATALOG.horseshoe!.props, 'HOT')).toBe(0)
+    expect(p(striker.props, 'HOT'), 'the invention survives the trade').toBeGreaterThan(0.35)
+  })
+
+  it('does not let capabilities pile up with depth', () => {
+    // Ceiling, not a target. Was 11 before the trade rule, and a result that
+    // does nine things is already suspicious.
+    for (const r of RECIPES) {
+      expect(caps(r.id).length, `${r.id} does ${caps(r.id).length} things`).toBeLessThanOrEqual(9)
+    }
+  })
+
+  it('keeps most results doing something no other result does', () => {
+    // Not all, and deliberately not asserted as all: four buckets of different
+    // liquids legitimately share a profile. What matters is that the book does
+    // not collapse toward one item. Was 42 distinct of 64.
+    const profiles = new Set(RECIPES.map((r) => caps(r.id).join(',')))
+    expect(profiles.size, 'the recipe book is collapsing toward one item').toBeGreaterThanOrEqual(50)
+  })
+
+  it('leaves most results different from either thing that made them', () => {
+    // A result whose capabilities equal a parent's is inventory consolidation:
+    // one item instead of two, doing the same job. `pitch_torch` is oil,
+    // `bolas` is rope, `straw_doll` is rope.
+    //
+    // This is a RATCHET, not a target. 16 is where the recipe book stands and
+    // the number exists to stop it growing; the fix for each one is content,
+    // not physics, because the only lever a recipe has is which two things it
+    // names. Lower this as they are reworked. Do not raise it.
+    const filler = RECIPES.filter((r) => {
+      const mine = caps(r.id).join(',')
+      return mine === caps(r.inputs[0]).join(',') || mine === caps(r.inputs[1]).join(',')
+    })
+    expect(filler.length, `filler: ${filler.map((r) => r.id).join(", ")}`).toBeLessThanOrEqual(0)
   })
 })
 
@@ -330,9 +440,22 @@ describe('catalog integrity', () => {
   })
 
   it('names nothing the parts library does not have', () => {
-    // Guards the constraint that the Blender library is owned elsewhere: a
-    // recipe naming a part that does not exist throws at load in the real game.
-    const known = new Set(STARTING_ITEMS.flatMap((id) => CATALOG[id]!.parts.map((s) => s.part)))
+    // Guards the constraint that the Blender library is owned elsewhere: an
+    // item naming a part that does not exist throws at load in the real game.
+    //
+    // Checked against the build script, which is the actual source of truth for
+    // what geometry exists. This used to compare against the parts the Band 0
+    // items happened to use, which was the same set right up until the moment
+    // it was not: `PartKind` has carried `stock_crossbow`, `prod_bow`,
+    // `fork_sling` and `book_closed` since before anything used them, marked in
+    // the union as built and waiting, and the first Band 1 item to pick one up
+    // failed a test for naming a part that was sitting in the library.
+    // Every part is named as a quoted string where it is emitted, but through
+    // several helpers (`emit`, `haft`, and others), so the names are collected
+    // rather than the call sites matched.
+    const script = readFileSync(new URL('../../tools/blender/build_parts.py', import.meta.url), 'utf8')
+    const known = new Set([...script.matchAll(/"([a-z][a-z_]{3,})"/g)].map((m) => m[1]!))
+    expect(known.size, 'could not read the part library out of the build script').toBeGreaterThan(30)
     for (const id of Object.keys(CATALOG)) {
       for (const spec of CATALOG[id]!.parts) {
         expect(known.has(spec.part), `${id} uses ${spec.part}`).toBe(true)

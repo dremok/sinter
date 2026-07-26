@@ -1,0 +1,88 @@
+{
+  "pipeline": 1,
+  "model": "eleven_text_to_sound_v2",
+  "format": "mp3_44100_64",
+  "entries": {
+    "ambience": {
+      "id": "ambience",
+      "key": "2b938118e22bb602",
+      "bytes": 176631,
+      "seconds": 22,
+      "loop": true,
+      "characterCost": 220,
+      "bakedAt": "2026-07-26"
+    },
+    "fire": {
+      "id": "fire",
+      "key": "b5952d1b9eb0a87f",
+      "bytes": 72559,
+      "seconds": 9,
+      "loop": true,
+      "characterCost": 90,
+      "bakedAt": "2026-07-26"
+    },
+    "water": {
+      "id": "water",
+      "key": "35f7c92fbc4f38e5",
+      "bytes": 72559,
+      "seconds": 9,
+      "loop": true,
+      "characterCost": 90,
+      "bakedAt": "2026-07-26"
+    },
+    "step-grass": {
+      "id": "step-grass",
+      "key": "efc7b9027e56113f",
+      "bytes": 6104,
+      "seconds": 0.7,
+      "loop": false,
+      "characterCost": 7,
+      "bakedAt": "2026-07-26"
+    },
+    "step-wood": {
+      "id": "step-wood",
+      "key": "4c89a22144c80e7b",
+      "bytes": 6104,
+      "seconds": 0.7,
+      "loop": false,
+      "characterCost": 7,
+      "bakedAt": "2026-07-26"
+    },
+    "chop": {
+      "id": "chop",
+      "key": "df4c4b6de28819b2",
+      "bytes": 10701,
+      "seconds": 1.3,
+      "loop": false,
+      "characterCost": 13,
+      "bakedAt": "2026-07-26"
+    },
+    "take": {
+      "id": "take",
+      "key": "b702f8f35a31f78e",
+      "bytes": 5268,
+      "seconds": 0.6,
+      "loop": false,
+      "characterCost": 6,
+      "bakedAt": "2026-07-26"
+    },
+    "drop": {
+      "id": "drop",
+      "key": "2f68c277f9055785",
+      "bytes": 6940,
+      "seconds": 0.8,
+      "loop": false,
+      "characterCost": 8,
+      "bakedAt": "2026-07-26"
+    },
+    "merge": {
+      "id": "merge",
+      "key": "a7bc338f38e0996b",
+      "bytes": 19688,
+      "seconds": 2.4,
+      "loop": false,
+      "characterCost": 24,
+      "bakedAt": "2026-07-26"
+    }
+  }
+}

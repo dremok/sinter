@@ -41,17 +41,58 @@ import { textures, tiled } from '../render/textures'
 import { createSmokeColumn } from '../render/flame'
 import { footprintOf } from './measure'
 
-/** Where the player may walk. Outside this is tree line. */
-export const BOUNDS = { minX: -28, maxX: 28, minZ: -22, maxZ: 20 }
+/**
+ * Where the player may walk. Outside this is tree line.
+ *
+ * Deliberately not symmetric. It grew east, to hold the burner's camp
+ * downstream of the mill, and it grew a long way north, past the wall, because
+ * that side is the only thing the region says about what is out there and
+ * fourteen metres of it was a strip rather than a place.
+ *
+ * Everything that defines the edge is derived from this: the tree line, the
+ * bracken fringe, the scatter, and the rock spurs that stop the wall being
+ * walked around. Widening the region used to leave a hole at the end of the
+ * palisade, because the spur ran to a hardcoded 29.5.
+ */
+export const BOUNDS = { minX: -28, maxX: 37, minZ: -36, maxZ: 20 }
 
 const GROUND_SIZE = 132
 /** Half-unit quads. Coarser than this and the banks read as facets. */
 const GRID = 220
 
+/**
+ * How many of something to scatter over the whole region, given the count that
+ * looked right in the old 56x42 clearing.
+ *
+ * Ground cover is a density, not a count. A number that reads well at one size
+ * is wrong at every other, and this region is going to keep growing: leave the
+ * counts literal and the new ground comes out visibly balder than the old.
+ */
+function perArea(atOldSize: number): number {
+  const area = (BOUNDS.maxX - BOUNDS.minX) * (BOUNDS.maxZ - BOUNDS.minZ)
+  return Math.round((atOldSize * area) / (56 * 42))
+}
+
 /** Pond centre. The radius is a function of angle; see `pondRadius`. */
 const POND = { x: -11.8, z: 5.2 }
 const POND_DEPTH = 1.6
 export const WATER_LEVEL = -0.42
+
+/**
+ * The mere, on the far side of the wall. The region's other water, and nothing
+ * like it.
+ *
+ * The pond at home is full to a shelving sand beach with reeds and lilies on
+ * it. This one has dropped: the dish is 2.1m deep and the water sits 0.44 of
+ * that below the rim, which leaves it standing in the middle of a wide pale
+ * margin that used to be under it. Nothing grows at the edge. Fill is a fact
+ * about a pool, so this is the fact that says the far side is drying out,
+ * without saying anything.
+ */
+const MERE = { x: 9.4, z: -23.0 }
+const MERE_DEPTH = 2.1
+/** How far below its own rim the water stands, as a fraction of the depth. */
+const MERE_FILL = 0.44
 
 /**
  * The brook. Water leaves the pond and goes somewhere, which is the cheapest
@@ -103,6 +144,17 @@ function distToPath(x: number, z: number, pts: readonly (readonly [number, numbe
 }
 /** The palisade line. */
 const PAL_Z = -8
+
+/**
+ * Where the clearing stops being the clearing.
+ *
+ * Not the wall itself. There are four metres of ordinary ground on the far side
+ * of the palisade so that getting through it does not feel like walking into a
+ * different game; the change happens as you climb, which is slower and reads as
+ * the world rather than as a boundary. Anything that belongs to home — bright
+ * scrub, flowers — stops here, and the moor starts.
+ */
+const MOOR_EDGE = -12
 
 /**
  * A tall opaque thing that can stand between the camera and the player.
@@ -343,6 +395,14 @@ function pondRadius(a: number): number {
   return 4.3 + 0.85 * Math.sin(a * 2 + 0.7) + 0.5 * Math.sin(a * 3 - 1.9) + 0.28 * Math.sin(a * 5 + 2.4)
 }
 
+/**
+ * The same, for the mere. Wider and lumpier, and out of phase with the pond, so
+ * the two do not read as one shape used twice.
+ */
+function mereRadius(a: number): number {
+  return 6.0 + 1.15 * Math.sin(a * 2 - 2.2) + 0.62 * Math.sin(a * 3 + 1.1) + 0.3 * Math.sin(a * 5 - 0.4)
+}
+
 export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const group = new THREE.Group()
   scene.add(group)
@@ -354,23 +414,38 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     amp * Math.exp(-(((x - cx) ** 2 + (z - cz) ** 2) / (2 * sigma * sigma)))
 
   /**
-   * Gentle on purpose, but no longer flat. Movement is analytic and simply
-   * samples this, so a slope can never wedge the player; the only limit is what
-   * reads well. Four features carry the composition:
+   * The land, before any water is cut into it.
+   *
+   * Split out from `heightAt` so that a basin can be sunk relative to the
+   * ground it sits in rather than to an absolute number. The far side stands
+   * five metres above the clearing, so a pool cut to a fixed depth below zero
+   * out there is a crater; a pool cut to a fixed depth below ITS OWN rim is a
+   * pool wherever the generator eventually decides to put it.
+   *
+   * Six features carry the composition:
    *
    *   - a knoll east of home, so the great oak stands above everything
    *   - a hollow between home and the wall, so the wall is revealed by walking
    *   - a levelled terrace under the yard, because people flatten what they
    *     live on, and because huts on a slope float at one corner
    *   - ground that climbs beyond the palisade, so the road out goes uphill
+   *   - and keeps climbing, so the far side is a hill with a crest on it and
+   *     the road disappears over the top rather than stopping in a field
+   *   - a rise downstream of the mill, to stand the burner's camp on
    */
-  const heightAt = (x: number, z: number): number => {
+  const landAt = (x: number, z: number): number => {
     let h = noise(x * 0.033, z * 0.033) * 0.62 + noise(x * 0.095, z * 0.095) * 0.2
 
     h += bump(x, z, 10.6, 8.4, 4.6, 1.6)
     h -= bump(x, z, -3.0, 1.0, 5.6, 1.0)
     h += bump(x, z, -15.0, -0.5, 4.2, 0.9)
+    h += bump(x, z, 31.0, -2.0, 4.6, 1.7)
     h += smoothstep(-5, -22, z) * 3.0
+    // Purely additive past the old edge, so nothing at z > -22 moves. The
+    // palisade, the crossing and everything derived from a bank are all on the
+    // near side of that line, and terrain is shared: a change here is never
+    // local.
+    h += smoothstep(-22, -34, z) * 2.6
 
     // Reaches far enough to hold the widened holding and no further. Pushed out
     // to 13.4 once, which reached the brook twelve metres away and lifted its
@@ -378,7 +453,16 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     // which put the deck out of stepping range from the water. Terrain is
     // shared: a radius here is not a local decision.
     const yard = 1 - smoothstep(7.6, 11.9, Math.hypot((x - HOME.x) * 0.82, z - HOME.z))
-    h = h * (1 - yard) + 0.42 * yard
+    return h * (1 - yard) + 0.42 * yard
+  }
+
+  /**
+   * The rim the dead pool is sunk from, measured rather than typed. See MERE.
+   */
+  const MERE_RIM = landAt(MERE.x, MERE.z)
+
+  const heightAt = (x: number, z: number): number => {
+    let h = landAt(x, z)
 
     // The brook, cut before the pond so that where the two meet the pond wins
     // and the channel simply runs out into it. Shallow on purpose: this is
@@ -401,8 +485,23 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       const t = d / r
       h = h * (t * t) - POND_DEPTH * (1 - t) ** 1.34
     }
+
+    // The mere. Same flatten-and-sink shape, but referenced to MERE_RIM instead
+    // of to zero, so the floor is deterministic wherever the dish is put and
+    // the waterline lands exactly where the dish crosses MERE_LEVEL.
+    const mx = x - MERE.x
+    const mz = z - MERE.z
+    const md = Math.hypot(mx, mz)
+    const mr = mereRadius(Math.atan2(mz, mx))
+    if (md < mr) {
+      const t = md / mr
+      h = h * (t * t) + MERE_RIM * (1 - t * t) - MERE_DEPTH * (1 - t) ** 1.35
+    }
     return h
   }
+
+  /** Where the mere's surface sits. Derived, so it can never miss the dish. */
+  const MERE_LEVEL = MERE_RIM - MERE_DEPTH * MERE_FILL
 
   /** Everything that can hide the player. Filled in as the world is built. */
   const occluders: Occluder[] = []
@@ -429,6 +528,29 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     top: number,
   ): void => {
     standables.push({ ...box(x, z, w / 2, dep / 2, turn), top })
+  }
+
+  /**
+   * The HIGHEST ground anywhere under a rectangle, in the same frame a
+   * footprint uses.
+   *
+   * Anything long laid on a slope meets the ground higher at one end than at
+   * its middle, so a surface height taken from the centre is buried at that
+   * end and the player walks through it. That is exactly how the plank
+   * crossing came to sit 0.26m under its own bank, and it is not a fact about
+   * bridges: a fallen beam and a toppled stone have the same problem at a
+   * twentieth of the size.
+   */
+  const groundUnder = (x: number, z: number, hx: number, hz: number, ry: number): number => {
+    const c = Math.cos(ry)
+    const s = Math.sin(ry)
+    let high = -Infinity
+    for (const lx of [-hx, 0, hx]) {
+      for (const lz of [-hz, 0, hz]) {
+        high = Math.max(high, heightAt(x + lx * c + lz * s, z - lx * s + lz * c))
+      }
+    }
+    return high
   }
 
   /**
@@ -525,6 +647,23 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     wheat: flatMat(tex.straw, 0xe7d296),
     tilled: flatMat(tex.sand, 0xa07d55),
     shore: flatMat(tex.sand, 0xd9bf8e),
+
+    /**
+     * Beyond the wall.
+     *
+     * The first attempt at this was a dull green, and it read as grass in
+     * shadow rather than as different ground: at this distance the eye reads
+     * hue before value, and anything green next to green is the same place.
+     * These moved off green entirely. Moorland genuinely is brown, and brown
+     * next to that clearing is unmistakable from across the region.
+     */
+    moor: flatMat(tex.grass, 0x6d6353),
+    peat: flatMat(tex.sand, 0x4c4335),
+    dryMoor: flatMat(tex.straw, 0x8d8467),
+    /** The margin the mere left behind when it dropped. */
+    bleach: flatMat(tex.sand, 0xbcb6a2),
+    /** The road past the wall. Nobody has laid a barrow of gravel on it. */
+    oldTrack: flatMat(tex.sand, 0x94886d),
     // Darker than the mud it sits in. Water lighter than its own bank inverts
     // the natural relationship and reads as a hole punched in the render.
     water: toonUnique({
@@ -539,6 +678,15 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
       map: tiled(tex.water, 3.2, 3.2),
       transparent: true,
       opacity: 0.82,
+      side: THREE.DoubleSide,
+    }),
+    // Standing water rather than running water. Nearly opaque, and greyed off
+    // the blue, so it reads as a lid rather than as something you can see into.
+    still: toonUnique({
+      color: 0x4a5a58,
+      map: tiled(tex.water, 3.2, 3.2),
+      transparent: true,
+      opacity: 0.93,
       side: THREE.DoubleSide,
     }),
 
@@ -674,6 +822,52 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     for (let i = 0; i < steps; i++) {
       const a = i * 2
       idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2)
+    }
+    surface(verts, uvs, idx, mat)
+  }
+
+  /**
+   * A whole area of different ground, as a subdivided sheet.
+   *
+   * `layPatch` is a fan from one centre vertex, which is fine at three metres
+   * and wrong at seven: a single triangle spanning that far is a flat chord,
+   * and over concave ground the chord rises well above the terrain it is
+   * supposed to be lying on. Six metre moor patches at a 0.04 lift were
+   * therefore poking up through a track laid at 0.07, so the road out came out
+   * in pieces. A grid keeps every cell about a metre, so the sheet follows the
+   * ground and stays underneath everything laid on top of it.
+   *
+   * The near edge is a function of x, so the boundary between two kinds of
+   * ground wanders instead of being a straight line across the region.
+   */
+  function layField(
+    x0: number,
+    x1: number,
+    zFar: number,
+    edgeAt: (x: number) => number,
+    mat: THREE.Material,
+    lift: number,
+  ): void {
+    const cols = Math.max(2, Math.round((x1 - x0) / 1.6))
+    const rows = 26
+    const verts: number[] = []
+    const uvs: number[] = []
+    const idx: number[] = []
+    for (let i = 0; i <= cols; i++) {
+      const x = x0 + ((x1 - x0) * i) / cols
+      const zNear = edgeAt(x)
+      for (let j = 0; j <= rows; j++) {
+        const z = zNear + ((zFar - zNear) * j) / rows
+        verts.push(x, heightAt(x, z) + lift, z)
+        uvs.push(...worldUv(x, z))
+      }
+    }
+    for (let i = 0; i < cols; i++) {
+      for (let j = 0; j < rows; j++) {
+        const a = i * (rows + 1) + j
+        const b = a + rows + 1
+        idx.push(a, b, a + 1, a + 1, b, b + 1)
+      }
     }
     surface(verts, uvs, idx, mat)
   }
@@ -1113,16 +1307,30 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     [0.0, -7.6],
   ] as const
 
+  /**
+   * The same road, on the other side, and it does not stop.
+   *
+   * It used to end in a field at z = -21, which says the world ends there. It
+   * now climbs over the crest and leaves the region, which says the opposite
+   * with the same amount of geometry. That is the whole of the guidance out
+   * here: D20 bans markers, so the road has to be the argument.
+   */
   const BEYOND_TRACK = [
     [0.0, -8.4],
     [-0.3, -10.6],
     [-0.9, -13.4],
     [-1.9, -17.0],
     [-3.4, -21.0],
+    [-4.4, -25.2],
+    [-4.2, -29.4],
+    [-3.4, -33.2],
+    [-3.2, -37.0],
   ] as const
 
   layTrack(MAIN_TRACK, 1.05, M.track, trackRng)
-  layTrack(BEYOND_TRACK, 0.95, M.track, trackRng)
+  // Paler, and laid higher than the moor sheet it crosses. Same road, but
+  // nobody on this side has put a barrow of gravel on it in a long time.
+  layTrack(BEYOND_TRACK, 0.95, M.oldTrack, trackRng, 0.09)
 
   // Cart ruts, only on the busy stretch near home.
   for (const off of [-0.42, 0.42]) {
@@ -1220,6 +1428,12 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
         b.rotation.y = r.range(0, Math.PI * 2)
         b.translateY(len * 0.45)
         b.castShadow = true
+        // Same argument as a canopy, and the same word for it: a branch is
+        // thin wood you push past, and the trunk is what stops you. Stated
+        // here because a dead tree's branches reach 2.5m out from the trunk at
+        // chest height, so a footprint measured with them in it is a two metre
+        // invisible wall around every snag on the moor.
+        b.userData.noCollide = true
         tree.add(b)
       }
       // Snapped off rather than tapering to a point.
@@ -1315,11 +1529,13 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const FLANK: readonly Species[] = ['oak', 'pine', 'oak', 'birch', 'scrub']
   const NORTH: readonly Species[] = ['pine', 'pine', 'dead', 'pine', 'oak']
 
-  // Behind home the wood is held back, so the huts have air around them.
-  treeWall(-40, 40, (t, d) => [t, BOUNDS.maxZ + 4.6 + d] as const, SOUTH, treeRng)
-  treeWall(-34, 34, (t, d) => [t, BOUNDS.minZ - 1.2 - d] as const, NORTH, treeRng)
-  treeWall(-27, 27, (t, d) => [BOUNDS.minX - 1.4 - d, t] as const, FLANK, treeRng)
-  treeWall(-27, 27, (t, d) => [BOUNDS.maxX + 1.4 + d, t] as const, FLANK, treeRng)
+  // Behind home the wood is held back, so the huts have air around them. Every
+  // run overshoots its own corner, so the four walls meet rather than leaving a
+  // notch of open ground at each corner of the region.
+  treeWall(BOUNDS.minX - 12, BOUNDS.maxX + 12, (t, d) => [t, BOUNDS.maxZ + 4.6 + d] as const, SOUTH, treeRng)
+  treeWall(BOUNDS.minX - 6, BOUNDS.maxX + 6, (t, d) => [t, BOUNDS.minZ - 1.2 - d] as const, NORTH, treeRng)
+  treeWall(BOUNDS.minZ - 5, BOUNDS.maxZ + 7, (t, d) => [BOUNDS.minX - 1.4 - d, t] as const, FLANK, treeRng)
+  treeWall(BOUNDS.minZ - 5, BOUNDS.maxZ + 7, (t, d) => [BOUNDS.maxX + 1.4 + d, t] as const, FLANK, treeRng)
 
   // Trees inside the clearing. These ones are real entities: they burn and
   // they can be felled. Placed off the tracks so they decorate rather than
@@ -1349,10 +1565,13 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // Scrub scattered inside, to soften the step from lawn to wall. Kept low and
   // well off the tracks: anything tall in the middle of the clearing breaks the
   // sightline from the hearth to the gate, which is the one line that matters.
-  for (let i = 0; i < 44; i++) {
+  for (let i = 0; i < perArea(44); i++) {
     const x = treeRng.range(BOUNDS.minX + 0.5, BOUNDS.maxX - 0.5)
     const z = treeRng.range(BOUNDS.minZ + 0.5, BOUNDS.maxZ - 0.5)
     if (distToPath(x, z, BROOK) < 2.6) continue
+    // Scrub is bright, soft and green, and it is the clearing's. The far side
+    // gets its own low cover, which is grey.
+    if (z < MOOR_EDGE) continue
     if (Math.hypot(x - HOME.x, z - HOME.z) < 13.5) continue
     if (Math.hypot(x - POND.x, z - POND.z) < pondRadius(Math.atan2(z - POND.z, x - POND.x)) + 0.6) continue
     if (Math.abs(z - PAL_Z) < 2.5) continue
@@ -1382,16 +1601,23 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const brackenMats = [0x8a7a3a, 0x9c6f34, 0x6f7a34].map((c) =>
     toonUnique({ color: c, map: tiled(tex.foliage, 1.4, 1.4) }),
   )
-  for (let c = 0; c < 52; c++) {
+  // Count comes from the length of the edge it dresses, so widening the region
+  // thickens the fringe instead of stretching the same 52 clumps thinner.
+  const MID_X = (BOUNDS.minX + BOUNDS.maxX) / 2
+  const MID_Z = (BOUNDS.minZ + BOUNDS.maxZ) / 2
+  const SPAN_X = (BOUNDS.maxX - BOUNDS.minX) / 2 + 4
+  const SPAN_Z = (BOUNDS.maxZ - BOUNDS.minZ) / 2 + 2
+  const perimeter = 4 * (SPAN_X + SPAN_Z)
+  for (let c = 0; c < Math.round(perimeter * 0.265); c++) {
     const side = treeRng.int(0, 3)
     const along = treeRng.range(-1, 1)
     const inset = treeRng.range(-1.5, 2.6)
     let cx = 0
     let cz = 0
-    if (side === 0) { cx = along * 32; cz = BOUNDS.maxZ + 3.2 - inset }
-    else if (side === 1) { cx = along * 28; cz = BOUNDS.minZ - 0.4 + inset }
-    else if (side === 2) { cx = BOUNDS.minX - 0.6 + inset; cz = along * 24 }
-    else { cx = BOUNDS.maxX + 0.6 - inset; cz = along * 24 }
+    if (side === 0) { cx = MID_X + along * SPAN_X; cz = BOUNDS.maxZ + 3.2 - inset }
+    else if (side === 1) { cx = MID_X + along * SPAN_X; cz = BOUNDS.minZ - 0.4 + inset }
+    else if (side === 2) { cx = BOUNDS.minX - 0.6 + inset; cz = MID_Z + along * SPAN_Z }
+    else { cx = BOUNDS.maxX + 0.6 - inset; cz = MID_Z + along * SPAN_Z }
 
     for (let k = 0; k < treeRng.int(3, 7); k++) {
       const x = cx + treeRng.range(-1.5, 1.5)
@@ -1429,9 +1655,9 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   }
 
   /** Dry grass, in clumps. FLAMMABLE, so this is also the fire's road. */
-  for (let c = 0; c < 20; c++) {
-    const cx = grassRng.range(-26, 26)
-    const cz = grassRng.range(-20, 18)
+  for (let c = 0; c < perArea(20); c++) {
+    const cx = grassRng.range(BOUNDS.minX + 2, BOUNDS.maxX - 2)
+    const cz = grassRng.range(BOUNDS.minZ + 2, BOUNDS.maxZ - 2)
     for (let k = 0; k < grassRng.int(2, 4); k++) {
       const x = cx + grassRng.range(-2.4, 2.4)
       const z = cz + grassRng.range(-2.4, 2.4)
@@ -1486,15 +1712,20 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   const flowerMats = [0xd9cd86, 0xd8d2c6, 0xc09cb0, 0xd3a469].map((c) => toonUnique({ color: c }))
   const stemMat = toonUnique({ color: 0x5f9c38 })
 
-  for (let c = 0; c < 38; c++) {
-    const cx = grassRng.range(-27, 27)
-    const cz = grassRng.range(-21, 19)
+  for (let c = 0; c < perArea(38); c++) {
+    const cx = grassRng.range(BOUNDS.minX + 1, BOUNDS.maxX - 1)
+    const cz = grassRng.range(BOUNDS.minZ + 1, BOUNDS.maxZ - 1)
     const kind = grassRng.next()
     for (let k = 0; k < grassRng.int(3, 9); k++) {
       const x = cx + grassRng.range(-1.6, 1.6)
       const z = cz + grassRng.range(-1.6, 1.6)
       if (Math.hypot(x - POND.x, z - POND.z) < pondRadius(Math.atan2(z - POND.z, x - POND.x)) + 0.4) continue
       const h = heightAt(x, z)
+
+      // Nothing flowers past the wall. Everything else — pebbles, sticks,
+      // mushrooms — is as at home, because the ground itself has not stopped
+      // being ground.
+      if (kind < 0.45 && z < MOOR_EDGE) continue
 
       if (kind < 0.45) {
         const mat = flowerMats[grassRng.int(0, flowerMats.length - 1)]!
@@ -1769,9 +2000,14 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
   // Rock spurs at each end, running all the way to the bounds so the wall
   // cannot be walked around. Facts, not invisible walls: they are STONE, so
   // nothing burns or cuts them.
+  // Each side runs to ITS OWN bound, because the bounds are no longer
+  // symmetric. A single hardcoded limit here is a hole at the end of the wall
+  // the moment the region grows on one side, and a wall you can walk around is
+  // not an obstacle at all.
   for (const side of [-1, 1]) {
+    const limit = (side < 0 ? -BOUNDS.minX : BOUNDS.maxX) + 2.0
     let x = side * 7.6
-    while (Math.abs(x) < 29.5) {
+    while (Math.abs(x) < limit) {
       const z = PAL_Z + palRng.range(-0.4, 0.4)
       const h = heightAt(x, z)
       const s = palRng.range(1.35, 2.15)
@@ -1914,6 +2150,474 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     [4.8, -10.2, 1.0],
   ] as const) {
     plantTree(x, z, 'dead', s, beyondRng)
+  }
+
+  // ------------------------------------------------------------------- moor
+  /**
+   * The ground past the wall.
+   *
+   * The far side used to be the same bright lawn as home with a tower on it,
+   * which is why it read as more of the same however much was put on it. This
+   * is the fix, and it is ground rather than props: dull cold green over most
+   * of it, wet dark peat in the low places, and no flowers.
+   *
+   * Laid at a lower lift than a track (0.07) on purpose, so the road stays on
+   * top of the moor rather than being buried by it wherever a patch happens to
+   * fall across it. Same trick the parched pasture uses at home.
+   */
+  {
+    // One sheet, not a scatter of patches. The far side is a different ground
+    // and it has to cover; patches over grass read as patches on grass, which
+    // is what the first attempt at this looked like.
+    const wobble = (x: number): number =>
+      MOOR_EDGE +
+      2.4 * Math.sin(x * 0.21 + 1.3) +
+      1.5 * Math.sin(x * 0.47 - 0.6) +
+      0.9 * Math.sin(x * 0.93 + 2.1)
+    layField(BOUNDS.minX - 4, BOUNDS.maxX + 4, BOUNDS.minZ - 5, wobble, M.moor, 0.038)
+
+    // Wet ground in the low places and bleached grass on the exposed ones. Kept
+    // small enough that a fan's chord still hugs the terrain.
+    for (let i = 0; i < 30; i++) {
+      const x = beyondRng.range(BOUNDS.minX, BOUNDS.maxX)
+      // Biased outward, so the ground keeps changing as you climb rather than
+      // changing once at a line.
+      const t = beyondRng.next() ** 0.6
+      const z = MOOR_EDGE - t * (MOOR_EDGE - (BOUNDS.minZ - 1))
+      // Not on top of the mere: the pale margin there is the point of it.
+      if (Math.hypot(x - MERE.x, z - MERE.z) < mereRadius(Math.atan2(z - MERE.z, x - MERE.x)) + 1) continue
+      const wet = beyondRng.chance(0.45)
+      layPatch(x, z, beyondRng.range(1.8, 3.2), wet ? M.peat : M.dryMoor, beyondRng, 0.4, 18, 0.052)
+    }
+  }
+
+  /**
+   * Low cover, in place of the scrub that stops at MOOR_EDGE. Grey, woody and
+   * knee high: the same silhouette as the bracken at home in a colour that is
+   * nobody's idea of spring.
+   */
+  const heathMats = [0x6d6a58, 0x7b6f66, 0x5f6553].map((c) =>
+    toonUnique({ color: c, map: tiled(tex.foliage, 1.4, 1.4) }),
+  )
+  for (let c = 0; c < 60; c++) {
+    const cx = beyondRng.range(BOUNDS.minX, BOUNDS.maxX)
+    const cz = beyondRng.range(BOUNDS.minZ, MOOR_EDGE)
+    if (nearTrack(cx, cz, 2.2)) continue
+    for (let k = 0; k < beyondRng.int(3, 8); k++) {
+      const x = cx + beyondRng.range(-1.7, 1.7)
+      const z = cz + beyondRng.range(-1.7, 1.7)
+      if (Math.hypot(x - MERE.x, z - MERE.z) < mereRadius(Math.atan2(z - MERE.z, x - MERE.x)) - 0.5) continue
+      const s = beyondRng.range(0.32, 0.7)
+      const b = new THREE.Mesh(brackenGeo, beyondRng.pick(heathMats))
+      b.scale.set(s, s * beyondRng.range(0.6, 1.0), s)
+      b.position.set(x, heightAt(x, z) + s * 0.24, z)
+      b.rotation.set(beyondRng.range(-0.1, 0.1), beyondRng.range(0, 3), beyondRng.range(-0.1, 0.1))
+      b.castShadow = true
+      group.add(b)
+    }
+  }
+
+  // ------------------------------------------------------------------- mere
+  /**
+   * Water that has dropped.
+   *
+   * The one water feature out here, and it is built to be read against the pond
+   * at home rather than on its own. The pond is full, blue, shelving into sand,
+   * with reeds standing in it and lilies on it. This is a dish two metres deep
+   * with the water sitting nearly half of that below the rim, so most of what
+   * you see is the pale floor it used to cover. Nothing grows at the edge.
+   *
+   * Everything about it is derived from MERE_RIM, so the whole thing can be
+   * moved by moving one pair of numbers, which is what D22 asks of a feature
+   * that a generator will eventually be placing.
+   */
+  {
+    // The dish, drawn from the middle out past the waterline, so the part under
+    // the water reads as a bottom you can see.
+    const seg = 44
+    const rings = [0, 0.3, 0.52, 0.74, 0.94]
+    const verts: number[] = []
+    const uvs: number[] = []
+    const idx: number[] = []
+    const ragged: number[] = []
+    for (let i = 0; i <= seg; i++) ragged.push(beyondRng.range(-0.45, 0.6))
+
+    for (let i = 0; i <= seg; i++) {
+      const a = (i / seg) * Math.PI * 2
+      const rad = mereRadius(a)
+      for (const f of rings) {
+        const rr = rad * f + (f === 0.94 ? ragged[i % seg]! : 0)
+        const x = MERE.x + Math.cos(a) * rr
+        const z = MERE.z + Math.sin(a) * rr
+        verts.push(x, heightAt(x, z) + 0.045, z)
+        uvs.push(...worldUv(x, z))
+      }
+    }
+    const n = rings.length
+    for (let i = 0; i < seg; i++) {
+      for (let k = 0; k < n - 1; k++) {
+        const a = i * n + k
+        idx.push(a, a + 1, a + n, a + 1, a + n + 1, a + n)
+      }
+    }
+    surface(verts, uvs, idx, M.bleach)
+  }
+
+  {
+    // The water itself, drawn generously past its own edge. The dish rises
+    // above MERE_LEVEL at 0.46 of the radius and hides the surplus, so the
+    // waterline is wherever the ground crosses the plane and is irregular for
+    // nothing.
+    const seg = 40
+    const verts: number[] = [MERE.x, MERE_LEVEL, MERE.z]
+    const uvs: number[] = [...worldUv(MERE.x, MERE.z)]
+    const idx: number[] = []
+    for (let i = 0; i <= seg; i++) {
+      const a = (i / seg) * Math.PI * 2
+      const rad = mereRadius(a) * 0.62
+      const x = MERE.x + Math.cos(a) * rad
+      const z = MERE.z + Math.sin(a) * rad
+      verts.push(x, MERE_LEVEL, z)
+      uvs.push(...worldUv(x, z))
+    }
+    for (let i = 1; i <= seg; i++) idx.push(0, i, i + 1)
+    const water = surface(verts, uvs, idx, M.still)
+    water.receiveShadow = false
+    water.renderOrder = 1
+  }
+
+  // Trunks standing in it, snapped off at about the height the water used to
+  // be. A wood does not grow in a pond; it grows and then the pond arrives.
+  for (let i = 0; i < 7; i++) {
+    const a = beyondRng.range(0, Math.PI * 2)
+    const rad = mereRadius(a) * beyondRng.range(0.1, 0.42)
+    const x = MERE.x + Math.cos(a) * rad
+    const z = MERE.z + Math.sin(a) * rad
+    const hgt = beyondRng.range(0.7, 2.2)
+    const snag = new THREE.Mesh(trunkGeo, M.barkDead)
+    const girth = beyondRng.range(0.5, 0.85)
+    snag.scale.set(girth, hgt, girth)
+    snag.position.set(x, heightAt(x, z) + hgt / 2, z)
+    snag.rotation.set(beyondRng.range(-0.12, 0.12), beyondRng.range(0, 3), beyondRng.range(-0.14, 0.14))
+    snag.castShadow = true
+    group.add(snag)
+    solidRound(snag, heightAt(x, z) + hgt / 2, 'Snag', { WOODEN: 0.8, FLAMMABLE: 0.2, RIGID: 0.7 })
+  }
+
+  // Pale stones on the margin, sitting where the water put them.
+  for (let i = 0; i < 16; i++) {
+    const a = beyondRng.range(0, Math.PI * 2)
+    const rad = mereRadius(a) * beyondRng.range(0.5, 0.92)
+    const x = MERE.x + Math.cos(a) * rad
+    const z = MERE.z + Math.sin(a) * rad
+    const s = beyondRng.range(0.14, 0.4)
+    const rock = new THREE.Mesh(beyondRng.chance(0.5) ? boulderGeo : rubbleGeo, M.stone)
+    rock.scale.set(s, s * 0.55, s * beyondRng.range(0.8, 1.4))
+    rock.position.set(x, heightAt(x, z) + s * 0.22, z)
+    rock.rotation.set(beyondRng.range(0, 3), beyondRng.range(0, 3), beyondRng.range(0, 3))
+    rock.castShadow = true
+    group.add(rock)
+  }
+
+  /**
+   * A fence walking into the water and not coming out.
+   *
+   * Somebody enclosed this before there was a mere here. It is one line of
+   * posts, it does not turn a corner, and the last four of it are standing in
+   * the pool with their tops at about the old waterline. Nothing says the land
+   * changed more cheaply than a boundary that is still where it was.
+   */
+  {
+    const from = new THREE.Vector2(MERE.x - 3.4, MERE.z - 11.0)
+    const to = new THREE.Vector2(MERE.x + 1.1, MERE.z + 2.6)
+    for (let i = 0; i <= 13; i++) {
+      if (beyondRng.chance(0.14)) continue
+      const t = i / 13
+      const x = from.x + (to.x - from.x) * t + beyondRng.range(-0.12, 0.12)
+      const z = from.y + (to.y - from.y) * t + beyondRng.range(-0.12, 0.12)
+      const ground = heightAt(x, z)
+      const hgt = beyondRng.range(0.85, 1.15)
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.095, hgt, 6), M.barkDead)
+      post.position.set(x, ground + hgt / 2, z)
+      post.rotation.set(beyondRng.range(-0.14, 0.14), 0, beyondRng.range(-0.16, 0.16))
+      post.castShadow = true
+      group.add(post)
+    }
+  }
+
+  // ------------------------------------------------------- the empty holding
+  /**
+   * Footings, a cold hearth, and a gap where a door was.
+   *
+   * This is the far side's argument, and it is made against home rather than on
+   * its own: the same plan, the same size, the same stone under it, with the
+   * timber gone and grass in the fire. Nobody explains it and nothing here is
+   * takeable. It is a landmark and a statement, in that order.
+   *
+   * Each wall is its own solid, so the doorway gap is a gap the player can walk
+   * through. One footprint around the whole rectangle would have sealed it, and
+   * a ruin you cannot get into is a box.
+   */
+  {
+    const cx = -15.0
+    const cz = -24.5
+    const turn = 0.42
+    const W = 5.6
+    const D = 3.8
+    const WALL = 0.85
+    const c = Math.cos(turn)
+    const s = Math.sin(turn)
+    /** Local (right, forward) in the holding's own frame, to world. */
+    const at = (lx: number, lz: number): [number, number] => [cx + lx * c + lz * s, cz - lx * s + lz * c]
+
+    layPatch(cx, cz, 4.6, M.peat, beyondRng, 0.3, 20, 0.042)
+
+    // Four runs of low rubble wall, with the south one broken for the doorway.
+    const walls: [number, number, number, number][] = [
+      [0, -D / 2, W, 0.5],
+      [-W / 2, 0, 0.5, D],
+      [W / 2, 0, 0.5, D],
+      [-W / 2 + 1.05, D / 2, 2.1, 0.5],
+      [W / 2 - 0.85, D / 2, 1.7, 0.5],
+    ]
+    for (const [lx, lz, w, d] of walls) {
+      const [x, z] = at(lx, lz)
+      const g = new THREE.Group()
+      // Courses rather than one box, because a ruin is a wall that has lost its
+      // top and the ragged line is the whole read.
+      const courses = 3
+      for (let i = 0; i < courses; i++) {
+        const f = 1 - i * beyondRng.range(0.05, 0.16)
+        const course = new THREE.Mesh(
+          new THREE.BoxGeometry(w * f, WALL / courses, d * (i === 0 ? 1 : 0.86)),
+          M.rubbleWall,
+        )
+        course.position.set(
+          beyondRng.range(-0.06, 0.06),
+          (i + 0.5) * (WALL / courses),
+          beyondRng.range(-0.05, 0.05),
+        )
+        course.castShadow = true
+        course.receiveShadow = true
+        g.add(course)
+      }
+      g.position.set(x, heightAt(x, z), z)
+      g.rotation.y = turn
+      group.add(g)
+      solidBuilt(g, heightAt(x, z) + WALL / 2, 'Footings', { STONE: 1, HEAVY: 1, RIGID: 1 })
+    }
+
+    // Fallen stone off the walls, so the rectangle sits in its own rubble.
+    for (let i = 0; i < 18; i++) {
+      const [x, z] = at(beyondRng.range(-W / 2 - 1.4, W / 2 + 1.4), beyondRng.range(-D / 2 - 1.2, D / 2 + 1.2))
+      const sc = beyondRng.range(0.14, 0.36)
+      const st = new THREE.Mesh(beyondRng.chance(0.5) ? boulderGeo : rubbleGeo, M.rubbleWall)
+      st.scale.set(sc, sc * 0.6, sc)
+      st.position.set(x, heightAt(x, z) + sc * 0.25, z)
+      st.rotation.set(beyondRng.range(0, 3), beyondRng.range(0, 3), beyondRng.range(0, 3))
+      st.castShadow = true
+      group.add(st)
+    }
+
+    // The hearth, which is the point of the whole thing: the same ring of set
+    // stones as at home, with no bowl, no coals and no smoke. Cold is stated by
+    // what is missing rather than by anything added.
+    {
+      const [hx, hz] = at(-0.4, 0.3)
+      const hy = heightAt(hx, hz)
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI * 2
+        const sc = beyondRng.range(0.24, 0.38)
+        const st = new THREE.Mesh(beyondRng.chance(0.5) ? boulderGeo : rubbleGeo, M.stoneDark)
+        st.scale.set(sc, sc * 0.75, sc)
+        const x = hx + Math.cos(a) * 0.8
+        const z = hz + Math.sin(a) * 0.8
+        st.position.set(x, heightAt(x, z) + sc * 0.28, z)
+        st.rotation.set(beyondRng.range(0, 3), beyondRng.range(0, 3), beyondRng.range(0, 3))
+        st.castShadow = true
+        group.add(st)
+      }
+      const ash = new THREE.Mesh(
+        new THREE.CircleGeometry(0.8, 13).rotateX(-Math.PI / 2),
+        toonUnique({ color: 0x4b463c, map: tiled(tex.stone, 1.8, 1.8) }),
+      )
+      ash.position.set(hx, hy + 0.03, hz)
+      group.add(ash)
+      // Growing in it.
+      for (let i = 0; i < 5; i++) {
+        const x = hx + beyondRng.range(-0.55, 0.55)
+        const z = hz + beyondRng.range(-0.55, 0.55)
+        const len = beyondRng.range(0.4, 0.8)
+        const tuft = new THREE.Mesh(tuftGeo, M.tuftPale)
+        tuft.scale.set(1, len, 1)
+        tuft.position.set(x, heightAt(x, z) + len * 0.46, z)
+        tuft.rotation.set(beyondRng.range(-0.3, 0.3), beyondRng.range(0, 3), beyondRng.range(-0.3, 0.3))
+        group.add(tuft)
+      }
+    }
+
+    // The ridge beam, down across its own floor. A capsule, like the log at the
+    // pond: a segment grown by its own girth, sat on the highest ground it
+    // touches rather than on the ground at its middle.
+    {
+      const [bx, bz] = at(0.5, -0.2)
+      const yaw = turn + 0.7
+      const LEN = 4.6
+      const GIRTH = 0.22
+      const y = groundUnder(bx, bz, LEN / 2 - GIRTH, 0, yaw) + 0.18
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, LEN, 7), M.barkDead)
+      beam.rotation.set(0, yaw, Math.PI / 2 - 0.05)
+      beam.position.set(bx, y, bz)
+      beam.castShadow = true
+      group.add(beam)
+      standables.push({ ...box(bx, bz, LEN / 2 - GIRTH, 0, yaw, GIRTH * 1.4), top: y + GIRTH })
+    }
+  }
+
+  // ------------------------------------------------------------- the stones
+  /**
+   * A row of standing stones over the crest, and the far side's landmark.
+   *
+   * D20 makes this load-bearing rather than decorative. There is no marker
+   * saying the region continues past the hill, so something tall and pale has
+   * to stand on the skyline and be worth walking toward, and it has to still be
+   * there when you arrive, which is what `pinned` means on an occluder.
+   *
+   * They ignore the road completely, because they are older than it. Where the
+   * two meet, the stone is down and the road goes over it.
+   */
+  const STONE_ROW = { x0: -14.5, z0: -28.4, x1: 8.0, z1: -31.4, count: 8 }
+  {
+    for (let i = 0; i < STONE_ROW.count; i++) {
+      const t = i / (STONE_ROW.count - 1)
+      const x = STONE_ROW.x0 + (STONE_ROW.x1 - STONE_ROW.x0) * t + beyondRng.range(-0.7, 0.7)
+      const z = STONE_ROW.z0 + (STONE_ROW.z1 - STONE_ROW.z0) * t + beyondRng.range(-0.9, 0.9)
+      const h = heightAt(x, z)
+      const w = beyondRng.range(0.72, 1.15)
+      const thick = beyondRng.range(0.34, 0.5)
+
+      // The one the road runs through is lying down. Measured against the track
+      // rather than counted out, so moving either does not silently bury a
+      // three metre stone in the middle of the way out.
+      if (nearTrack(x, z, 2.6)) {
+        const len = beyondRng.range(2.2, 2.9)
+        const yaw = beyondRng.range(0, 3)
+        // Bedded on the highest ground it covers, so no corner of a stone this
+        // long ends up under the hill it fell on.
+        const y = groundUnder(x, z, w / 2, len / 2, yaw)
+        const down = new THREE.Mesh(new THREE.BoxGeometry(w, thick, len), M.stone)
+        down.position.set(x, y + thick * 0.45, z)
+        down.rotation.set(beyondRng.range(-0.06, 0.06), yaw, beyondRng.range(-0.05, 0.05))
+        down.castShadow = true
+        down.receiveShadow = true
+        group.add(down)
+        standables.push({ ...box(x, z, w / 2, len / 2, yaw, 0), top: y + thick * 0.9 })
+        continue
+      }
+
+      const hgt = beyondRng.range(2.4, 3.7)
+      const g = new THREE.Group()
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, thick), M.stone)
+      slab.position.y = hgt / 2
+      slab.rotation.set(beyondRng.range(-0.09, 0.09), 0, beyondRng.range(-0.13, 0.13))
+      slab.castShadow = true
+      slab.receiveShadow = true
+      g.add(slab)
+      // A darker cap where it has weathered, so the top edge is not one flat
+      // plane across eight stones.
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(w * 0.96, 0.16, thick * 0.96), M.stoneDark)
+      cap.position.y = hgt - 0.05
+      cap.rotation.copy(slab.rotation)
+      g.add(cap)
+      g.position.set(x, h, z)
+      g.rotation.y = beyondRng.range(0, Math.PI)
+      group.add(g)
+      occluders.push(occluder(g, Math.max(w, thick) * 0.7, hgt, true))
+      solidBuilt(g, h + hgt / 2, 'Standing stone', { STONE: 1, HEAVY: 1, RIGID: 1 })
+
+      // Packing stones at the foot, which is how one of these is actually set.
+      for (let k = 0; k < beyondRng.int(2, 5); k++) {
+        const px = x + beyondRng.range(-0.8, 0.8)
+        const pz = z + beyondRng.range(-0.8, 0.8)
+        const sc = beyondRng.range(0.16, 0.32)
+        const st = new THREE.Mesh(rubbleGeo, M.stoneDark)
+        st.scale.set(sc, sc * 0.6, sc)
+        st.position.set(px, heightAt(px, pz) + sc * 0.25, pz)
+        st.rotation.set(beyondRng.range(0, 3), beyondRng.range(0, 3), beyondRng.range(0, 3))
+        group.add(st)
+      }
+    }
+  }
+
+  /**
+   * Cairns beside the road, getting bigger as it climbs. Somebody was counting
+   * something, and nobody says what.
+   */
+  for (const [x, z, n] of [
+    [-2.5, -19.2, 7],
+    [-6.0, -24.4, 11],
+    [-2.4, -31.0, 16],
+  ] as const) {
+    const h = heightAt(x, z)
+    const g = new THREE.Group()
+    for (let i = 0; i < n; i++) {
+      const t = i / n
+      const rad = 0.62 * (1 - t) + 0.06
+      const a = beyondRng.range(0, Math.PI * 2)
+      const sc = beyondRng.range(0.2, 0.42) * (1.05 - t * 0.4)
+      const st = new THREE.Mesh(beyondRng.chance(0.5) ? boulderGeo : rubbleGeo, M.stone)
+      st.scale.set(sc, sc * 0.62, sc * beyondRng.range(0.85, 1.2))
+      st.position.set(Math.cos(a) * rad * beyondRng.range(0, 1), 0.12 + t * 1.05, Math.sin(a) * rad * beyondRng.range(0, 1))
+      st.rotation.set(beyondRng.range(0, 3), beyondRng.range(0, 3), beyondRng.range(0, 3))
+      st.castShadow = true
+      st.receiveShadow = true
+      g.add(st)
+    }
+    g.position.set(x, h, z)
+    group.add(g)
+    solidRound(g, h + 0.5, 'Cairn', { STONE: 1, HEAVY: 1, RIGID: 1 })
+  }
+
+  /**
+   * The wood past the crest, and it leans.
+   *
+   * Every trunk out here is dead, and they all lean the same way, which nothing
+   * at home does. Trees lean into shelter or away from wind and a clearing full
+   * of them agreeing is the quietest wrong thing available: it is only visible
+   * once you notice you are not looking at a wood, you are looking at a
+   * direction.
+   */
+  /**
+   * Kept small, and the reason is collision rather than taste. `footprintOf`
+   * measures in the object's OWN frame, so a lean folds out of the measurement
+   * entirely and the trunk's blocker stays upright underneath it. At 0.11 the
+   * wood is about 13cm off its own footprint at chest height, against 3-13cm of
+   * slack in the circle, so the worst case is clipping the edge of a trunk. Any
+   * further and it would need measure.ts to measure in a level frame, which is
+   * its own change.
+   */
+  const LEAN = 0.11
+  const LEAN_YAW = 2.2
+  for (const [cx, cz, n] of [
+    [-11.5, -20.5, 4],
+    [7.5, -16.5, 3],
+    [-19.0, -30.5, 5],
+    [3.5, -27.0, 4],
+    [16.5, -29.5, 5],
+    [24.5, -19.5, 4],
+    [-24.0, -16.0, 3],
+    [30.0, -27.0, 4],
+  ] as const) {
+    for (let i = 0; i < n; i++) {
+      const x = cx + beyondRng.range(-3.2, 3.2)
+      const z = cz + beyondRng.range(-2.6, 2.6)
+      if (nearTrack(x, z, 2.4)) continue
+      if (Math.hypot(x - MERE.x, z - MERE.z) < mereRadius(Math.atan2(z - MERE.z, x - MERE.x)) + 1.2) continue
+      const s = beyondRng.range(0.85, 1.6)
+      const t = plantTree(x, z, 'dead', s, beyondRng)
+      t.rotation.set(0, LEAN_YAW + beyondRng.range(-0.18, 0.18), LEAN + beyondRng.range(-0.03, 0.03))
+      treeEntity(t, x, z, s, 'Dead trunk')
+    }
   }
 
   // ------------------------------------------------------------------ home

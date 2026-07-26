@@ -1,0 +1,3 @@
+# Raw ElevenLabs output, cached so a re-run of the bake does not re-bill.
+# Only the processed MP3s in assets/baked/audio/ are committed.
+.cache/

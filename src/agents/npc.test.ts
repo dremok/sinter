@@ -2,17 +2,31 @@ import { describe, it, expect } from 'vitest'
 import { CAST, FERRYMAN, GATE_GUARD, KEEPER, WREN, npc, say, suggestFromPack } from './cast'
 import {
   DRIVES,
+  RUN_FLAGS,
   WORLD_FACTS,
+  WORLD_SUPPLIED_FLAGS,
   bestCarried,
+  blocks,
   emptySituation,
   entryNode,
   initialState,
+  postings,
   talk,
+  unplaced,
+  type Gate,
   type NpcDef,
   type NpcState,
+  type Outcome,
+  type PlaceKind,
+  type PlaceLike,
+  type RunFlag,
   type Situation,
   type WorldFact,
 } from './npc'
+// Types only, and deliberately: `world/region.ts` pulls in Three.js, and this
+// import is erased at build time, so the check below costs nothing at runtime
+// and still fails `npm run typecheck` if the two ever disagree.
+import type { Place } from '../world/region'
 import { CATALOG, STARTING_ITEMS } from '../items/catalog'
 import { RECIPES } from '../items/merge'
 import { p, type PropertyId } from '../props/registry'
@@ -77,6 +91,87 @@ function resolvingRoutes(def: NpcDef, sit: Situation, maxDepth = 6): string[][] 
 
   walk(initialState(def), [])
   return found
+}
+
+/** Carrying everything, knowing everything, having done everything. */
+function fullyEquipped(over: Partial<Situation> = {}): Situation {
+  return situation({
+    carried: reachable(),
+    skills: { firecraft: 1, haggling: 1, reading: 1, quiet_step: 1, butchery: 1, cold_blood: 1 },
+    done: new Set<RunFlag>(RUN_FLAGS),
+    ...over,
+  })
+}
+
+/**
+ * Every situation worth exploring from, which between them can satisfy any gate
+ * the vocabulary allows. Both settings of every fact, because a claim is only
+ * offered honestly in one of them and the `sour` node is only reachable through
+ * a lie, which needs the fact to be FALSE.
+ */
+const ALL_SITUATIONS: Situation[] = [
+  situation(),
+  fullyEquipped(),
+  fullyEquipped({ facts: { something_burning: true, after_dark: true, alone: true } }),
+]
+
+/**
+ * Every option id this person can ever actually put in front of a player.
+ *
+ * Computed by walking the real dialogue with the real engine, not by reading
+ * the table, because the question is whether the gates can all be satisfied at
+ * once from a state you can really get to. An option nobody can ever be offered
+ * is dead content, and dead content in a table is invisible: it typechecks, it
+ * reads fine, and it never appears in the game.
+ */
+function everOffered(def: NpcDef, sits: Situation[]): Set<string> {
+  const offered = new Set<string>()
+
+  const key = (s: NpcState) =>
+    `${s.at}|${s.disposition.toFixed(3)}|${DRIVES.map((d) => s.drives[d].toFixed(3)).join(',')}|${[...s.said].sort().join(',')}`
+
+  for (const sit of sits) {
+    const seen = new Set<string>()
+    const walk = (state: NpcState, depth: number): void => {
+      if (depth > 8 || seen.has(key(state))) return
+      seen.add(key(state))
+      for (const o of talk(def, state, sit).options) {
+        offered.add(o.id)
+        const said = say(def, state, sit, o.id)
+        if (!said.ended) walk(said.state, depth + 1)
+      }
+    }
+    walk(initialState(def), 0)
+  }
+  return offered
+}
+
+/** Every gate written anywhere in the cast, with enough context to name it. */
+function everyGate(): { def: NpcDef; where: string; gate: Gate }[] {
+  const out: { def: NpcDef; where: string; gate: Gate }[] = []
+  for (const def of CAST) {
+    for (const node of def.nodes) {
+      for (const g of node.when ?? []) out.push({ def, where: `${def.id}/${node.id} (entry)`, gate: g })
+      for (const o of node.options) {
+        for (const g of o.requires ?? []) out.push({ def, where: `${def.id}/${node.id}/${o.id}`, gate: g })
+      }
+    }
+  }
+  return out
+}
+
+/** Every outcome written anywhere in the cast, both sides of every lie. */
+function everyOutcome(): { def: NpcDef; where: string; out: Outcome }[] {
+  const out: { def: NpcDef; where: string; out: Outcome }[] = []
+  for (const def of CAST) {
+    for (const node of def.nodes) {
+      for (const o of node.options) {
+        out.push({ def, where: `${def.id}/${o.id}`, out: o.then })
+        if (o.caught) out.push({ def, where: `${def.id}/${o.id} (caught)`, out: o.caught })
+      }
+    }
+  }
+  return out
 }
 
 describe('the engine', () => {
@@ -267,6 +362,19 @@ describe('a person is an obstacle you can also walk around', () => {
     expect(distinct.size, `only one way through: ${[...distinct]}`).toBeGreaterThan(1)
   })
 
+  it('keeps every route the guard advertises open, counted rather than named', () => {
+    /**
+     * `cast.ts` claims six ways through him, five of them conversation. This
+     * counts, and does not name: a test listing 'bribe' would still pass with
+     * the bribe reachable only in theory, which is exactly what happened. His
+     * greed was above anything Band 0 could produce, so the bribe existed in
+     * the table, read correctly, and could never be chosen.
+     */
+    const routes = resolvingRoutes(GATE_GUARD, fullyEquipped(), 7)
+    const distinct = new Set(routes.map((r) => r[r.length - 1]!))
+    expect(distinct.size, `only ${distinct.size} ways past him: ${[...distinct]}`).toBeGreaterThanOrEqual(5)
+  })
+
   it('opens one more route when the world cooperates', () => {
     const carried = reachable()
     const calm = new Set(
@@ -353,6 +461,258 @@ describe('the cast is well formed', () => {
   it('is registered under its own id', () => {
     for (const def of CAST) expect(npc(def.id)).toBe(def)
     expect(npc('nobody')).toBeUndefined()
+  })
+})
+
+describe('nothing authored is unreachable', () => {
+  it('gives everybody something to say to a player carrying nothing', () => {
+    for (const def of CAST) {
+      const opening = talk(def, initialState(def), situation())
+      expect(opening.says.length, `${def.id} opens with silence`).toBeGreaterThan(0)
+      expect(opening.options.length, `${def.id} cannot be spoken to empty handed`).toBeGreaterThan(0)
+    }
+  })
+
+  it('can actually offer every option it authored', () => {
+    for (const def of CAST) {
+      const offered = everOffered(def, ALL_SITUATIONS)
+      for (const node of def.nodes) {
+        for (const o of node.options) {
+          expect(offered.has(o.id), `${def.id}/${node.id}/${o.id} can never be offered`).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('can actually reach every node it authored', () => {
+    // A node is reached either by being an entry or by being the target of an
+    // option that can be offered. A `sour` node nobody can sour into is a mood
+    // the game never has.
+    for (const def of CAST) {
+      const offered = everOffered(def, ALL_SITUATIONS)
+      const reached = new Set<string>()
+      for (const sit of ALL_SITUATIONS) {
+        try {
+          reached.add(entryNode(def, initialState(def), sit).id)
+        } catch {
+          // Covered by 'gives every conversation somewhere to start'.
+        }
+      }
+      for (const node of def.nodes) {
+        if (node.when) reached.add(node.id) // a mood; reachability of it is the drive test's job
+        for (const o of node.options) {
+          if (!offered.has(o.id)) continue
+          for (const outcome of [o.then, o.caught]) {
+            if (outcome?.goto && outcome.goto !== 'end') reached.add(outcome.goto)
+          }
+        }
+      }
+      for (const node of def.nodes) {
+        expect(reached.has(node.id), `${def.id}/${node.id} is a node nothing leads to`).toBe(true)
+      }
+    }
+  })
+
+  it('sours the guard into his own node, which is how that node is reached at all', () => {
+    // The one gated node in the cast, checked by walking rather than asserting
+    // that the gate looks satisfiable.
+    let s = initialState(GATE_GUARD)
+    s = say(GATE_GUARD, s, situation(), 'fire_behind_you').state
+    s = say(GATE_GUARD, s, situation(), 'fire_behind_you').state
+    expect(talk(GATE_GUARD, s, situation()).node).toBe('sour')
+    expect(talk(GATE_GUARD, s, fullyEquipped()).options.length).toBeGreaterThan(0)
+  })
+})
+
+describe('no gate is unsatisfiable', () => {
+  const have = reachable()
+  const best = (prop: PropertyId) =>
+    have.reduce((acc, id) => Math.max(acc, p(CATALOG[id]!.props, prop)), 0)
+
+  it('asks only for items Band 0 can produce', () => {
+    for (const { where, gate } of everyGate()) {
+      if (gate.kind !== 'item' || gate.is === false) continue
+      expect(have, `${where} wants ${gate.item}, which nothing in Band 0 yields`).toContain(gate.item)
+    }
+  })
+
+  it('asks only for property levels Band 0 can reach', () => {
+    for (const { def, where, gate } of everyGate()) {
+      if (gate.kind !== 'property') continue
+      // A drive threshold is checked at its STARTING value, which is what a
+      // first meeting sees. Drives move afterwards, and an option getting
+      // harder because you frightened somebody is design, not a defect.
+      const min = typeof gate.min === 'number' ? gate.min : def.drives[gate.min.drive]
+      expect(best(gate.prop), `${where} needs ${gate.prop} >= ${min} and nothing gets there`).toBeGreaterThanOrEqual(min)
+    }
+  })
+
+  it('asks only about lines somebody actually remembers', () => {
+    const remembered = new Map<string, Set<string>>()
+    for (const { def, out } of everyOutcome()) {
+      if (!out.remember) continue
+      const forNpc = remembered.get(def.id) ?? new Set<string>()
+      forNpc.add(out.remember)
+      remembered.set(def.id, forNpc)
+    }
+    for (const { def, where, gate } of everyGate()) {
+      if (gate.kind !== 'said' || gate.is === false) continue
+      expect(
+        remembered.get(def.id)?.has(gate.line),
+        `${where} waits for "${gate.line}", which ${def.id} never remembers`,
+      ).toBe(true)
+    }
+  })
+
+  it('asks only about run flags something can set', () => {
+    const settable = new Set<RunFlag>(WORLD_SUPPLIED_FLAGS)
+    for (const { out } of everyOutcome()) if (out.sets) settable.add(out.sets)
+
+    for (const { where, gate } of everyGate()) {
+      if (gate.kind !== 'done' || gate.is === false) continue
+      expect(settable.has(gate.flag), `${where} waits for ${gate.flag}, which nothing sets`).toBe(true)
+    }
+  })
+
+  it('declares no run flag that is dead on both ends', () => {
+    // The vocabulary is the contract with main.ts, so it must not accumulate
+    // flags nobody sets or nobody reads.
+    const set = new Set<RunFlag>(WORLD_SUPPLIED_FLAGS)
+    for (const { out } of everyOutcome()) if (out.sets) set.add(out.sets)
+    const read = new Set<RunFlag>()
+    for (const { gate } of everyGate()) if (gate.kind === 'done') read.add(gate.flag)
+
+    for (const flag of RUN_FLAGS) {
+      expect(set.has(flag), `${flag} is declared but nothing sets it`).toBe(true)
+      expect(read.has(flag), `${flag} is declared but nothing reads it`).toBe(true)
+    }
+  })
+
+  it('never writes a range nothing can sit in', () => {
+    for (const { where, gate } of everyGate()) {
+      if (gate.kind !== 'drive' && gate.kind !== 'disposition') continue
+      const min = gate.min ?? 0
+      const max = gate.max ?? 1
+      expect(min, `${where} wants ${min}..${max}, which is empty`).toBeLessThanOrEqual(max)
+      expect(min).toBeGreaterThanOrEqual(0)
+      expect(max).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('never asks for a skill nobody could have', () => {
+    for (const { where, gate } of everyGate()) {
+      if (gate.kind !== 'skill') continue
+      expect(gate.min, `${where} wants ${gate.skill} above 1`).toBeLessThanOrEqual(1)
+      expect(gate.min, `${where} wants a skill of 0, which is everybody`).toBeGreaterThan(0)
+    }
+  })
+
+  it('reaches a run flag through one person and spends it on another', () => {
+    // The whole point of the `done` gate, walked end to end rather than
+    // asserted. Without Wren, the option does not exist.
+    const cold = fullyEquipped({ done: new Set<RunFlag>() })
+    expect(talk(GATE_GUARD, initialState(GATE_GUARD), cold).options.map((o) => o.id)).not.toContain('the_swap')
+
+    const told = say(WREN, initialState(WREN), cold, 'about_the_gate')
+    expect(told.sets).toBe('knows_the_swap')
+
+    const warm = fullyEquipped({ done: new Set<RunFlag>([told.sets!]) })
+    expect(talk(GATE_GUARD, initialState(GATE_GUARD), warm).options.map((o) => o.id)).toContain('the_swap')
+    expect(say(GATE_GUARD, initialState(GATE_GUARD), warm, 'the_swap').state.resolved).toEqual({ kind: 'pacify' })
+  })
+})
+
+describe('people belong to a kind of place, not to a coordinate', () => {
+  /**
+   * D22, enforced at compile time. `PlaceKind` is declared in `npc.ts` rather
+   * than imported so that `agents/` never depends on `world/`, and this is what
+   * stops the two copies drifting: if the region adds or drops a kind, this
+   * stops compiling and `npm run typecheck` fails.
+   */
+  type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never
+  const KINDS_AGREE: Same<PlaceKind, Place['kind']> = true
+
+  /** The places the hand-laid Band 0 region exposes today, kinds only. */
+  const PLACES: PlaceLike[] = [
+    { id: 'hearth', kind: 'home' },
+    { id: 'well', kind: 'water' },
+    { id: 'pond', kind: 'water' },
+    { id: 'ford', kind: 'water' },
+    { id: 'mill', kind: 'work' },
+    { id: 'barn', kind: 'work' },
+    { id: 'field', kind: 'work' },
+    { id: 'block', kind: 'work' },
+    { id: 'oldoak', kind: 'landmark' },
+    { id: 'grave', kind: 'landmark' },
+    { id: 'arch', kind: 'landmark' },
+    { id: 'tower', kind: 'landmark' },
+    { id: 'gate', kind: 'exit' },
+  ]
+
+  it('agrees with the region about what kinds of place exist', () => {
+    expect(KINDS_AGREE).toBe(true)
+  })
+
+  it('finds everybody a place in the region as it stands', () => {
+    expect(unplaced(CAST, PLACES)).toEqual([])
+    expect(postings(CAST, PLACES).length).toBe(CAST.length)
+  })
+
+  it('puts the person who is in the way in the way, and the rest beside him', () => {
+    const atGate = postings(CAST, PLACES).filter((post) => post.place.id === 'gate')
+    expect(atGate.length, 'the guard and the ferryman both belong at the way out').toBe(2)
+
+    const guard = atGate.find((post) => post.def === GATE_GUARD)!
+    expect(blocks(GATE_GUARD)).toBe(true)
+    expect(guard.offset, 'a blocker stands ON the place, or he is not blocking it').toEqual({ dx: 0, dz: 0 })
+
+    const ferryman = atGate.find((post) => post.def === FERRYMAN)!
+    expect(Math.hypot(ferryman.offset.dx, ferryman.offset.dz), 'two people inside each other').toBeGreaterThan(1)
+  })
+
+  it('never stands two people on the same spot', () => {
+    const seen = new Set<string>()
+    for (const post of postings(CAST, PLACES)) {
+      const spot = `${post.place.id}@${post.offset.dx},${post.offset.dz}`
+      expect(seen.has(spot), `two people at ${spot}`).toBe(false)
+      seen.add(spot)
+    }
+  })
+
+  it('treats a preferred place as a hint and not a requirement', () => {
+    expect(postings(CAST, PLACES).find((post) => post.def === WREN)!.place.id).toBe(WREN.prefer)
+
+    // A generated region that never heard of the chopping block still gets her.
+    const without = PLACES.filter((pl) => pl.id !== 'block')
+    const moved = postings(CAST, without).find((post) => post.def === WREN)!
+    expect(moved.place.kind).toBe('work')
+    expect(unplaced(CAST, without)).toEqual([])
+  })
+
+  it('spreads people of one kind across the places of it', () => {
+    const crowd: NpcDef[] = [WREN, { ...WREN, id: 'wren2', prefer: undefined }, { ...WREN, id: 'wren3', prefer: undefined }]
+    const where = postings(crowd, PLACES).map((post) => post.place.id)
+    expect(new Set(where).size, 'three workers stacked on one workplace').toBeGreaterThan(1)
+  })
+
+  it('survives a region that has almost nothing, rather than inventing a coordinate', () => {
+    const bare: PlaceLike[] = [{ id: 'fire', kind: 'home' }]
+    const placed = postings(CAST, bare)
+    expect(placed.map((post) => post.def.id)).toEqual([KEEPER.id])
+    expect(unplaced(CAST, bare).map((d) => d.id).sort()).toEqual(['ferryman', 'gate_guard', 'wren'])
+  })
+
+  it('hands the caller its own place back, with whatever it was carrying', () => {
+    // The generic is what keeps Three.js out of this module: main.ts passes
+    // region.places straight in and gets objects with `at` still on them.
+    const rich = PLACES.map((pl) => ({ ...pl, at: { x: 1, y: 2, z: 3 } }))
+    expect(postings(CAST, rich)[0]!.place.at).toEqual({ x: 1, y: 2, z: 3 })
+  })
+
+  it('names a kind of place and never a coordinate', () => {
+    for (const def of CAST) {
+      expect(PLACES.map((pl) => pl.kind), `${def.id} stands somewhere no region has`).toContain(def.stands)
+    }
   })
 })
 

@@ -1,28 +1,52 @@
 /**
- * The player character: a hooded scavenger.
+ * The player character: a scavenger.
  *
- * The camera shows 22 world units top to bottom whatever the resolution, and
- * the character is 1.35 units tall, so it is always about a twentieth of the
- * frame height: roughly 50 pixels in a 900 line window and about 60 at 1080p.
- * Raising the render resolution did not make the character bigger and never
- * will, because the camera is what decides its size. That is sprite territory.
- * Nothing about a face, a belt buckle or a fold of cloth survives at that size;
- * what survives is the outline and the value structure. So the whole design is
- * an outline problem, and every part here earns its place by changing the
- * silhouette:
+ * ------------------------------------------------------------------ the size
  *
- *   - a big pointed hood that overhangs the face and runs back into a spike
- *   - a short mantle that flares off the shoulders, and a long cloak behind it
- *   - a pack that rises above the shoulder line with a bedroll lashed across it
- *   - chunky boots below the hem, wider than the legs they hang off
+ * MEASURED, not assumed, with `__sinter.project` on the live camera: at 1600 by
+ * 900 the figure is **45 pixels** from boot to crown, and the head is about ten
+ * of them. Every judgement below is made against that number, so it is worth
+ * knowing where it comes from and that it is currently the wrong number.
  *
- * Read as a shape, that is a wedge on top of a triangle on top of two blocks,
- * with one bright roll cutting across the back. It is not a person-shaped blob.
+ * `IsoCamera.viewSize` defaults to 22 and is applied by `setAspect`, which the
+ * constructor calls. `main.ts` then assigns `iso.viewSize = 13` and never calls
+ * `setAspect` again, so the projection matrix keeps the 22 it was built with.
+ * The game boots at 22 and snaps to 13 the first time the player touches the
+ * scroll wheel or resizes the window. One line in `main.ts` fixes it and the
+ * figure becomes 76 pixels; until it does, 45 is what ships and 45 is what this
+ * file is drawn for. Anything that reads at 45 also reads at 76.
  *
- * Proportions are stylised, not anatomical. The head is roughly a quarter of
- * the total height and nearly as wide as the shoulders, the legs are short, the
- * boots are oversized. Realistic proportions read as "small generic human" at
- * fifty pixels; exaggerated ones read as a character.
+ * At 45 pixels a face is ten pixels of head, an eye is one pixel and a mouth is
+ * one. That is sprite territory, so the design is a silhouette-and-value
+ * problem first and a modelling problem a distant second.
+ *
+ * ------------------------------------------------------------ what reads, why
+ *
+ * Three things carry the whole figure, in this order:
+ *
+ *   1. A shoulder line WIDER than the head. This is the single change that
+ *      stopped it reading as a bobblehead. The tunic used to be narrowest at
+ *      the shoulders and flare to its widest at the hem, which is the shape of
+ *      a dress: the eye found no shoulders at all, so the head had nothing to
+ *      be measured against and looked enormous. The yoke is now the widest
+ *      thing on the body and the hem is pulled in under it.
+ *   2. A neck. Two pixels of skin between a dark collar and the jaw. A head
+ *      welded straight onto the shoulders reads as a helmet however well the
+ *      face is modelled, because the join is where the eye looks to decide
+ *      whether a thing is wearing a head or has one.
+ *   3. Hair that covers the top third of the head and no more. It used to
+ *      cover the top half AND overhang the skull on every side, which is the
+ *      literal description of a helmet, and is what Max was seeing.
+ *
+ * Then, in the second rank: hands a shade lighter than everything near them, so
+ * the arm swing is visible; boots a step off the trousers, so the walk has a
+ * foot; a pack that stops below the chin instead of sticking out either side of
+ * the head.
+ *
+ * Proportions are stylised, not anatomical. The head is about a quarter of the
+ * height, the legs are short, the boots are oversized. Realistic proportions
+ * read as "small generic human" at fifty pixels; exaggerated ones read as a
+ * character.
  *
  * Forms are beveled boxes rather than plain boxes. An octagonal prism scaled to
  * a width and a depth is a box with its four vertical corners cut, which is
@@ -72,33 +96,37 @@ const TAU = Math.PI * 2
 /**
  * Three masses, three values.
  *
- * At play size the figure is about 26 by 45 pixels and the scene's outline pass
- * is a fixed world-space width, so it eats roughly 3 pixels off every edge and
- * bites irregular wedges out of anything narrow. Under that, a character whose
- * parts differ only in hue collapses into one smear: the previous pass had a
- * hood at luma 194 sitting on a mantle at luma 211 and the head could not be
- * told from the shoulders, which is exactly what happened.
+ * The figure is about 26 by 45 pixels, and a character whose parts differ only
+ * in hue collapses into one smear at that size: the pass before last had a hood
+ * at luma 194 sitting on a mantle at luma 211 and the head could not be told
+ * from the shoulders.
  *
  * So the blocking is value first and everything else second. Head is light,
  * torso is mid, legs are near-black, and the steps between them are about 90
- * points each. That reads as three bands even when the outline has eaten the
- * edges, the frame is desaturated, and every piece of detail is gone.
+ * points each. That reads as three bands even when the frame is desaturated and
+ * every piece of detail is gone.
  *
- * The corollary is that detail below about 3 pixels is not detail, it is noise
- * for the outline to bisect. A lantern, a bedroll, a chest strap, a buckle, hip
- * pouches, boot cuffs and pack lashings were all modelled here and all deleted:
- * individually good ideas, collectively a smear.
+ * ------------------------------------------------------- what the outline does
+ *
+ * The header used to say the outline pass is "a fixed world-space width, so it
+ * eats roughly 3 pixels off every edge". Read `render/outline.ts`: it is not,
+ * and it has not been for a while. The hull width is
+ *
+ *     clamp( screenPx * 0.017, 1, 3 ) * smoothstep( 5, 9, screenPx )
+ *
+ * where `screenPx` is the mesh's OWN world height in pixels. Reaching 3px needs
+ * a mesh 4.3 metres tall; nothing on a 1.35 metre character comes close, so
+ * every outline here is exactly one pixel, and anything under about six pixels
+ * tall gets none at all. That is why the eyes and the mouth work now, and it is
+ * also why `feature()` below is belt and braces rather than the load-bearing
+ * trick it was written as.
+ *
+ * A one-pixel line does not eat edges. It does still merge SEPARATE small parts
+ * whose gap is a pixel, which is the real reason a lantern, a bedroll, a chest
+ * strap, a buckle, hip pouches, boot cuffs and pack lashings were all modelled
+ * here and all deleted: individually good ideas, collectively a smear.
  */
 const HUE = {
-  /**
-   * Head. The lightest thing on the character by a wide margin, but held back
-   * from white on purpose: the frame's exposure is being lifted about a quarter
-   * and a hood already sitting at 220 would clip to flat white and lose its
-   * form. At 202 there is still an 80 point step down to the torso.
-   */
-  head: 0xd8c9a6,
-  /** A plane change on the hood brow. Still firmly inside the light band. */
-  headShade: 0xc0b28f,
   /**
    * Skin, and the lightest thing on the character.
    *
@@ -108,32 +136,42 @@ const HUE = {
    * a head read as a head rather than as headgear.
    */
   skin: 0xecd2ac,
-  /** Turned planes of the face: the nose, the ears. */
+  /** Turned planes of the face and the neck: the nose, the ears, under the jaw. */
   skinShade: 0xd0b087,
   /**
-   * Hair. Sandy, and the value is load bearing.
+   * Hair. Sandy, and both its value and its CHROMA are load bearing.
    *
    * Dark hair reads as hair immediately and is wrong here: it lands at the same
    * value as the torso, and it sits directly in front of the pack, which is
-   * dark for the express reason that it must not compete with the head. At 159
-   * it is a clear step under the skin, a clear step over the pack, and the head
-   * stays the light mass the whole value plan is built on.
+   * dark for the express reason that it must not compete with the head.
+   *
+   * It was 0xc79a5c, which is the same argument with more saturation, and on
+   * screen that came out as a solid gold cap: the crown is the one surface on
+   * the character pointing straight at a 44 degree sun, so it lands in the
+   * ramp's top band, and then the grade lifts exposure by 1.48 and pushes
+   * saturation UP in the highlights. A saturated gold in shadow is sandy hair;
+   * the same gold in full sun is a brass helmet. Dropping the chroma and about
+   * fifteen points of value costs nothing in the shade and is the difference in
+   * the sun. It is still a clear step over the pack.
    */
-  hair: 0xc79a5c,
-  /** Torso, mantle and sleeves. Mid, and where the red identity now lives. */
+  hair: 0xb08a5e,
+  /** Torso, yoke and sleeves. Mid, and where the red identity now lives. */
   torso: 0xc16a48,
   /** The trailing cloak panel, a step under the torso so it reads as behind. */
   cloak: 0x9c4632,
-  /** Legs, boots, mitts and the collar. One near-black mass. */
+  /** Trousers, forearms and the collar. One near-black mass. */
   legs: 0x241d16,
+  /**
+   * Boots. A small step up off the trousers, and the only value break allowed
+   * inside the dark band.
+   *
+   * The lower body was one unbroken black trapezoid, so the walk had feet that
+   * could not be seen doing anything. Twenty points of luma is enough to say
+   * "the leg ends here" and not enough to break the third band into two.
+   */
+  boot: 0x3d3025,
   /** The pack. Dark, because it sits behind the head and must not compete. */
   pack: 0x5a4630,
-  /**
-   * The face. Mid, so it separates from the hood without leaving the head's
-   * light band: the head has to stay one light mass at a distance and only
-   * resolve into a face when you look at it.
-   */
-  face: 0xc9a078,
   /** Eyes and brow. The darkest thing on the head, by a long way. */
   eye: 0x18131a,
   /** Mouth. A step lighter than the eyes, so the eyes still win the face. */
@@ -147,10 +185,18 @@ const HUE = {
 /** Hip height, and the origin of both the pelvis and the chest. */
 const HIP = 0.55
 /** Shoulder and neck, in chest-local space. */
-const SHOULDER = 0.34
+const SHOULDER = 0.31
 const NECK = 0.42
+/**
+ * Half the distance between the shoulder joints.
+ *
+ * Was 0.17, which put the arms inside the width of the tunic and left the
+ * figure with no shoulder at all. The yoke is 0.50 across, so at 0.20 the upper
+ * arm's outer edge stands a little proud of it, which is what a deltoid does.
+ */
+const ARM = 0.2
 /** Where the pack rides, in chest-local space. */
-const PACK = new THREE.Vector3(0, 0.3, -0.24)
+const PACK = new THREE.Vector3(0, 0.22, -0.23)
 
 /** Full stride frequency at top speed, in radians per second. */
 const STRIDE = 14
@@ -352,7 +398,7 @@ export class Character {
       ankle.position.y = -0.2
       knee.add(ankle)
 
-      const boot = bevel(0.24, 0.16, 0.29, HUE.legs)
+      const boot = bevel(0.24, 0.16, 0.29, HUE.boot)
       boot.position.set(0, -0.04, 0.045)
       ankle.add(boot)
 
@@ -361,21 +407,94 @@ export class Character {
     }
   }
 
+  /**
+   * A tunic, and above it the most important shape on the character.
+   *
+   * The torso alone is 0.38 across and the tunic hem below it was 0.51, so the
+   * upper body was a wedge that got WIDER as it went down and had its narrowest
+   * point exactly where the shoulders should have been. Nothing about that
+   * silhouette says shoulders, and with no shoulders to measure it against a
+   * head of perfectly ordinary size reads as a bobblehead. That is what Max was
+   * seeing, and no amount of work on the face was going to fix it.
+   *
+   * So the yoke: 0.50 across the flats, sitting from just under the collar to
+   * just under the armpit, and flaring DOWNWARD so its widest edge is the
+   * shoulder line rather than its narrowest. It is the widest thing on the
+   * figure by 5cm, the head is 0.29, and the ratio between those two is what
+   * the eye actually uses to size a person.
+   */
   private buildTorso(): void {
-    const torso = bevel(0.38, 0.44, 0.28, HUE.torso, 1.05)
-    torso.position.y = 0.2
+    const torso = bevel(0.38, 0.42, 0.28, HUE.torso, 1.1)
+    torso.position.y = 0.145
     this.chest.add(torso)
+
+    const yoke = bevel(0.5, 0.15, 0.32, HUE.torso, 0.8)
+    yoke.position.y = 0.285
+    this.chest.add(yoke)
+
+    // A near-black collar between the light head and the mid torso. It belongs
+    // to the chest and not to the head, which is where it used to live: a
+    // collar that yaws with the head turns the whole neck-and-shoulder join
+    // into one rigid piece, which is half of what "helmet" means.
+    const collar = bevel(0.19, 0.07, 0.19, HUE.legs)
+    collar.position.y = 0.325
+    this.chest.add(collar)
+
+    /**
+     * The neck. Two pixels of it, and worth more than any other two pixels here.
+     *
+     * There was none at all: the jaw sat on a dark collar which sat on the
+     * shoulders, so the head was a separate object resting on a body. A head
+     * needs to be seen to be attached, and the thing that shows attachment is a
+     * short lit column with a shadow under the jaw. Chest-parented, so the head
+     * turns on it rather than carrying it around.
+     *
+     * Everything above the armpit had to come down 8cm to make room for it, and
+     * the throat had to come 3cm forward. Both because of the camera, and this
+     * is worth doing the arithmetic for rather than nudging:
+     *
+     * the rig looks down along (1,1,1), so a point 1cm below the chin is hidden
+     * unless it also sits 1cm PROUD of the chin in z. The jaw's front face is at
+     * z 0.128, so a throat at z 0 is occluded by its own chin for the first
+     * 6.3cm below the jaw, and the first attempt at a neck exposed 6.8cm. Half
+     * a centimetre of visible neck, which is a fifth of a pixel. It looked
+     * exactly like no neck at all, because it was.
+     *
+     * Dropping the collar and pushing the throat forward leaves 10cm exposed
+     * with 3cm of it in the chin's shadow: about two pixels of lit skin between
+     * a dark collar and the jaw, with the dark pack directly behind it.
+     */
+    const neck = bevel(0.13, 0.19, 0.13, HUE.skinShade)
+    neck.position.set(0, 0.41, 0.03)
+    this.chest.add(neck)
   }
 
   private buildArms(): void {
     for (const side of [-1, 1] as const) {
       const shoulder = new THREE.Group()
-      shoulder.position.set(side * 0.17, SHOULDER, 0)
+      shoulder.position.set(side * ARM, SHOULDER, 0)
 
-      // The whole arm is dark and tucked inside the mantle's shoulder radius.
-      // Only the forearm and mitt clear the hem, so the arm swings inside the
-      // lower dark mass rather than leaving a lit sliver beside the torso.
-      const upper = bevel(0.13, 0.22, 0.14, HUE.legs)
+      /**
+       * Three values down one arm: sleeve, cuff, hand.
+       *
+       * The whole arm used to be near-black, on the reasoning that it should
+       * hide inside the lower dark mass. It did, completely: the arm swing was
+       * invisible, which is most of the animation budget spent on something
+       * nobody can see. Worse, the shoulder had no sleeve, so the tunic simply
+       * stopped at the torso edge.
+       *
+       * The sleeve takes the cloak's value rather than the torso's, which was
+       * the first thing tried and does not work: an arm the same colour as the
+       * chest it hangs against is the same as no arm, and the figure came out
+       * as one wide orange lump with two hands attached to it. A step down says
+       * "beside the body" for exactly the reason the cloak uses it to say
+       * "behind the body". Cuff near-black keeps the middle of the arm quiet.
+       * The hand is a shade under the face, so it is the second lightest thing
+       * on the figure: four pixels of light that move against a dark lower body
+       * every stride, and deliberately not as light as the face, which still
+       * has to win.
+       */
+      const upper = bevel(0.14, 0.22, 0.15, HUE.cloak)
       upper.position.y = -0.11
       shoulder.add(upper)
 
@@ -387,7 +506,7 @@ export class Character {
       fore.position.y = -0.09
       elbow.add(fore)
 
-      const mitt = bevel(0.13, 0.12, 0.14, HUE.legs)
+      const mitt = bevel(0.125, 0.115, 0.135, HUE.skinShade)
       mitt.position.y = -0.215
       elbow.add(mitt)
 
@@ -400,53 +519,59 @@ export class Character {
     this.head.position.y = NECK
     this.chest.add(this.head)
 
-    // A near-black collar between the light head and the mid torso. The value
-    // step already separates them; this makes the join a hard edge rather than
-    // a gradient the outline can smudge.
-    const collar = bevel(0.3, 0.09, 0.28, HUE.legs)
-    collar.position.y = -0.03
-    this.head.add(collar)
-
     /**
-     * A head, in two masses.
+     * A head, in two masses, and smaller than it was.
      *
-     * This was one tapered block 0.36 by 0.34 by 0.42 in a single pale colour,
-     * with a small darker plate stuck on the front for a face. Deeper than it
-     * was wide, uniform in value, and rounded over the top: Max called it a
-     * weird helmet, which is precisely what that describes.
+     * Before this it was one tapered block in a single pale colour with a small
+     * darker plate stuck on the front for a face. Then it became two masses,
+     * which was the right idea, and still read as headgear. Three things were
+     * wrong and all three were about the HAIR rather than about the face:
      *
-     * What makes a head read as a head at forty pixels is not detail, it is the
-     * two-mass structure everybody's visual system is tuned for — a cranium
-     * with hair on it, and a narrower jaw below the brow carrying a lighter
-     * face. Get those two shapes and their values right and the features are
-     * confirmation rather than the whole argument.
+     *   - it was 0.322 wide over a 0.30 skull and 0.318 deep over a 0.285 one,
+     *     so it overhung the head on every side. A shape that is bigger than the
+     *     head underneath it and rests on top of it is a hat. That is not an
+     *     analogy, it is the definition.
+     *   - it covered the skull from 1.19 up, which with the fringe in front of
+     *     it left about a pixel and a half of forehead. Hair to the eyebrows on
+     *     all sides is a helmet liner.
+     *   - lit gold on the crown, see HUE.hair.
      *
-     * So: cranium wider than deep now rather than the reverse, a jaw that
-     * tapers to a chin, hair over the crown and back with a fringe at the brow,
-     * and ears where the two masses meet.
+     * It is now narrower and shallower than the skull it sits on, so a sliver
+     * of temple shows on each side, and it starts high enough to leave real
+     * forehead under the fringe. Total head is 0.29, about 21% of the figure
+     * and roughly ten pixels, against 0.32 and 24% before.
+     *
+     * The rest is unchanged and was right: cranium wider than deep, a jaw that
+     * tapers to a chin, ears where the two masses meet.
      */
-    const skull = bevel(0.30, 0.21, 0.285, HUE.skin, 0.94)
-    skull.position.set(0, 0.255, -0.015)
+    const skull = bevel(0.275, 0.19, 0.26, HUE.skin, 0.95)
+    skull.position.set(0, 0.245, -0.012)
     this.head.add(skull)
 
     // Taper > 1 widens the TOP, so this narrows downward: cheekbones to chin.
-    const jaw = bevel(0.272, 0.155, 0.262, HUE.skin, 1.16)
-    jaw.position.set(0, 0.132, 0.008)
+    const jaw = bevel(0.245, 0.145, 0.235, HUE.skin, 1.15)
+    jaw.position.set(0, 0.115, 0.01)
     this.head.add(jaw)
 
-    const hair = bevel(0.322, 0.155, 0.318, HUE.hair, 0.86)
-    hair.position.set(0, 0.30, -0.045)
+    const hair = bevel(0.283, 0.12, 0.272, HUE.hair, 0.9)
+    hair.position.set(0, 0.3, -0.03)
     this.head.add(hair)
+
+    // The back of the head, which is otherwise bald: the cap above stops at the
+    // crown, and from three quarters on the camera sees plenty of nape.
+    const nape = box(0.23, 0.15, 0.06, HUE.hair)
+    nape.position.set(0, 0.225, -0.115)
+    this.head.add(nape)
 
     // The fringe is what stops the hair reading as a cap: a hard dark-over-light
     // edge at the brow line is the single most face-making shape on a head.
-    const fringe = box(0.278, 0.05, 0.095, HUE.hair)
-    fringe.position.set(0, 0.262, 0.098)
+    const fringe = box(0.245, 0.045, 0.075, HUE.hair)
+    fringe.position.set(0, 0.245, 0.098)
     this.head.add(fringe)
 
     for (const side of [-1, 1] as const) {
-      const ear = feature(0.035, 0.062, 0.055, HUE.skinShade)
-      ear.position.set(side * 0.150, 0.196, -0.005)
+      const ear = feature(0.032, 0.058, 0.05, HUE.skinShade)
+      ear.position.set(side * 0.138, 0.168, -0.004)
       this.head.add(ear)
     }
 
@@ -464,18 +589,19 @@ export class Character {
      */
     const front = new THREE.Group()
     front.rotation.x = -0.3
-    front.position.set(0, 0.196, 0.115)
+    front.position.set(0, 0.168, 0.103)
     this.head.add(front)
 
     /**
      * Brow, eyes, nose, mouth, and none of them outlined.
      *
-     * The face was two dark pixels, on the reasoning that anything more becomes
-     * "noise for the outline to bisect". The observation was right and the
-     * conclusion was backwards: it is noise only BECAUSE the outline was drawing
-     * round it. The pass is a fixed world-space width, so on a two-pixel eye the
-     * hull is wider than the eye and four features two pixels apart merge into
-     * one dark blob. Excluded from the pass, the same four read cleanly.
+     * The face was two dark pixels for a long time, on the reasoning that
+     * anything more becomes "noise for the outline to bisect". That was right
+     * about the symptom and wrong about the cause: `outline.ts` fades the hull
+     * out entirely below about six pixels of object height, so these never take
+     * one anyway, and `feature()` is now insurance rather than the mechanism.
+     * What actually merges small features is their own spacing, so the rows are
+     * kept a clear pixel apart at play size and no closer.
      *
      * The rows are spaced so that when the face collapses to four pixels of
      * height at distance, what survives is dark-light-dark-light: fringe, brow,
@@ -483,25 +609,25 @@ export class Character {
      * see a single feature, and it is the real test, not whether the mouth is
      * legible.
      */
-    const brow = feature(0.16, 0.022, 0.04, HUE.skinShade)
-    brow.position.set(0, 0.044, 0.025)
+    const brow = feature(0.145, 0.02, 0.036, HUE.skinShade)
+    brow.position.set(0, 0.042, 0.023)
     front.add(brow)
 
     for (const side of [-1, 1] as const) {
-      const eye = feature(0.04, 0.038, 0.04, HUE.eye)
-      eye.position.set(side * 0.05, 0.008, 0.032)
+      const eye = feature(0.037, 0.034, 0.036, HUE.eye)
+      eye.position.set(side * 0.046, 0.006, 0.029)
       front.add(eye)
     }
 
     // A plane, not a lump. Standing the nose out gives it a lit side and a
     // shadowed one, which at this size is worth more than its silhouette: it is
     // what stops the face reading as a sticker printed on the front of a block.
-    const nose = feature(0.03, 0.052, 0.042, HUE.skinShade)
-    nose.position.set(0, -0.032, 0.036)
+    const nose = feature(0.028, 0.048, 0.038, HUE.skinShade)
+    nose.position.set(0, -0.03, 0.032)
     front.add(nose)
 
-    const mouth = feature(0.058, 0.02, 0.035, HUE.mouth)
-    mouth.position.set(0, -0.072, 0.026)
+    const mouth = feature(0.052, 0.018, 0.032, HUE.mouth)
+    mouth.position.set(0, -0.066, 0.023)
     front.add(mouth)
 
     /**
@@ -515,19 +641,23 @@ export class Character {
      */
     const specs = new THREE.Group()
     for (const side of [-1, 1] as const) {
-      const rim = feature(0.082, 0.068, 0.028, HUE.frame)
-      rim.position.set(side * 0.052, 0.008, 0.042)
+      const rim = feature(0.076, 0.062, 0.026, HUE.frame)
+      rim.position.set(side * 0.048, 0.006, 0.038)
       specs.add(rim)
-      const lens = feature(0.058, 0.046, 0.022, HUE.lens)
-      lens.position.set(side * 0.052, 0.008, 0.052)
+      const lens = feature(0.053, 0.042, 0.02, HUE.lens)
+      lens.position.set(side * 0.048, 0.006, 0.047)
       specs.add(lens)
-      // Arms, back along the temple. Only a few pixels, but they are what say
-      // the glasses are ON the head rather than painted on the front of it.
-      const arm = feature(0.02, 0.015, 0.14, HUE.frame)
-      arm.position.set(side * 0.096, 0.02, -0.03)
+      // Arms, back along the temple. They were at x 0.096 against a skull half
+      // width of 0.15, which is to say entirely INSIDE the head and drawn
+      // nowhere. Out at the surface they are a dark line down the near temple,
+      // which is what says the glasses are ON the head rather than painted on
+      // the front of it. Under a three-quarter camera one temple always faces
+      // the viewer, so it is one of the two that is worth modelling.
+      const arm = feature(0.018, 0.014, 0.13, HUE.frame)
+      arm.position.set(side * 0.131, 0.018, -0.028)
       specs.add(arm)
     }
-    const bridge = feature(0.034, 0.016, 0.024, HUE.frame)
+    const bridge = feature(0.031, 0.015, 0.022, HUE.frame)
     bridge.position.set(0, 0.014, 0.044)
     specs.add(bridge)
 
@@ -544,7 +674,13 @@ export class Character {
     // separate one. It hangs to just above the knee, which leaves a long dark
     // leg mass below it: the previous hem sat high enough that the legs were
     // barely present at all.
-    const mantleGeo = new THREE.CylinderGeometry(0.195, 0.275, 0.32, 8, 1, true)
+    //
+    // The hem was 0.275, which is 0.51 across the flats against a 0.38 torso
+    // and, at the time, no shoulder at all. The widest point of the upper body
+    // was therefore down at hip height, which is the silhouette of a skirt. It
+    // is pulled in under the yoke now: the shoulders are 0.50 across and the
+    // hem is 0.45, so the tunic narrows downward like a garment on a person.
+    const mantleGeo = new THREE.CylinderGeometry(0.195, 0.245, 0.32, 8, 1, true)
     mantleGeo.rotateY(Math.PI / 8)
     mantleGeo.translate(0, -0.16, 0)
     const mantleMesh = new THREE.Mesh(
@@ -575,10 +711,16 @@ export class Character {
 
     // One mass. The lid, the bedroll, the lashings and the hanging lantern all
     // lived here and all had to go: the bedroll in particular stuck out either
-    // side of the hood, which is precisely what made head and shoulders
+    // side of the head, which is precisely what made head and shoulders
     // impossible to tell apart.
-    const sack = bevel(0.32, 0.38, 0.24, HUE.pack, 0.92)
-    sack.position.y = 0.16
+    //
+    // Lower and narrower than it was. It topped out at 1.20 world, which is eye
+    // height, and it is 0.30 across against a 0.28 head, so at three quarters
+    // it showed as two dark ears sticking out past the skull. It now stops just
+    // under the chin: still above the shoulder line, which is what it is for,
+    // but no longer part of the head's outline.
+    const sack = bevel(0.3, 0.32, 0.23, HUE.pack, 0.92)
+    sack.position.y = 0.1
     this.pack.add(sack)
   }
 

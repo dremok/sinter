@@ -67,7 +67,11 @@ async function startDevServer(): Promise<{ url: string; proc: ChildProcess }> {
   })
 
   const url = await new Promise<string>((res, rej) => {
-    const timer = setTimeout(() => rej(new Error('vite did not start within 30s')), 30_000)
+    // Generous, because this repo is often driven by several agents at once and
+    // a machine running eight vite servers and eight browsers takes far longer
+    // to answer than a machine running one. A timeout that trips under load
+    // reads as a code failure and is not one; that cost real debugging time.
+    const timer = setTimeout(() => rej(new Error('vite did not start within 120s')), 120_000)
     proc.stdout?.on('data', (chunk: Buffer) => {
       const m = /(http:\/\/localhost:\d+)/.exec(chunk.toString())
       if (m?.[1]) {
@@ -108,8 +112,8 @@ try {
     (args.wear ? `&wear=${encodeURIComponent(args.wear)}` : '') +
     (args.slots ? `&slots=${encodeURIComponent(args.slots)}` : '')
   const target = `${url}/?seed=${encodeURIComponent(args.seed)}&ticks=${args.ticks}${extra}`
-  await page.goto(target, { waitUntil: 'load' })
-  await page.waitForFunction(() => window.__sinterReady === true, undefined, { timeout: 30_000 })
+  await page.goto(target, { waitUntil: 'load', timeout: 120_000 })
+  await page.waitForFunction(() => window.__sinterReady === true, undefined, { timeout: 120_000 })
 
   await mkdir(dirname(args.out), { recursive: true })
   await page.screenshot({ path: args.out })

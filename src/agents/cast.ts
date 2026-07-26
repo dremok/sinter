@@ -6,7 +6,7 @@
  * `docs/DESIGN.md`. Band 3 people say LESS, not more, and the test at the
  * bottom of `npc.test.ts` holds the line on that in advance.
  *
- * The guard is the one carrying the design weight. Five ways through him:
+ * The guard is the one carrying the design weight. Six ways through him:
  *
  *   bribe        anything VALUABLE at or above his greed, and the cheapest
  *                sufficient thing is what he takes
@@ -14,6 +14,8 @@
  *   lie          tell him something is burning, which works only when
  *                something IS burning
  *   bore         wait him out, because his boredom starts at 0.8 and rises
+ *   blackmail    what Wren told you about his shift, which is the only route
+ *                that runs through a second person
  *   walk away    burn, cut or climb the palisade somewhere he is not
  *
  * Only the last of those is unauthored, and it is the one that matters most.
@@ -51,8 +53,22 @@ export const GATE_GUARD: NpcDef = {
   name: 'The Gate Guard',
   blurb: 'Young, cold, and counting the hours until somebody relieves him.',
   band: 0,
+  // The way out, whichever way out a region ends up having.
+  stands: 'exit',
   disposition: 0.5,
-  drives: { greed: 0.6, fear: 0.35, loyalty: 0.4, curiosity: 0.2, boredom: 0.8 },
+  /**
+   * Greed was 0.6, and at 0.6 he could not be bribed at all: the most VALUABLE
+   * thing Band 0 can produce is the sword at 0.5, and the merge results carry
+   * their parents' value rather than summing it. The bribe was dead content and
+   * had been since it was written, which nobody noticed because the other five
+   * routes work. `npc.test.ts` computes this now instead of trusting it.
+   *
+   * 0.5 is therefore a price with a meaning: the sword, or something made from
+   * it, and nothing else. Handing over the best thing you own to walk through a
+   * gate is the trade this is supposed to be. Do not raise this without raising
+   * something in the catalog to match, and the test will say so if you do.
+   */
+  drives: { greed: 0.5, fear: 0.35, loyalty: 0.4, curiosity: 0.2, boredom: 0.8 },
   routesPast: [
     { prop: 'HOT', min: 0.35, says: 'Burn the palisade somewhere down the line and walk through the gap.' },
     { prop: 'TOOL_CUTTING', min: 0.45, says: 'Cut through the wall where he is not standing.' },
@@ -150,6 +166,23 @@ export const GATE_GUARD: NpcDef = {
           },
         },
         {
+          /**
+           * What Wren told you, used. Nothing about this is a quest step: the
+           * flag is knowledge, the option is offered the moment you have it,
+           * and if you never talk to her it simply is not there. Note that it
+           * costs disposition. He does what you want and likes you less.
+           */
+          id: 'the_swap',
+          text: 'You swapped shifts and told nobody.',
+          requires: [{ kind: 'done', flag: 'knows_the_swap' }],
+          then: {
+            reply: 'Who said that. Go on, then. Quick, and we never spoke.',
+            disposition: -0.1,
+            drives: { fear: 0.2 },
+            resolve: { kind: 'pacify' },
+          },
+        },
+        {
           id: 'wait',
           text: '(say nothing, and wait)',
           requires: [{ kind: 'drive', drive: 'boredom', max: 0.94 }],
@@ -187,6 +220,7 @@ export const KEEPER: NpcDef = {
   name: 'The Keeper',
   blurb: 'Elderly, runs the hearth, and has outlived most of the people who left.',
   band: 0,
+  stands: 'home',
   disposition: 0.7,
   drives: { greed: 0.1, fear: 0.15, loyalty: 0.9, curiosity: 0.25, boredom: 0.3 },
   routesPast: [],
@@ -248,6 +282,10 @@ export const WREN: NpcDef = {
   name: 'Wren',
   blurb: 'The smith’s daughter. Bored, and interested in absolutely everything.',
   band: 0,
+  // Somewhere people work, and the chopping block if the region has one, so a
+  // player meets her on the way out rather than having to go looking.
+  stands: 'work',
+  prefer: 'block',
   disposition: 0.6,
   drives: { greed: 0.3, fear: 0.1, loyalty: 0.5, curiosity: 0.9, boredom: 0.7 },
   routesPast: [],
@@ -281,6 +319,24 @@ export const WREN: NpcDef = {
             goto: 'start',
           },
         },
+        {
+          /**
+           * The only run flag in the game, and the reason the `done` gate is
+           * not scaffolding: this is one person's gossip becoming another
+           * person's problem. She is not sending you anywhere and does not know
+           * you want through the gate, which is what keeps her the opposite of
+           * a quest giver. She just knows everything about everyone.
+           */
+          id: 'about_the_gate',
+          text: 'Who is on the gate tonight?',
+          requires: [{ kind: 'said', line: 'asked_gate', is: false }],
+          then: {
+            reply: 'The young one. He swapped with my cousin and never told the sergeant. He thinks nobody noticed.',
+            remember: 'asked_gate',
+            sets: 'knows_the_swap',
+            goto: 'start',
+          },
+        },
         { id: 'later', text: 'Not now.', then: { reply: 'Suit yourself.', goto: 'end' } },
       ],
     },
@@ -299,6 +355,9 @@ export const FERRYMAN: NpcDef = {
   name: 'The Ferryman',
   blurb: 'Sits by the gate. Has watched a great many people leave.',
   band: 0,
+  // Same place as the guard, and that is the point: the guard blocks it, so he
+  // gets the spot, and the ferryman is put beside him.
+  stands: 'exit',
   disposition: 0.5,
   drives: { greed: 0.2, fear: 0.2, loyalty: 0.3, curiosity: 0.4, boredom: 0.6 },
   routesPast: [],

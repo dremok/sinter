@@ -64,6 +64,32 @@ export type WorldFact = 'something_burning' | 'after_dark' | 'alone'
 export const WORLD_FACTS: WorldFact[] = ['something_burning', 'after_dark', 'alone']
 
 /**
+ * Run-scope flags, which are the only things a `done` gate may name.
+ *
+ * The difference between this and `said` is scope. `said` is one person's
+ * memory of one conversation and never leaves them. A run flag is something
+ * that happened in the run, so a second person can gate on it, which is what
+ * lets a thing learnt from Wren be usable at the gate.
+ *
+ * A closed union for the same reason `WorldFact` is one: every entry is a line
+ * the caller has to supply, and a flag vocabulary nobody can list is a quest
+ * variable with extra steps. The type makes a typo a compile error, and
+ * `npc.test.ts` asserts nothing here is unreachable.
+ *
+ * Who supplies each:
+ *   knows_the_swap   dialogue. Wren sets it; the guard reads it.
+ *
+ * World-supplied flags go here too when `main.ts` can compute one. There are
+ * none yet, and inventing them before anything sets them would be scaffolding.
+ */
+export const RUN_FLAGS = ['knows_the_swap'] as const
+
+export type RunFlag = (typeof RUN_FLAGS)[number]
+
+/** Flags that dialogue can never set, so the test knows not to look for one. */
+export const WORLD_SUPPLIED_FLAGS: readonly RunFlag[] = []
+
+/**
  * Everything outside the NPC that a gate may read, supplied by the caller.
  *
  * `carried` is item ids; properties are read from the catalog definitions. If
@@ -75,7 +101,7 @@ export interface Situation {
   skills: Partial<Record<SkillId, number>>
   facts: Record<WorldFact, boolean>
   /** Things done elsewhere in the run, for `done` gates. */
-  done: ReadonlySet<string>
+  done: ReadonlySet<RunFlag>
 }
 
 /** A situation with nothing in it. Useful for tests and for a first meeting. */
@@ -97,8 +123,8 @@ export type Gate =
   /** Carrying ANYTHING with enough of a property. This is the one that matters. */
   | { kind: 'property'; prop: PropertyId; min: Threshold }
   | { kind: 'skill'; skill: SkillId; min: number }
-  /** Something done elsewhere in the run. */
-  | { kind: 'done'; flag: string; is?: boolean }
+  /** Something done elsewhere in the run, by anyone, including another NPC. */
+  | { kind: 'done'; flag: RunFlag; is?: boolean }
   /** Something already said to THIS person. */
   | { kind: 'said'; line: string; is?: boolean }
   | { kind: 'drive'; drive: DriveId; min?: number; max?: number }
@@ -116,7 +142,7 @@ export interface Outcome {
   /** Remembered, so later options can gate on `said`. */
   remember?: string
   /** Set a run flag, for `done` gates on other people. */
-  sets?: string
+  sets?: RunFlag
   /**
    * Take the item that satisfied this option's item or property gate. For a
    * property gate the CHEAPEST sufficient item goes, not the best one, so
@@ -173,12 +199,44 @@ export interface DialogueNode {
   options: DialogueOption[]
 }
 
+/**
+ * The kinds of place a region exposes. Must agree with `Place['kind']` in
+ * `world/region.ts`, and `npc.test.ts` asserts that it does, at compile time.
+ *
+ * Declared here rather than imported because the dependency runs one way.
+ * `world/` sits on top and pulls in Three.js with it; `agents/` has to stay
+ * testable with no scene and no browser. A type-only assertion in the test
+ * costs nothing at runtime and still fails the build if the two drift.
+ */
+export type PlaceKind = 'home' | 'water' | 'work' | 'landmark' | 'exit'
+
+/** As much of a place as an NPC is allowed to know. Note: no coordinate. */
+export interface PlaceLike {
+  id: string
+  kind: PlaceKind
+}
+
 export interface NpcDef {
   id: string
   name: string
   /** One line, the way an item has one. Not a biography. */
   blurb: string
   band: 0 | 1 | 2 | 3
+  /**
+   * The KIND of place this person belongs at. Never a coordinate, and never a
+   * region-specific id, because D22 says the region has to stay generable and a
+   * person standing at a hardcoded x,z is the first thing generation breaks.
+   *
+   * "The guard is at the way out" survives a new region. "The guard is at
+   * (0, -13.6)" does not.
+   */
+  stands: PlaceKind
+  /**
+   * A hint, not a requirement: the place id to take when the region happens to
+   * have one. Falls back to any place of the right kind, so a generated region
+   * that never heard of the chopping block still gets a Wren.
+   */
+  prefer?: string
   /** Where they start. [0,1], 0.5 is neutral. */
   disposition: number
   drives: Record<DriveId, number>
@@ -206,6 +264,100 @@ export interface NpcState {
   resolved: Effect | null
 }
 
+/**
+ * Whether this person is an obstacle at all, worked out rather than declared.
+ *
+ * Somebody who has a way of standing aside is somebody who was in the way. A
+ * flag saying so would be a second description of the dialogue and would drift
+ * from it; this cannot. `main.ts` wants it for placement (a blocker stands in
+ * the gap, everyone else stands beside it) and the test wants it to decide who
+ * rule 1 applies to.
+ */
+export function blocks(def: NpcDef): boolean {
+  return def.nodes.some((n) => n.options.some((o) => o.then.resolve || o.caught?.resolve))
+}
+
+/** Where one person stands, expressed without a single world coordinate. */
+export interface Posting<P extends PlaceLike> {
+  def: NpcDef
+  /** The caller's own place object, handed back with whatever it carries. */
+  place: P
+  /**
+   * Where to stand relative to that place, in metres.
+   *
+   * This is a formation, not a position: it exists so two people at one gate do
+   * not stand inside each other. Whoever is at a place first, blockers before
+   * anyone else, gets (0,0) and therefore the spot itself. The rest ring around
+   * them. The caller adds this to the place and then has to do the one thing
+   * only it can do, which is put the result on walkable ground: `agents/` does
+   * not know where the hearth fire is and must not learn.
+   */
+  offset: { dx: number; dz: number }
+}
+
+/** Metres from a place to the people who did not get to stand on it. */
+const RING = 1.6
+
+/**
+ * Who stands where, given whatever places a region happens to expose.
+ *
+ * Generic over the place type so `main.ts` can pass `region.places` straight in
+ * and get its own objects back with `at` still on them. That is the whole trick
+ * that keeps this module free of Three.js.
+ *
+ * Deterministic with no RNG: candidates are sorted by id, and NPCs wanting the
+ * same kind are dealt round robin across the places of it, so four `work`
+ * places do not end up with four people on one of them. An NPC whose kind the
+ * region does not have is left out rather than dumped at the origin; ask
+ * `unplaced` if you care, and a generator should.
+ */
+export function postings<P extends PlaceLike>(
+  cast: readonly NpcDef[],
+  places: readonly P[],
+): Posting<P>[] {
+  const dealt = new Map<PlaceKind, number>()
+  const taken: { def: NpcDef; place: P }[] = []
+
+  for (const def of cast) {
+    const candidates = places.filter((pl) => pl.kind === def.stands).sort((a, b) => a.id.localeCompare(b.id))
+    if (candidates.length === 0) continue
+
+    const preferred = def.prefer ? candidates.find((pl) => pl.id === def.prefer) : undefined
+    const n = dealt.get(def.stands) ?? 0
+    dealt.set(def.stands, n + 1)
+    taken.push({ def, place: preferred ?? candidates[n % candidates.length]! })
+  }
+
+  const out: Posting<P>[] = []
+  for (const place of places) {
+    // Blockers first, so the person in the way gets the spot itself.
+    const here = taken.filter((t) => t.place.id === place.id)
+    const ordered = [...here.filter((t) => blocks(t.def)), ...here.filter((t) => !blocks(t.def))]
+
+    ordered.forEach((t, i) => {
+      const a = i === 0 ? 0 : (2 * Math.PI * (i - 1)) / Math.max(1, ordered.length - 1)
+      out.push({
+        def: t.def,
+        place: t.place,
+        offset:
+          i === 0
+            ? { dx: 0, dz: 0 }
+            : {
+                dx: Math.round(RING * Math.cos(a) * 1000) / 1000,
+                dz: Math.round(RING * Math.sin(a) * 1000) / 1000,
+              },
+      })
+    })
+  }
+  return out
+}
+
+/** Everyone the region had nowhere to put. Should be empty; a generator should check. */
+export function unplaced<P extends PlaceLike>(cast: readonly NpcDef[], places: readonly P[]): NpcDef[] {
+  const kinds = new Set(places.map((pl) => pl.kind))
+  return cast.filter((def) => !kinds.has(def.stands))
+}
+
 export function initialState(def: NpcDef): NpcState {
   return {
     id: def.id,
@@ -215,6 +367,19 @@ export function initialState(def: NpcDef): NpcState {
     at: null,
     resolved: null,
   }
+}
+
+/**
+ * Walk away mid-sentence. Returns a NEW state, like everything else here.
+ *
+ * The conversation forgets where it was; the person does not forget anything.
+ * Disposition, drives and everything you have said all stand. This exists so
+ * `main.ts` never has to reach in and set `at` by hand, and because re-entering
+ * is more correct than resuming: entry gates are read on the way in, so a guard
+ * you soured two minutes ago opens cold rather than picking up where he was.
+ */
+export function leave(state: NpcState): NpcState {
+  return { ...state, at: null }
 }
 
 /**
@@ -341,7 +506,7 @@ export interface Said {
   /** Set when they stop opposing you. Same vocabulary as an interaction. */
   effect?: Effect
   /** A run flag to record, for `done` gates elsewhere. */
-  sets?: string
+  sets?: RunFlag
   /** True when the conversation is over. */
   ended: boolean
 }

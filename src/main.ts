@@ -18,10 +18,11 @@ import { spatial } from './sim/spatial'
 import { applyReactions } from './props/derive'
 import { p } from './props/registry'
 import { buildItemMesh } from './render/kitbash'
-import { CATALOG, useOf, useSummary, type ItemDef } from './items/catalog'
+import { CATALOG, useOf, useSummary, type ItemDef, type WearSlot } from './items/catalog'
 import { landingOf } from './items/interactions'
 import { itemIcon } from './render/icons'
 import { Ui } from './ui/interface'
+import { AimReticle } from './ui/reticle'
 
 /**
  * SINTER, alpha slice.
@@ -254,6 +255,32 @@ iso.update()
 const ui = new Ui({
   onMerged: (result, a, b) => ui.toast('Merged', `${a.name} + ${b.name} → ${result.name}`),
   onDropped: (def) => ui.toast('Dropped', def.name),
+  // Which item is in hand is state that lives here, because Q, E and R are read
+  // here. Cycling is fine for four things and useless for forty.
+  onHold: (index) => {
+    held = index
+  },
+  onEquip: (itemId) => wear(itemId),
+  onUnequip: (slot) => takeOff(slot),
+})
+
+/**
+ * The aim reticle for thrown things.
+ *
+ * Lives in the scene rather than in the DOM so it can be hidden by the wall you
+ * are throwing over and can sit on the slope it lands on. See `ui/reticle.ts`.
+ */
+const reticle = new AimReticle()
+scene.add(reticle.group)
+
+/** Where the pointer is over the WORLD, for aiming. Null until the mouse moves. */
+let aimPointer: { x: number; y: number } | null = null
+
+addEventListener('pointermove', (e) => {
+  // Over the pack, the pointer is choosing a card and not a place to throw at,
+  // so the aim holds where it was instead of following the mouse into the panel.
+  if ((e.target as HTMLElement).closest?.('#inventory')) return
+  aimPointer = { x: e.clientX, y: e.clientY }
 })
 
 // ---------------------------------------------------------------- input
@@ -784,15 +811,13 @@ function throwCarried(def: ItemDef): boolean {
   const land = landingOf(def.id)
   if (!land) return false
 
-  // Straight ahead, at the item's range. No arc and no aim reticle yet; those
-  // are UI and belong with whoever owns the pack panel.
-  const basis = iso.screenBasis()
-  const dir = player.heading === null
-    ? { x: basis.forward.x, z: basis.forward.z }
-    : { x: Math.sin(player.heading), z: Math.cos(player.heading) }
-
-  const x = player.pos.x + dir.x * use.range
-  const z = player.pos.z + dir.z * use.range
+  // It lands where the reticle is, and the reticle is what the player has been
+  // looking at. Re-aimed first rather than trusting last frame's, because the
+  // held item can have changed since then and range is a property of the item.
+  syncAim()
+  const aim = reticle.point
+  const x = aim ? aim.x : player.pos.x
+  const z = aim ? aim.z : player.pos.z
 
   spatial.rebuild(queries.simulated)
   let touched = 0
@@ -840,6 +865,41 @@ function throwCarried(def: ItemDef): boolean {
  */
 const equipped = new Map<string, string>()
 
+/**
+ * Put something on. One item per slot, and putting on a second thing displaces
+ * the first rather than refusing.
+ *
+ * Wearing is a STATE, not an event: asking to wear what is already worn is not
+ * a no-op that deserves a notice, it is the player confirming the state, so it
+ * says so once and the group key stops it counting up.
+ */
+function wear(itemId: string): void {
+  const def = CATALOG[itemId]
+  if (!def) return
+  const use = useOf(def)
+  if (use.mode !== 'worn') return
+
+  if (equipped.get(use.slot) === def.id) {
+    ui.toast(def.name, 'Already worn.', { group: `worn:${use.slot}` })
+    return
+  }
+  const previous = equipped.get(use.slot)
+  equipped.set(use.slot, def.id)
+  ui.toast(
+    def.name,
+    previous ? `Worn, in place of the ${CATALOG[previous]?.name ?? 'last one'}.` : `Worn on the ${use.slot}.`,
+    { group: `worn:${use.slot}` },
+  )
+}
+
+/** Take off whatever is in a slot. It stays in the pack. */
+function takeOff(slot: WearSlot): void {
+  const id = equipped.get(slot)
+  if (!id) return
+  equipped.delete(slot)
+  ui.toast(CATALOG[id]?.name ?? 'It', 'Taken off. Still in your pack.', { group: `worn:${slot}` })
+}
+
 function isEquipped(def: ItemDef): boolean {
   const use = useOf(def)
   return use.mode === 'worn' && equipped.get(use.slot) === def.id
@@ -878,29 +938,18 @@ function useHeld(): void {
     case 'panel':
       ui.toast(def.name, 'It opens, but its panel is not built yet.')
       break
-    case 'worn': {
-      // Wearing is a STATE, not an event. The old branch fired a notice on
-      // every press, and because notices coalesce by group the repeat counter
-      // ticked up, so holding glasses and pressing use read as though something
-      // was happening each time. Nothing was.
-      const already = equipped.get(use.slot) === def.id
-      if (already) {
-        ui.toast(def.name, 'Already worn.', { group: `worn:${def.id}` })
-      } else {
-        const previous = equipped.get(use.slot)
-        equipped.set(use.slot, def.id)
-        ui.toast(
-          def.name,
-          previous ? `Worn on the ${use.slot}, in place of what was there.` : `Worn on the ${use.slot}.`,
-          { group: `worn:${def.id}` },
-        )
-      }
+    // One route in, shared with the pack's Equip button, so the two can never
+    // disagree about what wearing something says or does.
+    case 'worn':
+      wear(def.id)
       break
-    }
   }
 }
 
 function syncHeld(): void {
+  // The pack mirrors what is worn. `Ui.worn` early-returns when nothing has
+  // changed, so this is free on the frames where nobody put anything on.
+  ui.worn(equipped)
   const def = heldItem()
   if (!def) {
     ui.held(null, '', '', 0, 0)
@@ -912,6 +961,32 @@ function syncHeld(): void {
     isEquipped(def) ? 'Worn. It works on its own.' : useSummary(def),
     held,
     ui.count,
+  )
+}
+
+/**
+ * Draw the throw before it happens.
+ *
+ * Only projected items have anything to aim, so everything else hides it. With
+ * no pointer yet the reticle points where the character faces at full range,
+ * which is both what a keyboard-only player gets and the state the screenshot
+ * harness can photograph.
+ */
+function syncAim(): void {
+  const def = heldItem()
+  const use = def ? useOf(def) : null
+  if (!def || use?.mode !== 'projected') {
+    reticle.hide()
+    return
+  }
+  reticle.aim(
+    player.pos,
+    player.heading,
+    use.range,
+    landingOf(def.id),
+    iso.camera,
+    aimPointer,
+    region.heightAt,
   )
 }
 
@@ -1424,6 +1499,7 @@ if (HEADLESS_TICKS > 0) {
   syncMeshes(TICK_DT)
   updateFocus()
   syncHeld()
+  syncAim()
   updateHud(0)
   iso.update()
   grade.render(renderer, scene, iso.camera)
@@ -1448,6 +1524,7 @@ if (HEADLESS_TICKS > 0) {
     // three of the seven verbs were invisible unless you already knew them.
     syncHeld()
     syncMeshes(dt)
+    syncAim()
 
     framesSinceSample++
     if (nowMs - lastFpsSample > 500) {

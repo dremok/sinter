@@ -19,12 +19,12 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { mkdir, writeFile, readdir } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { chromium, type Browser } from 'playwright'
 import { SHOTS, type ShotSpec } from './shots'
-import { decodePng, diff } from './png'
+import { decodePng, diff, type Image } from './png'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const CURRENT = join(ROOT, '.shots/vibe/current')
@@ -75,7 +75,32 @@ interface Result {
   isNew: boolean
 }
 
-async function takeShot(browser: Browser, url: string, spec: ShotSpec): Promise<string[]> {
+/**
+ * Is this frame actually a picture of the world?
+ *
+ * A sweep is worthless if it can quietly record a blank frame, and it recorded
+ * one: Vite watches the whole project, `.shots/` is inside the project, so
+ * every screenshot this tool wrote reloaded every other page it had open. One
+ * shot came back pure black with only the HUD on it and was reported as a
+ * clean pass. Screenshots are now held in memory until the browser is shut,
+ * which removes the cause, and this checks the symptom anyway, because the
+ * next thing that blanks a frame will not be Vite.
+ */
+function isBlank(img: Image): boolean {
+  let lit = 0
+  const n = img.width * img.height
+  for (let p = 0; p < n; p += 7) {
+    const l = img.data[p * 4]! + img.data[p * 4 + 1]! + img.data[p * 4 + 2]!
+    if (l > 90) lit++
+  }
+  return lit / (n / 7) < 0.02
+}
+
+async function takeShot(
+  browser: Browser,
+  url: string,
+  spec: ShotSpec,
+): Promise<{ errors: string[]; png: Buffer }> {
   const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT } })
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(String(e)))
@@ -86,18 +111,19 @@ async function takeShot(browser: Browser, url: string, spec: ShotSpec): Promise<
     const target = `${url}/?seed=${encodeURIComponent(SEED)}&ticks=${TICKS}&at=${encodeURIComponent(`${spec.x},${spec.z}`)}`
     await page.goto(target, { waitUntil: 'load', timeout: 60_000 })
     await page.waitForFunction(() => window.__sinterReady === true, undefined, { timeout: 60_000 })
-    await page.screenshot({ path: join(CURRENT, `${spec.name}.png`) })
-    return errors
+    // Never `{ path }`: writing inside the repo is what caused the blank frame.
+    const png = await page.screenshot()
+    if (isBlank(decodePng(png))) throw new Error('frame came back blank')
+    return { errors, png }
   } finally {
     await page.close()
   }
 }
 
-async function compare(spec: ShotSpec): Promise<Pick<Result, 'changed' | 'box' | 'isNew'>> {
+function compare(spec: ShotSpec, png: Buffer): Pick<Result, 'changed' | 'box' | 'isNew'> {
   const basePath = join(BASELINE, `${spec.name}.png`)
   if (!existsSync(basePath)) return { changed: null, box: null, isNew: true }
-  const [a, b] = await Promise.all([readFile(basePath), readFile(join(CURRENT, `${spec.name}.png`))])
-  const d = diff(decodePng(a), decodePng(b))
+  const d = diff(decodePng(readFileSync(basePath)), decodePng(png))
   return { changed: d.changed, box: d.box, isNew: false }
 }
 
@@ -110,6 +136,8 @@ const browser = await chromium.launch({
 })
 
 const results: Result[] = []
+/** name -> PNG bytes. Held until the browser is shut; see `takeShot`. */
+const captured = new Map<string, Buffer>()
 try {
   let next = 0
   const worker = async (): Promise<void> => {
@@ -118,19 +146,21 @@ try {
       const spec = specs[i]
       if (!spec) return
       let errors: string[] = []
-      let ok = false
-      for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+      let png: Buffer | null = null
+      for (let attempt = 0; attempt < 3 && !png; attempt++) {
         try {
-          errors = await takeShot(browser, url, spec)
-          ok = true
+          const shot = await takeShot(browser, url, spec)
+          errors = shot.errors
+          png = shot.png
         } catch (e) {
           errors = [String(e)]
           await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)))
         }
       }
-      const cmp = ok ? await compare(spec) : { changed: null, box: null, isNew: false }
-      results.push({ spec, ok, errors, ...cmp })
-      process.stdout.write(`${ok ? '.' : 'X'}`)
+      if (png) captured.set(spec.name, png)
+      const cmp = png ? compare(spec, png) : { changed: null, box: null, isNew: false }
+      results.push({ spec, ok: png !== null, errors, ...cmp })
+      process.stdout.write(png ? '.' : 'X')
     }
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, worker))
@@ -138,6 +168,9 @@ try {
   await browser.close()
   proc.kill()
 }
+
+// Only now, with nothing left to reload.
+for (const [name, png] of captured) await writeFile(join(CURRENT, `${name}.png`), png)
 
 process.stdout.write('\n\n')
 

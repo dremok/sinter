@@ -58,6 +58,36 @@ const MAX_NOTICES = 3
 const NOTICE_MS = 5200
 
 /**
+ * How long the merge button has to be held down.
+ *
+ * Rule 3 says both inputs are destroyed forever and that deciding whether to
+ * merge is the core tension, which only exists if the loss is real. A single
+ * click cannot carry that: it is over before the player has finished reading
+ * what they picked, which is exactly why the bench read as admin.
+ *
+ * A hold is not a confirmation dialog. A dialog asks a second time and gets a
+ * second reflex click; a hold has a DURATION, and during it the two things you
+ * are spending drain away in front of you. You can let go. That is the whole
+ * design: the cost is shown while it is still refusable.
+ *
+ * Six hundred milliseconds is long enough to feel deliberate and short enough
+ * that nobody merging forty things resents it.
+ */
+const HOLD_MS = 600
+
+/**
+ * How long the bench keeps showing what a merge cost, before going back to
+ * asking for two more things. Cleared early by picking anything.
+ */
+const AFTERMATH_MS = 9000
+
+/**
+ * How much weaker a property has to get before the result counts as having lost
+ * it. Below this it is derivation noise rather than a thing the player gave up.
+ */
+const LOSS_THRESHOLD = 0.2
+
+/**
  * How each use mode is drawn and named (IDEAS A11).
  *
  * `key` is the keycap shown beside the item, and it is present only when that
@@ -151,6 +181,15 @@ export interface UiHooks {
    */
   onEquip?: (itemId: string) => void
   /**
+   * Take off whatever is in this slot. It stays in the pack.
+   *
+   * The eyes slot used to be a one-way door: pressing use put the spectacles on
+   * and there was no gesture anywhere in the game that took them off again. A
+   * state you can enter and not leave is not a state, it is a mode change with
+   * no exit.
+   */
+  onUnequip?: (slot: WearSlot) => void
+  /**
    * Put the pack item at `index` in hand.
    *
    * Which item is held is `main.ts`'s state, because that is where Q, E and R
@@ -188,6 +227,26 @@ export class Ui {
   /** Signature of the equipment strip on screen, so a frame loop does not rebuild it. */
   private wornKey = ''
 
+  /**
+   * What the last merge cost, kept on the bench after the fact.
+   *
+   * The merge used to end with both cards silently vanishing from the list and
+   * a one-line toast. That is the single most consequential act in the game
+   * being reported the same way as picking up an apple. The bench now holds
+   * what was made and what it was made of until the player picks something
+   * else, so the loss has somewhere to be looked at.
+   */
+  private aftermath: { result: ItemDef; a: ItemDef; b: ItemDef } | null = null
+  private aftermathTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** In-flight hold on the merge button. See `HOLD_MS`. */
+  private holdTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Parts of the bench built here rather than in index.html. */
+  private cost!: HTMLElement
+  private fill!: HTMLElement
+  private buttonLabel!: HTMLElement
+
   /** In-flight card drag. See `dragStart`. */
   private drag: {
     from: number
@@ -202,10 +261,10 @@ export class Ui {
 
   constructor(private hooks: UiHooks) {
     this.buildFilters()
+    this.buildBench()
     this.mountDebug()
     this.mountHeadless()
 
-    $('merge-btn').addEventListener('click', () => this.doMerge())
     $('slot-a').addEventListener('click', () => {
       this.slotA = null
       this.render()
@@ -283,9 +342,74 @@ export class Ui {
 
   // ------------------------------------------------------------------- merge
 
-  private doMerge(): void {
+  /**
+   * The parts of the bench that have behaviour, built here rather than written
+   * into index.html, so the markup and the code that drives it cannot drift.
+   *
+   * The button stops being a button in the ordinary sense. It carries a fill
+   * that runs left to right over `HOLD_MS`, and the merge happens when the fill
+   * arrives, not when the pointer goes down.
+   */
+  private buildBench(): void {
+    // One source of truth for the hold duration. The fill and the draining
+    // slots are CSS transitions and the commit is a timer, and a bench whose
+    // animation finishes before its timer does is a bench that lies.
+    document.documentElement.style.setProperty('--hold-ms', `${HOLD_MS}ms`)
+
+    const button = $('merge-btn') as HTMLButtonElement
+    button.replaceChildren()
+    this.fill = el('span', 'merge-fill')
+    this.buttonLabel = el('span', 'merge-label', 'Hold to merge')
+    button.append(this.fill, this.buttonLabel)
+
+    // What the pair costs, between the result and the button, which is the last
+    // thing read before the hand goes to the button.
+    this.cost = el('div', 'bench-cost')
+    this.cost.hidden = true
+    button.before(this.cost)
+
+    button.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return
+      this.startHold()
+    })
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel'] as const) {
+      button.addEventListener(ev, () => this.cancelHold())
+    }
+    // A button answers Space and Enter, and holding a key repeats keydown, so
+    // the same hold works without a pointer at all.
+    button.addEventListener('keydown', (e) => {
+      if (e.key !== ' ' && e.key !== 'Enter') return
+      e.preventDefault()
+      this.startHold()
+    })
+    button.addEventListener('keyup', () => this.cancelHold())
+    // Space and Enter also synthesise a click. Nothing must ride on it.
+    button.addEventListener('click', (e) => e.preventDefault())
+  }
+
+  private startHold(): void {
+    if (this.holdTimer !== null) return
     if (this.slotA === null || this.slotB === null) return
-    this.commitMerge(this.slotA, this.slotB)
+    const a = this.pack[this.slotA]
+    const b = this.pack[this.slotB]
+    if (!a || !b || !canMerge(a.id, b.id)) return
+
+    $('bench').classList.add('holding')
+    this.buttonLabel.textContent = 'Keep holding'
+    this.holdTimer = setTimeout(() => {
+      this.holdTimer = null
+      $('bench').classList.remove('holding')
+      this.commitMerge(this.slotA!, this.slotB!)
+    }, HOLD_MS)
+  }
+
+  /** Letting go early is a real answer, and it costs nothing. */
+  private cancelHold(): void {
+    if (this.holdTimer === null) return
+    clearTimeout(this.holdTimer)
+    this.holdTimer = null
+    $('bench').classList.remove('holding')
+    this.buttonLabel.textContent = 'Hold to merge'
   }
 
   /**
@@ -320,8 +444,23 @@ export class Ui {
 
     this.slotA = null
     this.slotB = null
+    this.setAftermath({ result, a, b })
     this.render()
     this.hooks.onMerged(result, a, b)
+  }
+
+  /** Holds what a merge cost on the bench until the player moves on. */
+  private setAftermath(state: Ui['aftermath']): void {
+    if (this.aftermathTimer !== null) clearTimeout(this.aftermathTimer)
+    this.aftermath = state
+    this.aftermathTimer =
+      state === null
+        ? null
+        : setTimeout(() => {
+            this.aftermath = null
+            this.aftermathTimer = null
+            this.render()
+          }, AFTERMATH_MS)
   }
 
   /** Same path as clicking a card. Used by the `?slots=` dev aid for shots. */
@@ -330,6 +469,8 @@ export class Ui {
   }
 
   private pick(index: number): void {
+    // Choosing anything is the player moving on from the last merge.
+    if (this.aftermath) this.setAftermath(null)
     if (this.slotA === index) {
       this.slotA = null
     } else if (this.slotB === index) {
@@ -661,7 +802,9 @@ export class Ui {
       const def = id ? CATALOG[id] : undefined
 
       const tile = el('div', 'worn-slot' + (def ? ' filled' : ''))
-      tile.title = def ? `${def.name}, worn on the ${slot.label.toLowerCase()}` : `Nothing on the ${slot.label.toLowerCase()}`
+      tile.title = def
+        ? `${def.name}, worn on the ${slot.label.toLowerCase()}. Click to take it off.`
+        : `Nothing on the ${slot.label.toLowerCase()}`
 
       const well = el('div', 'worn-well')
       if (def) {
@@ -670,7 +813,28 @@ export class Ui {
         icon.alt = ''
         well.append(icon)
       }
-      tile.append(well, el('div', 'worn-label', def ? def.name : slot.label))
+
+      // A filled socket is the only control that takes a thing off, so it says
+      // so on hover instead of growing a second button next to itself. Taking
+      // something off costs nothing and the item stays in the pack, so it needs
+      // no confirmation, unlike the bench.
+      const label = el('div', 'worn-label', def ? def.name : slot.label)
+      if (def && this.hooks.onUnequip) {
+        tile.classList.add('takeoff')
+        tile.setAttribute('role', 'button')
+        tile.tabIndex = 0
+        label.append(el('span', 'worn-off', 'Take off'))
+        const off = () => this.hooks.onUnequip!(slot.id)
+        tile.addEventListener('click', off)
+        tile.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            off()
+          }
+        })
+      }
+
+      tile.append(well, label)
       host.append(tile)
     }
 
@@ -747,7 +911,11 @@ export class Ui {
 
     // Wearing is one click from the list. Making the player select the item and
     // then press use was ceremony for a thing you do once and forget.
-    if (mode === 'worn' && !worn) { // PROBE
+    //
+    // Guarded on the hook, the same way Hold is. This drew unconditionally and
+    // called `onEquip!`, which `main.ts` never passed, so the one control the
+    // equipment view exists for threw on click.
+    if (mode === 'worn' && !worn && this.hooks.onEquip) {
       const equip = el('button', 'card-hold', 'Equip')
       equip.type = 'button'
       equip.title = `Put on the ${def.name}`
@@ -799,12 +967,15 @@ export class Ui {
   }
 
   private renderBench(): void {
-    const a = this.slotA !== null ? this.pack[this.slotA] : undefined
-    const b = this.slotB !== null ? this.pack[this.slotB] : undefined
+    const bench = $('bench')
+    const past = this.aftermath
+    const a = past ? past.a : this.slotA !== null ? this.pack[this.slotA] : undefined
+    const b = past ? past.b : this.slotB !== null ? this.pack[this.slotB] : undefined
 
     const setSlot = (host: HTMLElement, def: ItemDef | undefined) => {
       host.replaceChildren()
-      host.classList.toggle('filled', def !== undefined)
+      host.classList.toggle('filled', def !== undefined && !past)
+      host.classList.toggle('spent', def !== undefined && past !== null)
       if (!def) return
       const icon = el('img')
       icon.src = itemIcon(def)
@@ -817,8 +988,8 @@ export class Ui {
     // One empty-state message for the whole bench, on the header row. Ghost
     // slots and a dead button already say "nothing is selected" twice over.
     const hint = $('bench-hint')
-    hint.hidden = Boolean(a && b)
-    hint.textContent = a || b ? 'Pick one more.' : 'Pick two things.'
+    hint.hidden = Boolean(a && b) && !past
+    hint.textContent = past ? 'Gone.' : a || b ? 'Pick one more.' : 'Pick two things.'
 
     const result = $('result')
     const button = $('merge-btn') as HTMLButtonElement
@@ -826,10 +997,40 @@ export class Ui {
 
     result.replaceChildren()
     result.classList.remove('refused')
+    this.cost.replaceChildren()
+    this.cost.hidden = true
+    bench.classList.toggle('done', past !== null)
+
+    /**
+     * After the fact.
+     *
+     * The two slots keep holding what was spent, struck through, and the result
+     * band names what came out of them. Rule 3 is that the loss has to be real,
+     * and a loss the player never sees is not one: the old ending was two cards
+     * quietly disappearing from a scrolling list.
+     */
+    if (past) {
+      const icon = el('img')
+      icon.src = itemIcon(past.result)
+      icon.alt = ''
+      const text = el('div', 'rtext')
+      text.append(
+        el('div', 'name', past.result.name),
+        el('div', 'sub', `Made from the ${past.a.name} and the ${past.b.name}. Neither is left.`),
+      )
+      result.hidden = false
+      result.append(icon, text)
+      button.disabled = true
+      this.buttonLabel.textContent = 'Hold to merge'
+      warn.hidden = true
+      this.announced = null
+      return
+    }
 
     if (!a || !b) {
       result.hidden = true
       button.disabled = true
+      this.buttonLabel.textContent = 'Hold to merge'
       warn.hidden = true
       this.announced = null
       return
@@ -866,8 +1067,59 @@ export class Ui {
       result.append(el('span', 'q', '?'), el('span', 'sub', 'Never merged before.'))
     }
 
+    if (combines) this.renderCost(a, b)
+
     button.disabled = !combines
+    this.buttonLabel.textContent = 'Hold to merge'
     warn.hidden = !combines
+  }
+
+  /**
+   * What this particular pair costs, in the vocabulary the pack already teaches.
+   *
+   * "Both inputs are destroyed" is a rule. It sits under every pair identically
+   * and after the third one it is furniture. What a player actually wants at
+   * the moment of deciding is what THESE two could do that the result cannot,
+   * and for a pair already in the codex that is answerable exactly: take the
+   * stronger of the two inputs for each property and see what the result gives
+   * back.
+   *
+   * For a pair nobody has made, it is not answerable, and saying so is the
+   * honest move. Guessing here would be worse than silence, because a wrong
+   * number about an irreversible act is how a player learns to stop reading.
+   */
+  private renderCost(a: ItemDef, b: ItemDef): void {
+    // Nothing at all for a pair nobody has made. The result band one line above
+    // is already a question mark reading "Never merged before", and a second
+    // sentence saying the cost is unknown too is the same state announced
+    // twice. Not knowing IS the gamble; it does not need a caption.
+    if (!isDiscovered(a.id, b.id, this.codex)) return
+
+    this.cost.hidden = false
+    const result = tryMerge(a.id, b.id)!
+    const lost: { id: PropertyId; value: number }[] = []
+    for (const { id, value } of ranked(a.props)) {
+      const best = Math.max(value, b.props[id] ?? 0)
+      if (best - (result.props[id] ?? 0) > LOSS_THRESHOLD) lost.push({ id, value: best })
+    }
+    for (const { id, value } of ranked(b.props)) {
+      if (lost.some((l) => l.id === id)) continue
+      const best = Math.max(value, a.props[id] ?? 0)
+      if (best - (result.props[id] ?? 0) > LOSS_THRESHOLD) lost.push({ id, value: best })
+    }
+
+    if (lost.length === 0) {
+      this.cost.append(el('span', 'cost-note', 'Nothing either of them could do is lost.'))
+      return
+    }
+
+    this.cost.append(el('span', 'cost-line', 'You give up'))
+    const chips = el('span', 'cost-traits')
+    for (const { id, value } of lost.slice(0, TRAITS_PER_CARD)) chips.append(this.buildTrait(id, value))
+    if (lost.length > TRAITS_PER_CARD) {
+      chips.append(el('span', 'trait-more', `+${lost.length - TRAITS_PER_CARD}`))
+    }
+    this.cost.append(chips)
   }
 
   /**

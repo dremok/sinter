@@ -612,34 +612,80 @@ export const sand = (rng: Rng) =>
  * Still water. The one surface where fine detail is actively wrong: a pond of
  * per-texel noise shimmers the moment the camera moves and there is no mipmap
  * chain to save it.
+ *
+ * ## Why this is contours and not waves
+ *
+ * The previous version built its bands from `sin(v * 9)` plus `sin(v * 22)`,
+ * which is a function of v ALONE. Two frequencies were mixed in to stop the
+ * stripes being exactly equal in width, and that was treating the symptom: the
+ * defect was never the regularity of the spacing, it was that the marks were
+ * parallel at all. On the ground plane v is a single fixed world direction, so
+ * every ripple in the game ran the same way and the pond read as a hatched
+ * diagonal pattern lying on the world rather than as a surface.
+ *
+ * This file has already made and recorded that exact mistake once, on the grass
+ * tufts: "Every blade used to grow along -v, which on a ground plane is one
+ * fixed world direction, so the whole field ran the same diagonal and read as a
+ * woven carpet." The fix there was to give each mark its own direction, and the
+ * fix here is the same idea one step up: take the direction away from the
+ * texture axes entirely.
+ *
+ * So the bands are now CONTOURS of a noise field rather than a periodic
+ * function of one coordinate. Quantising a smooth field gives closed, irregular
+ * rings with no axis and no period, which is what light on still water actually
+ * makes, and it costs the same two lookups the sines did. The glints follow
+ * from the same field: each one lies along its own crest, found from the
+ * gradient, instead of every glint in the pond running along +x.
+ *
+ * Feature size is deliberately kept near a world unit. That is the constraint
+ * in the header above: there is no mipmap chain, so anything approaching texel
+ * scale will crawl the moment the camera moves.
  */
 export const water = (rng: Rng) =>
   build(POOL, rng, (put, r, n) => {
     const deep = normalized(fbm(r, 4))
-    const warp = valueNoise(r, 6)
 
-    // Two frequencies, because one gives stripes of exactly equal width and a
-    // pond of those reads as a beach towel.
-    const ripple = (u: number, v: number) =>
-      Math.sin((v * 9 + warp(u, v) * 0.5) * Math.PI * 2) * 0.72 +
-      Math.sin((v * 22 + warp(u, v) * 0.3) * Math.PI * 2) * 0.28
+    // Roughly 2.1 and 1.2 world units per feature at TEXELS_PER_UNIT. Three
+    // octaves on both, because it is the EDGE of each band that is seen here
+    // and two octaves give smooth amoeba outlines where water wants ragged.
+    const swell = normalized(fbm(r, 5, 3))
+    const chop = normalized(fbm(r, 9, 3))
+    const height = (u: number, v: number) => swell(u, v) * 0.74 + chop(u, v) * 0.26
 
     for (let y = 0; y < n; y++) {
       const v = y / n
       for (let x = 0; x < n; x++) {
         const u = x / n
-        const band = ripple(u, v)
-        const idx = 4 + (band > 0.5 ? 1 : band > 0 ? 0 : band > -0.5 ? -1 : -2)
-        put(x, y, tone(RAMP.water, idx - Math.round(deep(u, v) * 1.4)))
+        // Uneven thresholds on purpose: even ones give bands of equal area,
+        // which is the same uniformity the sines had, just curved. Still water
+        // is mostly one mid tone with a few bright crests in it.
+        const h = height(u, v)
+        const band = h > 0.74 ? 1 : h > 0.54 ? 0 : h > 0.32 ? -1 : -2
+        put(x, y, tone(RAMP.water, 4 + band - Math.round(deep(u, v) * 1.4)))
       }
     }
 
     // Glints: a few long dashes on the crests, not a scatter of white pixels.
+    // Each lies ALONG its crest, perpendicular to the gradient of the field, so
+    // a highlight curves with the ripple it sits on. Drawn from the middle
+    // outward in both directions, because a dash that starts at the crest and
+    // runs one way slides off it.
+    const e = 1.5 / n
     for (let i = 0; i < 26; i++) {
       const x = r.int(0, n - 1)
       const y = r.int(0, n - 1)
-      if (ripple(x / n, y / n) < 0.7) continue
-      stroke(put, x, y, 1, 0, r.int(5, 12), RAMP.water, 5, 5)
+      const u = x / n
+      const v = y / n
+      if (height(u, v) < 0.76) continue
+      const gx = height(u + e, v) - height(u - e, v)
+      const gy = height(u, v + e) - height(u, v - e)
+      const len = Math.hypot(gx, gy)
+      if (len < 1e-6) continue
+      const dx = -gy / len
+      const dy = gx / len
+      const half = r.int(3, 6)
+      stroke(put, x, y, dx, dy, half, RAMP.water, 5, 5)
+      stroke(put, x, y, -dx, -dy, half, RAMP.water, 5, 5)
     }
   })
 
