@@ -17,7 +17,8 @@
     "verify:deploy": "node tools/verify-deploy.mjs",
     "start": "node tools/serve.mjs",
     "verify:movement": "node tools/verify-movement.mjs",
-    "verify:collision": "node tools/verify-collision.mjs"
+    "verify:collision": "node tools/verify-collision.mjs",
+    "verify:still": "node tools/verify-still.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",
@@ -29,6 +30,7 @@
     "@types/node": "^26.1.1",
     "@types/three": "^0.185.1",
     "playwright": "^1.62.0",
+    "pngjs": "^7.0.0",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
     "vite": "^8.1.5",

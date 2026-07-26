@@ -184,6 +184,14 @@ export interface Region {
    */
   standables: Standable[]
   /**
+   * Every occluder's current opacity, for the flicker check.
+   *
+   * Exposed because "things flicker when I move" has been reported three times
+   * and diagnosed from a still screenshot zero times. A still frame cannot show
+   * an object that is toggling; a log of these numbers over a walk can.
+   */
+  occluderStates: () => { x: number; z: number; radius: number; opacity: number }[]
+  /**
    * What is here and what it is for.
    *
    * D22 asks that a region expose its meaning rather than just its geometry, so
@@ -3695,6 +3703,13 @@ export function buildRegion(rng: Rng, scene: THREE.Scene): Region {
     playerStart: new THREE.Vector3(0.8, heightAt(0.8, 10.8), 10.8),
     gate: new THREE.Vector3(0, gateH, PAL_Z),
     fadeOccluders,
+    occluderStates: () =>
+      occluders
+        .filter((o) => !o.pinned)
+        .map((o) => {
+          const at = o.object.getWorldPosition(new THREE.Vector3())
+          return { x: at.x, z: at.z, radius: o.radius, opacity: o.opacity }
+        }),
     standables,
     places: [
       { id: 'hearth', kind: 'home', at: new THREE.Vector3(HOME.x, heightAt(HOME.x, HOME.z), HOME.z) },

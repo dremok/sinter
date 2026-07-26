@@ -1211,6 +1211,7 @@ declare global {
       speed: () => number
       blockers: () => SolidReport[]
       standables: () => (Footprint & { top: number })[]
+      occluders: () => { x: number; z: number; radius: number; opacity: number }[]
       heightAt: (x: number, z: number) => number
       probe: (x: number, z: number) => ProbeReport
     }
@@ -1339,6 +1340,7 @@ window.__sinter = {
       }
     }),
   standables: () => region.standables.map((s) => ({ ...s })),
+  occluders: region.occluderStates,
   heightAt: region.heightAt,
   probe,
 }

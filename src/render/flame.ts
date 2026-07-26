@@ -170,12 +170,22 @@ interface TongueSpec {
   scroll: number
 }
 
+/**
+ * `rate` is how often the tongue picks a new shape, in Hz.
+ *
+ * These were 7 to 19, chosen because that is where real flame sits. Real flame
+ * is also several hundred pixels tall when you are looking at it; this one is
+ * thirty, and at that size a shape change is not a detail, it is the entire
+ * object moving. Halved, and the movement between steps is now eased rather
+ * than snapped, so what stays fast is the alpha mask on the edge — which is
+ * the part that actually reads as burning.
+ */
 const TONGUES: readonly TongueSpec[] = [
-  { color: DEEP, height: 0.9, width: 1.1, angle: 0.0, radius: 0.17, rate: 7, cut: 0.2, scroll: 1.1 },
-  { color: EMBER, height: 1.0, width: 0.95, angle: 2.09, radius: 0.16, rate: 11, cut: 0.18, scroll: 1.4 },
-  { color: EMBER, height: 0.84, width: 0.9, angle: 4.19, radius: 0.18, rate: 9, cut: 0.2, scroll: 1.25 },
-  { color: FLAME, height: 1.06, width: 0.7, angle: 0.0, radius: 0.0, rate: 14, cut: 0.1, scroll: 1.7 },
-  { color: CORE, height: 1.2, width: 0.48, angle: 0.0, radius: 0.0, rate: 19, cut: 0.04, scroll: 2.1 },
+  { color: DEEP, height: 0.9, width: 1.1, angle: 0.0, radius: 0.17, rate: 3.5, cut: 0.2, scroll: 1.1 },
+  { color: EMBER, height: 1.0, width: 0.95, angle: 2.09, radius: 0.16, rate: 5.5, cut: 0.18, scroll: 1.4 },
+  { color: EMBER, height: 0.84, width: 0.9, angle: 4.19, radius: 0.18, rate: 4.5, cut: 0.2, scroll: 1.25 },
+  { color: FLAME, height: 1.02, width: 0.7, angle: 0.0, radius: 0.0, rate: 7, cut: 0.1, scroll: 1.7 },
+  { color: CORE, height: 1.1, width: 0.48, angle: 0.0, radius: 0.0, rate: 9, cut: 0.04, scroll: 2.1 },
 ]
 
 /** One material per tongue role, shared by every fire in the scene. The time
@@ -587,14 +597,34 @@ export class Flame {
       const spec = TONGUES[i]!
       const mesh = this.tongues[i]!
 
-      // Quantised. A flame does not ease between shapes, it snaps to a new one,
-      // and stepping the time is the cheapest way to get that.
-      const step = Math.floor(t * spec.rate)
-      const n = hash01(step + i * 31.7 + this.seed)
-      const m = hash01(step * 1.7 + i * 13.1 + this.seed)
+      /**
+       * The EDGE snaps and the SILHOUETTE eases, and the split is the whole
+       * point.
+       *
+       * The scrolling alpha mask is what makes a tongue's outline break up and
+       * reform, and it should stay fast: that is the part that reads as fire.
+       * The tongue's overall size and lean is the part the eye tracks as an
+       * object, and this used to snap it at the same 7 to 19 Hz. On a flame
+       * thirty pixels tall, a whole object jumping to a new size nineteen times
+       * a second is not flicker, it is a strobe, and Max reported it twice as
+       * "horrible flickering around the campfire".
+       *
+       * So the shape now moves smoothly between the same steps the mask snaps
+       * on, at half the rate and with less than half the swing.
+       */
+      const step = t * spec.rate
+      const i0 = Math.floor(step)
+      const k = step - i0
+      const ease = k * k * (3 - 2 * k)
+      const between = (salt: number): number => {
+        const a = hash01(i0 + salt)
+        return a + (hash01(i0 + 1 + salt) - a) * ease
+      }
+      const n = between(i * 31.7 + this.seed)
+      const m = between(i * 13.1 + this.seed + 101.3)
 
-      const h = size * heat * spec.height * (0.78 + n * 0.42)
-      const w = size * heat * spec.width * (0.9 + m * 0.2)
+      const h = size * heat * spec.height * (0.88 + n * 0.22)
+      const w = size * heat * spec.width * (0.94 + m * 0.12)
       mesh.scale.set(w, h, w)
 
       // Tongues lean out from the centre and sway. The lean grows up the
@@ -612,7 +642,15 @@ export class Flame {
     // like the fire as a whole, not like its tips.
     this.light.visible = light
     if (light) {
-      const pulse = 0.78 + hash01(Math.floor(t * 5) + this.seed) * 0.28
+      // Eased between steps, for the same reason the tongues are. A hard step
+      // in intensity moves the warmth on every nearby wall at once, which is
+      // the most visible thing a fire does to the rest of the frame.
+      const p = t * 2.6
+      const p0 = Math.floor(p)
+      const pk = p - p0
+      const pe = pk * pk * (3 - 2 * pk)
+      const pa = hash01(p0 + this.seed)
+      const pulse = 0.84 + (pa + (hash01(p0 + 1 + this.seed) - pa) * pe) * 0.2
       // Above the flame, not inside it. Nothing should sit 20cm from a light
       // that is meant to warm a clearing.
       this.light.position.y = size * (0.7 + heat * 0.6)
