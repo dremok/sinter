@@ -23,11 +23,12 @@
 
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const DRY = process.argv.includes('--dry')
+const SERVICE = 'sinter'
 
 const run = (cmd, args, cwd = ROOT, opts = {}) =>
   execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: 'pipe', ...opts }).trim()
@@ -67,8 +68,17 @@ try {
     process.exit(0)
   }
 
+  // Railway remembers which project a DIRECTORY belongs to, and the staging
+  // directory is new every time, so it has to be told. Read the association
+  // from the repo rather than hardcoding ids, so this keeps working if the
+  // project is ever recreated.
+  const link = JSON.parse(run('cat', [join(homedir(), '.railway', 'config.json')]))
+  const repo = link.projects?.[ROOT]
+  if (!repo) throw new Error(`railway has no link for ${ROOT}. Run \`railway link\` there first.`)
+  run('railway', ['link', '-p', repo.project, '-e', repo.environmentName ?? 'production', '-s', SERVICE], stage)
+
   console.log('  uploading...')
-  const out = run('railway', ['up', '--detach', '--service', 'sinter'], stage, {
+  const out = run('railway', ['up', '--detach', '--service', SERVICE], stage, {
     stdio: ['ignore', 'pipe', 'inherit'],
   })
   console.log(out)
